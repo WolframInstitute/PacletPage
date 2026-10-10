@@ -25,7 +25,7 @@ RelatedTutorials: [PublishingADocumentationSite]
   - `CheckPacletPage`, every page;
   - and, with `"Submit" -> True`, `SubmitPacletResource`.
 - The result has `"Build"`, `"Resource"`, `"Site"`, `"Check"` and `"Submission"`: each step's result, `None` for a step not taken.
-- With `"DryRun" -> True`, it builds the documentation and the archive, loads the archive in a fresh kernel and scrapes the resource, but deploys and submits nothing, and publishes no site. Without a cloud session the dry run runs offline.
+- With `"DryRun" -> True`, it builds the documentation and the archive, loads the archive in a fresh kernel and scrapes the resource, but deploys and submits nothing, and publishes no site. Since a paclet's documentation may publish as it is built, a dry run that builds checks the account as a real run does; with `"Build" -> False`, a dry run as another account only reports it. Without a cloud session the dry run runs offline.
 - The following options can be given:
 
 | Option | Default | Description |

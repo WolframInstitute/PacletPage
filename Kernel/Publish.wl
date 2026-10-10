@@ -50,9 +50,10 @@ converterSpec[file_String] /; FileExistsQ[file] := converterSpec[file] = <|
 |>;
 (* a published function is used through its ResourceObject: a bare ResourceFunction[url] fails
    on parallel kernels *)
-converterSpec[url_String] := converterSpec[url] = With[{u = url}, <|
-    "Function" -> ResourceFunction[ResourceObject[u]], "Load" -> Hold[ResourceFunction[ResourceObject[u]]], "Distribute" -> None,
-    "ID" -> u
+converterSpec[url_String] := converterSpec[url] = With[{u = url, f = ResourceFunction[ResourceObject[url]]}, <|
+    "Function" -> f, "Load" -> Hold[ResourceFunction[ResourceObject[u]]], "Distribute" -> None,
+    (* the deployed definitions: a redeploy at the same URL is another converter *)
+    "ID" -> Hash[{u, ResourceFunction[f, "DefinitionData"]}, "SHA256", "HexString"]
 |>];
 converterSpec[f_] := <|"Function" -> f, "Load" -> Hold[f], "Distribute" -> Hold[f], "ID" -> Hash[f, "SHA256", "HexString"]|>;
 
@@ -214,7 +215,7 @@ convertTasks[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest},
 
 (* the page cache's key: everything a page's notebook depends on. The guides' titles are in it
    because every page's Related Guides links show them. *)
-$pageCacheVersion = "1";
+$pageCacheVersion = "2";
 pageKey[task_Association, converterID_, code_String, guides_List] := Hash[
     {$pageCacheVersion, task["Page"], FileHash[task["File"], "SHA256"], task["Options"], converterID, code, guides},
     "SHA256", "HexString"
@@ -285,7 +286,8 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     manifestFile = FileNameJoin[{cache, "evaluated.wl"}];
     evaluated = Replace[If[FileExistsQ[manifestFile], Get[manifestFile], <||>], Except[_Association] -> <||>];
     useCache = OptionValue["UseCache"] =!= False;
-    code = exampleCode[dir, OptionValue["Dependencies"]];
+    (* the code the examples run against: the paclet's, its dependencies' and the converter's *)
+    code = Hash[{exampleCode[dir, OptionValue["Dependencies"]], spec["ID"]}, "SHA256", "HexString"];
     separator[template_] := Replace[OptionValue["EvaluateSeparator"], {
         Automatic :> Lookup[$separatorByTemplate, template, Automatic],
         byTemplate_Association :> Lookup[byTemplate, template, Lookup[$separatorByTemplate, template, Automatic]]
@@ -540,6 +542,10 @@ publishArchive[archive_String, dir_String, name_String, permissions_, commit_] :
    check, no version gate (which reads the published archive) and no deploy location. With a
    session it checks everything a deploy would. *)
 offlineDryRunQ[dryRun_] := TrueQ[dryRun] && ! TrueQ[$CloudConnected];
+
+(* whether a check that failed stops the run: a dry run publishes nothing, so there a check only
+   reports, with its message, what a real run would refuse *)
+stopsQ[ok_, dryRun_] := ! TrueQ[ok] && ! TrueQ[dryRun];
 
 (* the documentation pages a built paclet archive holds *)
 archivePages[archive_String] := Select[Import[archive, {"ZIP", "FileNames"}], StringMatchQ[#, ___ ~~ "/Documentation/English/" ~~ ___ ~~ ".nb"] &];
@@ -1033,11 +1039,12 @@ DeployPacletResource::unknowncommit = "`1` is already published from commit `2`,
 DeployPacletResource::nocommit = "`1` is already published and records no commit; nothing was deployed. Use \"Republish\" -> True to replace it.";
 
 DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
-    {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target},
+    {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK},
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];
     If[ ! readyToPublishQ[DeployPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "deploy"]];
     offline = offlineDryRunQ[OptionValue["DryRun"]];
-    If[ ! offline && ! publishingAccountQ[DeployPacletResource, OptionValue["Account"]], Throw[$Failed, "deploy"]];
+    accountOK = offline || publishingAccountQ[DeployPacletResource, OptionValue["Account"]];
+    If[ stopsQ[accountOK, OptionValue["DryRun"]], Throw[$Failed, "deploy"]];
     PacletDirectoryLoad[dir];
     paclet = PacletObject[File[dir]];
     name = paclet["Name"];
@@ -1055,10 +1062,12 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         ResourceSystemClient`Private`loadDeployResourceShingle[];
         Replace[DeployedResourceShingle`Private`defaultCloudObjectLocation["Paclet", name], Except[_CloudObject] :> None]
     ];
-    If[ ! offline && ! TrueQ[OptionValue["Republish"]],
-        If[ MatchQ[target, _CloudObject] && ! releaseAllowedQ[DeployPacletResource, paclet["Version"] <> " at " <> First[target], deployedCommit[target, paclet["Version"]], commit],
+    (* the gate is about the deployment of the account checked: in a dry run as another account
+       there is nothing to gate *)
+    If[ ! offline && accountOK && ! TrueQ[OptionValue["Republish"]],
+        If[ MatchQ[target, _CloudObject] && stopsQ[releaseAllowedQ[DeployPacletResource, paclet["Version"] <> " at " <> First[target], deployedCommit[target, paclet["Version"]], commit], OptionValue["DryRun"]],
             Throw[$Failed, "deploy"]];
-        If[ StringQ[versioned] && ! releaseAllowedQ[DeployPacletResource, versioned, publishedCommit[versioned], commit],
+        If[ StringQ[versioned] && stopsQ[releaseAllowedQ[DeployPacletResource, versioned, publishedCommit[versioned], commit], OptionValue["DryRun"]],
             Throw[$Failed, "deploy"]]
     ];
     built = freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], OptionValue["LoadCheck"],
@@ -1182,7 +1191,7 @@ SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];
     If[ ! readyToPublishQ[SubmitPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "submit"]];
     offline = offlineDryRunQ[OptionValue["DryRun"]];
-    If[ ! offline && ! publishingAccountQ[SubmitPacletResource, OptionValue["Account"]], Throw[$Failed, "submit"]];
+    If[ stopsQ[offline || publishingAccountQ[SubmitPacletResource, OptionValue["Account"]], OptionValue["DryRun"]], Throw[$Failed, "submit"]];
     PacletDirectoryLoad[dir];
     paclet = PacletObject[File[dir]];
     {version, publisher} = {paclet["Version"], paclet["PublisherID"]};
@@ -1190,7 +1199,8 @@ SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
     If[ ! offline,
         With[{latest = Last[SortBy[Map[#["Version"] &, PacletFindRemote[paclet["Name"], UpdatePacletSites -> True]], versionKey], None]},
             If[ StringQ[latest] && ! newerVersionQ[version, latest],
-                Message[SubmitPacletResource::published, paclet["Name"], latest, version]; Throw[$Failed, "submit"]]
+                Message[SubmitPacletResource::published, paclet["Name"], latest, version];
+                If[ ! TrueQ[OptionValue["DryRun"]], Throw[$Failed, "submit"]]]
         ]
     ];
     loadResourceTools[];
@@ -1270,8 +1280,9 @@ PublishPacletPage::account = "Connected to the Wolfram Cloud as `1`, not as `2`;
 PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Catch[Module[
     {build, resource, catalog, site, check},
     (* the account first: a paclet's documentation may publish as it is built, as PacletPage's own
-       tutorial does *)
-    If[ ! offlineDryRunQ[OptionValue["DryRun"]] && ! publishingAccountQ[PublishPacletPage, OptionValue["Account"]], Throw[$Failed, "publish"]];
+       tutorial does, so a dry run that builds takes the account too; one that does not only reports *)
+    If[ stopsQ[offlineDryRunQ[OptionValue["DryRun"]] || publishingAccountQ[PublishPacletPage, OptionValue["Account"]], TrueQ[OptionValue["DryRun"]] && ! TrueQ[OptionValue["Build"]]],
+        Throw[$Failed, "publish"]];
     build = If[ TrueQ[OptionValue["Build"]], BuildPacletDocumentation[dir, Sequence @@ OptionValue["BuildOptions"]], None];
     If[ build === $Failed, Throw[$Failed, "publish"]];
     resource = DeployPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> OptionValue["DryRun"], Sequence @@ OptionValue["ResourceOptions"]];

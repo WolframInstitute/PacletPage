@@ -22,8 +22,8 @@ RelatedTutorials: [PublishingADocumentationSite]
 - When `Documentation` already holds finished pages, give their authoring notebooks as `"DocumentationSource"`: the paclet is built from a copy whose documentation is those notebooks, since rebuilding finished pages packs none.
 - The scrape reads the definition notebook while it is open, with the notebook's own hints, which a headless front end otherwise looks for in a notebook it does not have; and the packed archive must be the version being submitted.
 - The connected account must own the paclet's publisher. A rejected request reports the repository's answer as a message.
-- The repository takes only a version newer than the ones it has, so a version it has already is refused before anything is built, in a dry run too.
-- A dry run without a cloud session runs offline: it builds and loads the archive, without the account check, the notebook check and the scrape, which need a session.
+- The repository takes only a version newer than the ones it has, so a version it has already is refused before anything is built; a dry run reports it and goes on.
+- A dry run as another account than `"Account"` reports it and goes on. A dry run without a cloud session runs offline: it builds and loads the archive, without the account check, the notebook check and the scrape, which need a session.
 - The archive is built as `DeployPacletResource` builds it, and takes the same options for it: `"Exclude"`, for symbolic links that lead outside the paclet and other files to leave out, `"ArchiveCheck"`, `"Symbols"`, `"Incremental"`, `"Parallel"` and `"TimeConstraint"`. A paclet that declares LibraryLink libraries must have some in the archive.
 - The result has `"Name"`, `"Version"`, `"Account"`, the account it submits as, `"Submitted"`, `"Archive"` and `"Pages"`, and the repository's answer as `"Result"`.
 - The following options can be given:

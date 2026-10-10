@@ -21,7 +21,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 - The paclet is loaded first, so the examples on its pages evaluate against it.
 - MarkdownToNotebook converts the pages: the one already loaded, else the copy beside PacletPage in its source repository, else the published function.
 - Each page's notebook is cached, under a key of everything it depends on: its markdown and options, the converter, the titles of the paclet's guides, which its links show, and the code its examples run, the files under `Kernel/` and `Assets/` of the paclet and of its dependencies. A page whose key is cached is copied from the cache, without converting it.
-- The converter caches each example's result by the example's code alone, so a page whose examples last ran against other code is converted with that cache off: its examples are evaluated afresh.
+- The converter caches each example's result by the example's code alone, so a page whose examples last ran against other code is converted with that cache off: its examples are evaluated afresh. That code is the paclet's, its dependencies' and the converter's, so another converter, or a redeploy of the published one, evaluates every example afresh.
 - With `"Parallel" -> True` or a number of kernels, the pages are converted on parallel kernels, launched for the build and closed after it; with `Automatic`, on the parallel kernels already running, if any. This kernel converts the first page, so that anything the converter installs is in place first, and tries again any page that failed on a parallel kernel.
 - Each conversion has `"TimeConstraint"` seconds. A page that runs past them fails, unless it wrote its whole notebook first.
 - The cache is in `build/cache`, or the directory given as `"CacheDirectory"`, which a build server can keep between runs. After a build of every page, it keeps only what that build used.
@@ -46,7 +46,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Dependencies"` | `Automatic` | the paclets whose code the examples run besides the paclet's own, as directories or names; by default the ones its `PacletInfo.wl` declares |
 | `"Monitor"` | `False` | whether to print each page as it is converted |
 
-- After a change to the converter, `"UseCache" -> False` converts every page and evaluates every example afresh.
+- `"UseCache" -> False` converts every page and evaluates every example afresh, whatever has changed.
 
 ## Basic Examples
 

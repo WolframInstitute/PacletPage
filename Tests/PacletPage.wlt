@@ -573,6 +573,24 @@ VerificationTest[
     TestID -> "Build: a page whose sections use names from earlier ones is reported, and stays out of the cache"
 ]
 
+fakeConvertTwin[file_String, out_String, opts : OptionsPattern[]] := fakeConvert[file, out, opts];
+
+VerificationTest[
+    withFixtureDocs[Function[dir, Module[{first, second},
+        first = BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None];
+        second = BuildPacletDocumentation[dir, "Converter" -> fakeConvertTwin, "Definition" -> None];
+        {Length[first["Evaluated"]], Length[second["Converted"]], Length[second["Evaluated"]]}
+    ]]],
+    {3, 3, 3},
+    TestID -> "Build: another converter converts every page again and evaluates its examples afresh"
+]
+
+VerificationTest[
+    {stopsQ[False, False], stopsQ[False, True], stopsQ[True, False], stopsQ[True, True]},
+    {True, False, False, False},
+    TestID -> "Publish: a failed check stops a real run, and only reports in a dry run"
+]
+
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{failing, fixed, page = FileNameJoin[{dir, "docs", "Symbols", "foo-page.md"}]},
         BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None];
