@@ -3,9 +3,18 @@
 Build and publish a paclet's documentation, from the markdown in its `docs/` folder to a published
 paclet with a documentation site, without a front end and without scripts of the paclet's own.
 
+- **[Documentation](https://www.wolframcloud.com/obj/wolframinstitute/PacletPage)**: PacletPage's own
+  site, which PacletPage builds and publishes, with a feedback form on every page
+- **[Paclet resource](https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/PacletPage)**:
+  the resource page, with examples; install from it, in a fresh kernel for the newest release:
+
+  ```wl
+  PacletInstall[ResourceObject["https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/PacletPage"]]
+  ```
+
 | Function | |
 |---|---|
-| `BuildPacletDocumentation[dir]` | `docs/**/*.md` into `Documentation/English` notebooks with MarkdownToNotebook, `ResourceDefinition.md` into the definition notebook; unchanged pages from a cache, the rest on parallel kernels when asked, examples evaluated afresh when the code they run changes |
+| `BuildPacletDocumentation[dir]` | `docs/**/*.md` into `Documentation/English` notebooks with [MarkdownToNotebook](https://github.com/WolframInstitute/MarkdownToNotebook), `ResourceDefinition.md` into the definition notebook; unchanged pages from a cache, the rest on parallel kernels when asked, examples evaluated afresh when the code they run changes |
 | `DeployPacletResource[dir]` | a fresh PacletBuild checked to hold every documentation page and to load alone, then the paclet resource deployed to the cloud (hero image kept, version and commit recorded, archive optionally published for `PacletInstall`) |
 | `SubmitPacletResource[dir]` | the same build, the definition notebook checked, submitted to the Paclet Repository headless |
 | `PublishPacletPage[dir, name]` | all of it and the site, in one kernel and one account; `"Submit" -> True` submits too |
@@ -71,12 +80,6 @@ submission: `"Exclude"` for files the archive leaves out (a symbolic link that l
 paclet is refused otherwise), `"Parallel" -> n` and `"Incremental" -> True` for a large paclet's
 pages, `"ArchiveCheck"` for a check of the paclet's own. `"DryRun" -> True` builds without
 deploying anything, and without a cloud session it builds and loads the archive offline.
-
-PacletPage installs from its resource, in a fresh kernel for the newest release:
-
-```wl
-PacletInstall[ResourceObject["https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/PacletPage"]]
-```
 
 For a paclet already published, the site alone, from a shell:
 

@@ -586,6 +586,13 @@ VerificationTest[
 ]
 
 VerificationTest[
+    {sameAccountQ[{"me@x.org", "me@x.org"}, "me@x.org"], sameAccountQ[{"me@x.org", "you@x.org"}, "me@x.org"],
+        sameAccountQ[{"me@x.org", None}, "me@x.org"], sameAccountQ[{}, "me@x.org"], sameAccountQ[{"me@x.org"}, None]},
+    {True, False, False, False, False},
+    TestID -> "Cloud: cloud writes go to the parallel kernels only when every one acts as this kernel's account"
+]
+
+VerificationTest[
     {stopsQ[False, False], stopsQ[False, True], stopsQ[True, False], stopsQ[True, True]},
     {True, False, False, False},
     TestID -> "Publish: a failed check stops a real run, and only reports in a dry run"

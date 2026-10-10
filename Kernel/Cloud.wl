@@ -79,8 +79,28 @@ sourceNotebooks[dir_String] := Module[{root},
     ]
 ];
 
-(* serially, or over the parallel kernels the caller launched *)
-mapBlocks[f_, list_List] := If[Length[Kernels[]] > 0, ParallelMap[f, list, DistributedContexts -> Automatic], Map[f, list]];
+(* serially, or over the parallel kernels when every one acts as the account this kernel does: a
+   parallel kernel is connected as the machine's saved login, which another session may have
+   changed, and a write as another account is refused *)
+mapBlocks[f_, list_List] := If[ sameAccountQ[kernelAccounts[], cloudAccount[]],
+    ParallelMap[f, list, DistributedContexts -> Automatic],
+    Map[f, list]
+];
+
+(* the account a kernel acts as: $WolframID is None until the kernel's first cloud call *)
+cloudAccount[] := (
+    If[ TrueQ[$CloudConnected] && ! StringQ[$WolframID], CloudObject["x"]];
+    If[ TrueQ[$CloudConnected] && StringQ[$WolframID], $WolframID, None]
+);
+kernelAccounts[] := If[ Length[Kernels[]] > 0,
+    ParallelEvaluate[
+        If[ TrueQ[$CloudConnected] && ! StringQ[$WolframID], CloudObject["x"]];
+        If[ TrueQ[$CloudConnected] && StringQ[$WolframID], $WolframID, None]
+    ],
+    {}
+];
+sameAccountQ[accounts_List, account_String] := accounts =!= {} && AllTrue[accounts, # === account &];
+sameAccountQ[_, _] := False;
 
 (* Uploads the notebooks whose content changed since the manifest recorded them, deletes the ones
    no longer there, and records only what landed, so a failed upload is retried next time. *)
