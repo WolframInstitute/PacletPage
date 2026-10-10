@@ -34,7 +34,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Source"` | `Automatic` | the markdown directory, by default `docs/` |
 | `"Target"` | `Automatic` | the notebook directory, by default `Documentation/English` |
 | `"Files"` | `All` | the files to build, as a list or a pattern for their names |
-| `"EvaluateSeparator"` | `Automatic` | the converter's evaluation separator: by default each section, and each example between `---`, runs in a clean context; one value for every page, or an association by template |
+| `"EvaluateSeparator"` | `Automatic` | the converter's evaluation separator, one value for every page or an association by template: by default a tutorial or an Overview page runs in one context, since its later sections use what earlier ones define, and every other page runs each section, and each example between `---`, in a clean context |
 | `"ConverterOptions"` | `{}` | options for every conversion, such as `"MathFont"` |
 | `"UseCache"` | `Automatic` | whether to reuse cached pages and example results |
 | `"Definition"` | `Automatic` | the definition's markdown, or `None` |

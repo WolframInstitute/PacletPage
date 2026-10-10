@@ -95,12 +95,16 @@ relativePath[base_String, file_String] := With[{b = FileNameSplit[ExpandFileName
     If[ Length[f] > Length[b] && Take[f, Length[b]] === b, FileNameJoin[Drop[f, Length[b]]], file]
 ];
 
-(* a hash of the paclet's code (Kernel/ and Assets/): the documentation's examples are evaluated
-   afresh when it changes, since the converter caches each example's result by its code alone *)
+(* a hash of the paclet's code (its PacletInfo, Kernel/ and Assets/): the documentation's examples
+   are evaluated afresh when it changes, since the converter caches each example's result by its
+   code alone; the PacletInfo carries the version an example may show *)
 codeHash[dir_String] := Hash[
     Map[
         {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &,
-        Sort @ Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &]
+        Sort @ Join[
+            Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
+            Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &]
+        ]
     ],
     "SHA256", "HexString"
 ];
@@ -207,11 +211,16 @@ pageKey[task_Association, converterID_, code_String, guides_List] := Hash[
     "SHA256", "HexString"
 ];
 
-(* "EvaluateSeparator": the converter's, by default its own default for every page (each section,
-   and each example between ---, in a clean context), one value for every page, or an association
-   by template;
+(* "EvaluateSeparator": the converter's, one value for every page or an association by template;
+   by default None for tutorials and Overview pages, whose later sections use what earlier ones
+   define, and for every other page the converter's own default: each section, and each example
+   between ---, in a clean context;
    "ConverterOptions": options for every MarkdownToNotebook call, such as "MathFont";
    "Files": All, or the markdown files (or a string pattern for their names) to build *)
+(* a tutorial or an Overview page is one narrative: its later sections use what its earlier ones
+   define, so it runs in one context *)
+$separatorByTemplate = <|"TechNote" -> None, "Overview" -> None|>;
+
 Options[BuildPacletDocumentation] = {
     "Source" -> Automatic,
     "Target" -> Automatic,
@@ -268,7 +277,10 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     evaluated = Replace[If[FileExistsQ[manifestFile], Get[manifestFile], <||>], Except[_Association] -> <||>];
     useCache = OptionValue["UseCache"] =!= False;
     code = exampleCode[dir, OptionValue["Dependencies"]];
-    separator[template_] := Replace[OptionValue["EvaluateSeparator"], byTemplate_Association :> Lookup[byTemplate, template, Automatic]];
+    separator[template_] := Replace[OptionValue["EvaluateSeparator"], {
+        Automatic :> Lookup[$separatorByTemplate, template, Automatic],
+        byTemplate_Association :> Lookup[byTemplate, template, Lookup[$separatorByTemplate, template, Automatic]]
+    }];
     metas = AssociationMap[frontMatter, Union[all, files]];
     (* a page is markdown whose front matter names a page template; anything else under the source,
        such as notes for the authors or the definition, is not one *)
@@ -386,7 +398,8 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
 (* Fixes to the stock deploy (PacletResource`), installed once per session:
    - the resource page's Details section goes through htmlFragmentExport, which nothing defines;
    - some accounts' subscriptions reject the AppearanceElements option, whatever its value; a
-     probe decides, and the option is dropped where the cloud rejects it;
+     probe decides, the option is dropped where the cloud rejects it, and the deploy reports the
+     answer as "AppearanceElements";
    - each notebook's render is warmed by a one-second request that a render rarely beats; only the
      main guide and the examples, which the resource page inlines, are warmed, until they render;
    - the resource page, main guide and example notebooks are deleted before a copy that
@@ -394,6 +407,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
      The documentation directory is copied whole by a copy that cannot overwrite, so it is still
      deleted first. *)
 $deployFixesInstalled = False;
+$appearanceElements = None;
 
 deployFunctions[] := {
     PacletResource`Private`cloudExportPacletResourceContent,
@@ -414,7 +428,14 @@ installDeployFixes[] := If[ ! TrueQ[$deployFixesInstalled], Module[{probe = Clou
     If[ DownValues[DeployedResourceShingle`Private`htmlFragmentExport] === {} && OwnValues[DeployedResourceShingle`Private`htmlFragmentExport] === {},
         DeployedResourceShingle`Private`htmlFragmentExport[s_String] := s
     ];
-    If[ ! MatchQ[CloudDeploy["probe", probe, AppearanceElements -> None], _CloudObject],
+    (* where the subscription refuses the option, the probe's deploy says so with
+       CloudDeploy::appearancenotsup: that message is the probe's answer, not a failure, so it is
+       kept off the output, the one purpose of this Quiet, and reported in the deploy's result *)
+    $appearanceElements = Quiet[
+        Check[MatchQ[CloudDeploy["probe", probe, AppearanceElements -> None], _CloudObject], False, CloudDeploy::appearancenotsup],
+        CloudDeploy::appearancenotsup
+    ];
+    If[ ! $appearanceElements,
         Unprotect[PacletResource`Private`$embeddedOptions];
         PacletResource`Private`$embeddedOptions = Sequence[];
         patchDeployFunctions[HoldPattern[AppearanceElements -> _] :> Sequence[]]
@@ -1099,7 +1120,8 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         "ArchiveSize" -> built["ArchiveSize"],
         "Version" -> paclet["Version"],
         "Commit" -> commit,
-        "Load" -> built["Load"]
+        "Load" -> built["Load"],
+        "AppearanceElements" -> $appearanceElements
     |>
 ], "deploy"];
 

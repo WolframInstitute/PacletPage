@@ -540,8 +540,22 @@ VerificationTest[
             Length[FileNames["*.nb", FileNameJoin[{dir, "build", "cache", "pages"}]]]
         }
     ]]],
-    {{"foo-page.md"}, {}, 3, 3, "{\"UseCache\" -> False, \"EvaluateSeparator\" -> Automatic}", 3},
+    {{"foo-page.md"}, {}, 3, 3, "{\"UseCache\" -> False, \"EvaluateSeparator\" -> None}", 3},
     TestID -> "Build: an edited page is converted with its examples cached; a change to the code evaluates every page afresh"
+]
+
+VerificationTest[
+    withFixtureDocs[Function[dir, Module[{options},
+        BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None, "EvaluateSeparator" -> <|"Symbol" -> All|>];
+        options = Last[notebookText[FileNameJoin[{dir, "Documentation", "English", #}]]] &;
+        options /@ {FileNameJoin[{"ReferencePages", "Symbols", "Foo.nb"}], FileNameJoin[{"Tutorials", "Steps.nb"}], FileNameJoin[{"Guides", "Main.nb"}]}
+    ]]],
+    {
+        "{\"UseCache\" -> False, \"EvaluateSeparator\" -> All}",
+        "{\"UseCache\" -> False, \"EvaluateSeparator\" -> None}",
+        "{\"UseCache\" -> False, \"EvaluateSeparator\" -> Automatic}"
+    },
+    TestID -> "Build: a tutorial runs in one context, whatever a by-template separator names for other pages"
 ]
 
 VerificationTest[
@@ -853,6 +867,21 @@ VerificationTest[
     ],
     {True, True, True},
     TestID -> "Publish: an uncommitted paclet's commit carries a hash of its sources"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], before, after},
+        CreateDirectory[FileNameJoin[{dir, "Kernel"}]];
+        Export[FileNameJoin[{dir, "Kernel", "Code.wl"}], "f[x_] := x", "Text"];
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"P/N\", \"Version\" -> \"1.0.0\"|>]", "Text"];
+        before = codeHash[dir];
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"P/N\", \"Version\" -> \"1.0.1\"|>]", "Text"];
+        after = codeHash[dir];
+        DeleteDirectory[dir, DeleteContents -> True];
+        before =!= after
+    ],
+    True,
+    TestID -> "Build: a version bump changes the code the examples run against"
 ]
 
 VerificationTest[
