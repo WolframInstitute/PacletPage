@@ -1,0 +1,163 @@
+:root { --pp-accent: #dd1100; --pp-active-bg: #fdeee9; --pp-active-fg: #c4280b; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: 'Source Sans Pro', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: #333;
+  background: #fff;
+}
+a { text-decoration: none; color: inherit; }
+
+/* header */
+#hdr {
+  position: fixed; top: 0; left: 0; right: 0; height: 56px;
+  background: #232629; color: #fff;
+  display: flex; align-items: center; padding: 0 20px;
+  z-index: 20; border-bottom: 3px solid var(--pp-accent);
+}
+#hdr .brand { font-size: 20px; font-weight: 600; letter-spacing: .2px; color: #fff; cursor: pointer; white-space: nowrap; }
+#hdr .brand .sub { font-size: 12px; font-weight: 400; color: #b9bdc1; margin-left: 10px; }
+#hdr #q {
+  margin-left: 28px; flex: 0 1 360px; min-width: 140px;
+  background: #16181a; color: #e8eaec; border: 1px solid #3a3f44; border-radius: 4px;
+  padding: 6px 10px; font-size: 13px; font-family: inherit; outline: none;
+}
+#hdr #q::placeholder { color: #7d858c; }
+#hdr #q:focus { border-color: var(--pp-accent); background: #101214; }
+#hdr .home {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 13px; color: #cfd2d5; border: 1px solid #44484c;
+  padding: 5px 12px; border-radius: 4px;
+}
+#hdr .home:hover { background: #2e3236; color: #fff; }
+#hdr .home svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+/* a rail whose every entry is filtered out says so, instead of going blank */
+.nav-empty { padding: 10px 14px; color: #9aa3ab; font-size: 12px; font-style: italic; }
+
+/* layout: guides and tutorials (left) | content | symbols (right) */
+#main { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; display: flex; }
+#side, #side-right {
+  height: 100%; overflow-y: auto; overflow-x: hidden;
+  background: #fafafa; padding: 14px 0 40px;
+}
+#side { width: 340px; min-width: 200px; max-width: 45%; border-right: 1px solid #e3e3e3; }
+#side-right { width: 240px; min-width: 160px; max-width: 45%; border-left: 1px solid #e3e3e3; }
+#content { flex: 1; min-width: 0; height: 100%; position: relative; background: #fff; }
+#frame { width: 100%; height: 100%; border: 0; display: block; }
+#loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #999; font-size: 14px; background: #fff; pointer-events: none;
+  opacity: 0; transition: opacity .15s;
+}
+#loading.on { opacity: 1; }
+
+/* shared list and link styling */
+#side ul, #side-right ul { list-style: none; margin: 0; padding: 0; }
+#side li, #side-right li { position: relative; }
+#side a, #side-right a {
+  display: block; padding: 6px 30px 6px 18px; line-height: 1.35;
+  color: #333; font-size: 14px; border-left: 3px solid transparent; white-space: normal;
+  overflow-wrap: break-word;
+}
+#side a:hover, #side-right a:hover { background: #f0f1f2; }
+#side a.active, #side-right a.active { background: var(--pp-active-bg); color: var(--pp-active-fg); border-left-color: var(--pp-accent); }
+
+/* left: the guide tree */
+#side .nav-root > li { border-bottom: 1px solid #eee; }
+#side ul ul { padding-left: 14px; }
+#side a.gd { font-weight: 600; color: #2a2a2a; }
+/* the resource's definition notebook, at the top of the rail */
+#side a.res { font-weight: 600; color: #2a2a2a; font-size: 15px; }
+#side .nav-root > li > details > summary > a.gd,
+#side .nav-root > li > a.gd { font-size: 15px; }
+
+/* left: a thick delimiter, then the tutorials */
+.nav-sep { border-top: 4px solid #cfd2d6; margin: 18px 0 6px; }
+/* indented like the link text below it (the links' 18px padding plus their 3px border) */
+#side .nav-label {
+  margin: 10px 0 2px; padding: 0 30px 0 21px; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase; color: #7a838c;
+}
+#side a.tut { color: #1a6ba5; }
+/* worked applications, kept apart from the tutorials */
+#side a.app { color: #7c4d9e; }
+#side a.app.active, #side a.tut.active { color: var(--pp-active-fg); }
+
+/* right: symbols */
+#side-right a.sym { color: #1a6ba5; }
+
+/* collapsible guides */
+#side details { margin: 0; }
+#side summary { list-style: none; cursor: pointer; position: relative; }
+#side summary::-webkit-details-marker { display: none; }
+#side summary::after {
+  content: '\25B8'; position: absolute; right: 12px; top: 11px;
+  color: #aaa; font-size: 11px;
+}
+#side details[open] > summary::after { content: '\25BE'; }
+#side summary:hover::after { color: #666; }
+
+/* ---- narrow screens ---------------------------------------------------------------------
+   Below 900px the rails become off-canvas drawers opened from the header and the content takes
+   the full width; below 560px the header keeps the brand, the filter and the drawer buttons. */
+#navToggle, #symToggle, #scrim { display: none; }
+
+@media (max-width: 900px) {
+  #hdr { padding: 0 12px; gap: 8px; }
+  #hdr .brand { font-size: 17px; }
+  #hdr .brand .sub { display: none; }
+  #hdr #q { margin-left: 8px; flex: 1 1 auto; min-width: 0; }
+
+  #navToggle, #symToggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 30px; flex: 0 0 auto; cursor: pointer;
+    background: #2a2e32; color: #e8eaec; border: 1px solid #3a3f44; border-radius: 4px;
+    font-size: 15px; line-height: 1; -webkit-tap-highlight-color: transparent;
+  }
+  #navToggle:active, #symToggle:active { background: #3a3f44; }
+
+  /* drawers slide over the content instead of taking width from it */
+  #side, #side-right {
+    position: fixed; top: 56px; bottom: 0; z-index: 40; width: 82vw; max-width: 340px;
+    transform: translateX(-102%); transition: transform .18s ease-out;
+    box-shadow: 0 0 24px rgba(0, 0, 0, .28);
+  }
+  #side { left: 0; }
+  #side-right { right: 0; left: auto; transform: translateX(102%); }
+  #side.open, #side-right.open { transform: translateX(0); }
+
+  #scrim.on { display: block; position: fixed; inset: 56px 0 0; background: rgba(0, 0, 0, .38); z-index: 35; }
+  #content { width: 100%; }
+}
+
+@media (max-width: 560px) {
+  #hdr .home { display: none; }
+  #hdr #q { font-size: 16px; }   /* 16px keeps iOS from zooming the page on focus */
+}
+
+/* a coarse pointer needs a bigger hit target than a mouse does */
+@media (pointer: coarse) {
+  #side a, #side-right a { padding-top: 7px; padding-bottom: 7px; }
+  #side summary { padding-top: 7px; padding-bottom: 7px; }
+}
+
+/* ---- rail splitters ---------------------------------------------------------------------
+   Drag to rebalance the three columns; a double-click resets. The hit area is wider than the
+   visible line, so it is easy to grab without being a divider of its own. */
+.splitter {
+  flex: 0 0 5px; position: relative; cursor: col-resize; background: transparent;
+  -webkit-tap-highlight-color: transparent; touch-action: none;
+}
+.splitter::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px; background: transparent;
+}
+.splitter:hover::before, .splitter.dragging::before { background: var(--pp-accent); }
+.splitter:focus-visible { outline: 2px solid var(--pp-accent); outline-offset: -2px; }
+/* while dragging, the frame must not swallow the pointer */
+#main.resizing #frame { pointer-events: none; }
+#main.resizing { cursor: col-resize; user-select: none; }
+
+@media (max-width: 900px) {
+  /* the rails are drawers here, so there is nothing to resize */
+  .splitter { display: none; }
+}

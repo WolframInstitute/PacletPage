@@ -1,0 +1,209 @@
+(* ::Package:: *)
+
+(* ==================== the account and the site's objects ====================
+
+   A site named name lives in the connected account as sibling objects:
+     <name>          the shell, a public HTML page
+     <name>Page      the host page the shell frames, public
+     <name>Feedback/ the feedback form and the team's pages (Feedback.wl)
+     <name>Source/   the authoring notebooks, when the site publishes them
+     <name>SourceManifest   private: what <name>Source holds, by content hash
+   Cleanup only ever deletes objects strictly beneath the directory it works on, so a sibling
+   whose name starts with the same characters is never touched. *)
+
+siteNameQ[name_String] := StringMatchQ[name, RegularExpression["[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*"]];
+siteNameQ[_] := False;
+
+accountBase[] := First[$CloudRootDirectory];
+
+(* the URL of the site name: a name in the connected account, or the URL of a site *)
+siteURL[name_String] := If[StringStartsQ[name, "https://" | "http://"], StringTrim[name, "/"], accountBase[] <> "/" <> name];
+
+(* the connected Wolfram ID; $WolframID is set once the session has made a cloud request *)
+connectedAccount[] := (If[! StringQ[$WolframID], First[$CloudRootDirectory]]; $WolframID);
+
+(* whether the connected account may publish: connected, known, and as account when one is named *)
+publishingAccountQ[head_Symbol, account_] := Which[
+    ! TrueQ[$CloudConnected] || ! StringQ[connectedAccount[]], Message[head::cloud]; False,
+    StringQ[account] && ToLowerCase[account] =!= ToLowerCase[connectedAccount[]],
+        Message[head::account, connectedAccount[], account]; False,
+    True, True
+];
+
+strictlyBeneathQ[root_String, url_String] := StringStartsQ[url, StringTrim[root, "/"] <> "/"];
+
+(* every object strictly beneath the cloud directory root, deleted; root itself stays *)
+cleanBeneath[root_String] := Module[{objects},
+    objects = If[TrueQ[DirectoryQ[CloudObject[root]]], CloudObjects[CloudObject[root]], {}];
+    Scan[
+        Function[object,
+            If[ strictlyBeneathQ[root, First[object]],
+                If[TrueQ[DirectoryQ[object]], cleanBeneath[First[object]]];
+                DeleteObject[object]
+            ]
+        ],
+        objects
+    ]
+];
+
+(* text as an HTML page at url, UTF-8 and served as text/html *)
+exportPage[html_String, url_String, permissions_] := CloudExport[html, {"Text", "text/html"}, CloudObject[url],
+    CharacterEncoding -> "UTF-8", Permissions -> permissions];
+
+(* ==================== the authoring notebooks ==================== *)
+
+$sourceKinds = {{{"Guides"}, "guide"}, {{"ReferencePages", "Symbols"}, "ref"}, {{"Tutorials"}, "tutorial"}};
+
+(* {file, "<kind>/<Name>.nb"} for each authoring notebook of a directory holding
+   Documentation/English, or the English directory itself; one level deep per kind, since the
+   site addresses pages by kind and name alone. A paclet directory's ResourceDefinition.nb is the
+   source of the definition page, resource/<short name>. *)
+sourceNotebooks[dir_String, short_String] := Join[
+    sourceNotebooks[dir],
+    With[{definition = FileNameJoin[{dir, "ResourceDefinition.nb"}]},
+        If[FileExistsQ[definition], {{definition, "resource/" <> short <> ".nb"}}, {}]
+    ]
+];
+
+sourceNotebooks[dir_String] := Module[{root},
+    root = SelectFirst[{FileNameJoin[{dir, "Documentation", "English"}], dir},
+        AnyTrue[$sourceKinds, Function[kind, DirectoryQ[FileNameJoin[Prepend[First[kind], #]]]]] &, None];
+    If[ root === None, Return[{}, Module]];
+    Catenate @ Map[
+        Function[kind,
+            With[{sub = FileNameJoin[Prepend[First[kind], root]]},
+                If[DirectoryQ[sub], Map[{#, Last[kind] <> "/" <> FileNameTake[#]} &, FileNames["*.nb", sub]], {}]
+            ]
+        ],
+        $sourceKinds
+    ]
+];
+
+(* serially, or over the parallel kernels the caller launched *)
+mapBlocks[f_, list_List] := If[Length[Kernels[]] > 0, ParallelMap[f, list, DistributedContexts -> Automatic], Map[f, list]];
+
+(* Uploads the notebooks whose content changed since the manifest recorded them, deletes the ones
+   no longer there, and records only what landed, so a failed upload is retried next time. *)
+publishSource[dir_String, sourceURL_String, manifestURL_String, permissions_, short_String] := Module[
+    {tasks, manifest, hashes, changed, retired, results, failed, removed},
+    tasks = sourceNotebooks[dir, short];
+    If[ tasks === {}, Message[DeployPacletPage::source, dir]; Return[$Failed, Module]];
+    manifest = If[TrueQ[FileExistsQ[CloudObject[manifestURL]]], CloudGet[CloudObject[manifestURL]], <||>];
+    If[! AssociationQ[manifest], manifest = <||>];
+    hashes = Association @ Map[Last[#] -> FileHash[First[#], "SHA256", "HexString"] &, tasks];
+    changed = Select[tasks, Lookup[manifest, Last[#]] =!= hashes[Last[#]] &];
+    retired = Complement[Keys[manifest], Keys[hashes]];
+    results = mapBlocks[
+        Function[task,
+            Last[task] -> MatchQ[
+                CopyFile[First[task], CloudObject[sourceURL <> "/" <> Last[task], Permissions -> permissions], OverwriteTarget -> True],
+                _CloudObject
+            ]
+        ],
+        changed
+    ];
+    failed = Keys[Select[Association[results], ! TrueQ[#] &]];
+    removed = Select[retired,
+        Function[path,
+            With[{url = sourceURL <> "/" <> path},
+                strictlyBeneathQ[sourceURL, url] && (! TrueQ[FileExistsQ[CloudObject[url]]] || MatchQ[DeleteObject[CloudObject[url]], Null])
+            ]
+        ]
+    ];
+    CloudPut[
+        Join[KeyDrop[manifest, Join[failed, removed]], KeyDrop[hashes, failed]],
+        CloudObject[manifestURL],
+        Permissions -> "Private"
+    ];
+    <|
+        "URL" -> sourceURL,
+        "Notebooks" -> Length[tasks],
+        "Uploaded" -> Length[changed] - Length[failed],
+        "Removed" -> Length[removed],
+        "Failed" -> failed
+    |>
+];
+
+(* ==================== publishing the site ==================== *)
+
+Options[DeployPacletPage] = Join[
+    {
+        "Feedback" -> True,
+        "FeedbackOptions" -> {},
+        "Source" -> None,
+        "Account" -> Automatic,
+        Permissions -> "Public"
+    },
+    FilterRules[Options[PacletPageFiles], Except["SiteURL" | "PageURL" | "FeedbackURL" | "SourceURL"]]
+];
+
+DeployPacletPage::name = "`1` is not a site name: use letters, digits, \"_\" and \"-\", with \"/\" between directories.";
+
+DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[
+    {site, page, feedback, source, files, result, title},
+    Which[
+        ! catalogQ[catalog], Message[PacletPageFiles::catalog, catalog]; Return[$Failed, Module],
+        ! siteNameQ[name], Message[DeployPacletPage::name, name]; Return[$Failed, Module],
+        ! publishingAccountQ[DeployPacletPage, OptionValue["Account"]], Return[$Failed, Module]
+    ];
+    site = siteURL[name];
+    page = site <> "Page";
+    title = Replace[OptionValue["Title"], Automatic -> catalog["Title"]];
+    feedback = If[ TrueQ[OptionValue["Feedback"]],
+        DeployPacletPageFeedback[name, Sequence @@ OptionValue["FeedbackOptions"], "Title" -> title, "Account" -> OptionValue["Account"]],
+        None
+    ];
+    If[ feedback === $Failed, Return[$Failed, Module]];
+    source = Replace[OptionValue["Source"], {
+        None -> None,
+        dir_String :> publishSource[dir, site <> "Source", site <> "SourceManifest", OptionValue[Permissions], Last[StringSplit[catalog["Name"], "/"]]],
+        other_ :> (Message[DeployPacletPage::source, other]; $Failed)
+    }];
+    If[ source === $Failed, Return[$Failed, Module]];
+    files = PacletPageFiles[catalog,
+        "SiteURL" -> site,
+        "PageURL" -> page,
+        "FeedbackURL" -> If[AssociationQ[feedback], feedback["Form"], ""],
+        "SourceURL" -> If[AssociationQ[source], source["URL"], ""],
+        Sequence @@ FilterRules[{opts}, Options[PacletPageFiles]]
+    ];
+    If[ ! AssociationQ[files], Return[$Failed, Module]];
+    (* the host page first, so the shell never frames a page that is not there yet *)
+    Do[
+        result = exportPage[files[First[pair]], Last[pair], OptionValue[Permissions]];
+        If[ ! MatchQ[result, _CloudObject], Message[DeployPacletPage::export, Last[pair], result]; Return[$Failed, Module]],
+        {pair, {{"page.html", page}, {"index.html", site}}}
+    ];
+    <|
+        "Site" -> site,
+        "Page" -> page,
+        "Feedback" -> feedback,
+        "Source" -> source,
+        "Pages" -> Length[catalog["Pages"]]
+    |>
+];
+
+(* ==================== permissions ==================== *)
+
+(* the directory tree beneath dir, dir first: one listing per directory, of its directories only *)
+cloudDirectories[dir_CloudObject] := Prepend[Catenate[cloudDirectories /@ CloudObjects[dir, "Directory"]], dir];
+
+Options[SetPacletPagePermissions] = {"Objects" -> "Directories"};
+
+SetPacletPagePermissions[dir_String, permissions_, opts : OptionsPattern[]] :=
+    SetPacletPagePermissions[CloudObject[dir], permissions, opts];
+
+SetPacletPagePermissions[dir_CloudObject, permissions_, opts : OptionsPattern[]] := Module[{directories, objects, results},
+    If[ ! TrueQ[DirectoryQ[dir]], Message[SetPacletPagePermissions::dir, First[dir]]; Return[$Failed, Module]];
+    directories = cloudDirectories[dir];
+    objects = If[ OptionValue["Objects"] === All,
+        Join[directories, Catenate[Complement[CloudObjects[#], CloudObjects[#, "Directory"]] & /@ directories]],
+        directories
+    ];
+    results = mapBlocks[First[#] -> MatchQ[SetPermissions[#, permissions], _CloudObject | {___}] &, objects];
+    <|
+        "Directories" -> Length[directories],
+        "Objects" -> Length[objects],
+        "Failed" -> Keys[Select[Association[results], ! TrueQ[#] &]]
+    |>
+];

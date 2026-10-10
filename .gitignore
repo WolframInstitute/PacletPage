@@ -1,0 +1,6 @@
+.DS_Store
+build/
+Documentation/
+*.paclet
+tmp/
+ResourceDefinition.nb

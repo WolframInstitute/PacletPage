@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>`title`</title>
+<style>
+  /* The page the site's frame shows. The notebook embedder renders lazily as the WINDOW scrolls
+     and froze inside an overflow:auto container, so the notebook lives in normal flow: the cloud's
+     static render is injected into #notebook-embed and the embedder hydrates it in place. */
+  :root { --pp-accent: `accent`; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: #fff; }
+  #notebook-embed { padding: 0 24px 48px; }
+  /* the resource page, the built view of the definition notebook: the whole window, under the
+     page controls */
+  #resource-frame { display: none; position: fixed; inset: 0; width: 100%; height: 100%; border: 0; z-index: 1; background: #fff; }
+  #notebook-embed .notebook-html { display: block; }
+  #err {
+    display: none; margin: 40vh auto 0; max-width: 420px; text-align: center;
+    font: 14px/1.5 "Source Sans Pro", -apple-system, sans-serif; color: #666;
+  }
+  #err a { color: #1a5fb4; }
+  /* The page controls, fixed so a long page never scrolls them out of reach; each stays hidden
+     until the script has what it needs. */
+  #pagetools { position: fixed; top: 10px; right: 14px; z-index: 30; display: flex; gap: 6px; }
+  .pagetool {
+    display: none; font: 12px/1 "Source Sans Pro", -apple-system, sans-serif; color: #444;
+    background: rgba(255, 255, 255, .92); border: 1px solid #d8d8d8; border-radius: 4px;
+    padding: 6px 10px; cursor: pointer; text-decoration: none;
+    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  }
+  .pagetool:hover { background: #fff; border-color: #b8b8b8; color: #111; }
+  .pagetool:focus-visible { outline: 2px solid #4a90d9; outline-offset: 1px; }
+  #viewtoggle[data-view="source"] { background: #fdf6e3; border-color: #e3d7b0; color: #6b5a1e; }
+  /* Shown when the email link is followed: whether a mail app opens is up to the browser and the
+     system, so the address and the message stay within reach either way. */
+  #feedback-note {
+    display: none; position: fixed; top: 42px; right: 14px; z-index: 30; max-width: 330px;
+    font: 13px/1.45 "Source Sans Pro", -apple-system, sans-serif; color: #333; background: #fff;
+    border: 1px solid #d8d8d8; border-radius: 6px; padding: 10px 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .12);
+  }
+  #feedback-note.on { display: block; }
+  #feedback-note strong { font-weight: 600; user-select: all; -webkit-user-select: all; }
+  #feedback-note .row { display: flex; gap: 6px; margin-top: 8px; }
+  #feedback-note .pagetool { display: block; }
+  /* The feedback panel, floating over the page: its answers go to the site's feedback form. */
+  #feedback-overlay {
+    position: fixed; inset: 0; z-index: 40; display: flex; align-items: flex-start;
+    justify-content: flex-end; padding: 44px 14px 14px; background: rgba(20, 20, 20, .28);
+  }
+  #feedback-overlay[hidden] { display: none; }
+  #feedback-form {
+    display: flex; flex-direction: column; width: min(520px, 100%); max-height: 100%; margin: 0;
+    background: #fff; border-radius: 8px; box-shadow: 0 8px 30px rgba(0, 0, 0, .25); overflow: hidden;
+    font: 14px/1.45 "Source Sans Pro", -apple-system, sans-serif; color: #222;
+  }
+  #feedback-form .head {
+    display: flex; align-items: center; justify-content: space-between; padding: 10px 10px 10px 16px;
+    border-bottom: 1px solid #eee; font-weight: 600; font-size: 15px;
+  }
+  #feedback-dismiss {
+    border: 0; background: none; color: #666; font-size: 22px; line-height: 1; padding: 2px 6px;
+    cursor: pointer; border-radius: 4px;
+  }
+  #feedback-dismiss:hover { background: #f2f2f2; color: #111; }
+  #feedback-form .body { padding: 12px 16px 4px; overflow: auto; }
+  #feedback-form label { display: block; font-weight: 600; margin: 10px 0 4px; }
+  #feedback-form label:first-child { margin-top: 0; }
+  #feedback-form .opt { font-weight: 400; color: #888; }
+  #feedback-form textarea, #feedback-form input[type="text"], #feedback-form input[type="email"] {
+    box-sizing: border-box; width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 4px;
+    font: inherit; color: inherit; background: #fff; resize: vertical;
+  }
+  #feedback-form textarea:focus, #feedback-form input:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74, 144, 217, .18); }
+  #feedback-form .hp { position: absolute; left: -10000px; width: 1px; height: 1px; opacity: 0; }
+  #fb-drop {
+    border: 1.5px dashed #c8c8c8; border-radius: 6px; padding: 10px 12px; color: #666; font-size: 13px;
+    background: #fafafa;
+  }
+  #fb-drop.dragging { border-color: #4a90d9; background: #f0f6fd; }
+  #fb-browse { border: 0; background: none; padding: 0; font: inherit; color: #1a5fb4; cursor: pointer; text-decoration: underline; }
+  #fb-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  #fb-list li {
+    position: relative; display: flex; flex-direction: column; align-items: center; width: 108px;
+    padding: 6px; border: 1px solid #e3e3e3; border-radius: 6px; font-size: 11px; color: #555;
+  }
+  #fb-list img { max-width: 96px; max-height: 64px; border-radius: 3px; margin-bottom: 4px; }
+  #fb-list .name { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #fb-list .remove {
+    position: absolute; top: 2px; right: 2px; border: 0; background: rgba(255, 255, 255, .9); color: #666;
+    border-radius: 50%; width: 18px; height: 18px; line-height: 16px; padding: 0; cursor: pointer;
+  }
+  #fb-status { min-height: 18px; margin: 10px 0 0; font-size: 13px; }
+  #fb-status.error { color: #b3261e; }
+  #feedback-form .foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px;
+    border-top: 1px solid #eee; font-size: 12px; color: #666;
+  }
+  #feedback-form .foot a { color: #1a5fb4; }
+  #fb-mailline[hidden] { display: none; }
+  #fb-send {
+    margin-left: auto; border: 0; border-radius: 4px; background: var(--pp-accent); color: #fff; padding: 8px 16px;
+    font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1; cursor: pointer;
+  }
+  #fb-send:disabled { opacity: .6; cursor: default; }
+  #feedback-form.sent .body > :not(#fb-thanks), #feedback-form.sent .foot { display: none; }
+  #fb-thanks { display: none; text-align: center; padding: 40px 10px 44px; }
+  #feedback-form.sent #fb-thanks { display: block; }
+  #fb-thanks strong { display: block; font-size: 18px; margin-bottom: 4px; }
+  @media (max-width: 640px) {
+    #feedback-overlay { padding: 0; }
+    #feedback-form { width: 100%; height: 100%; max-height: none; border-radius: 0; }
+  }
+  @media (max-width: 900px) { #notebook-embed { padding: 0 14px 40px; } }
+</style>
+</head>
+<body>
+<div id="pagetools">
+  <!-- target _top: the cloud's CSP lets a frame load network URLs only, so a mailto: link
+       followed inside the frame is blocked; from the top window it opens the mail app. -->
+  <a id="feedback" class="pagetool" target="_top">Feedback</a>
+  <button id="viewtoggle" class="pagetool" type="button"></button>
+</div>
+<div id="feedback-note" role="status">
+  No mail app opened? Write to <strong id="feedback-to"></strong>, or copy the prefilled message
+  into any email.
+  <div class="row">
+    <button id="feedback-copy" class="pagetool" type="button">Copy message</button>
+    <button id="feedback-close" class="pagetool" type="button">Close</button>
+  </div>
+</div>
+<div id="feedback-overlay" hidden>
+  <form id="feedback-form" role="dialog" aria-modal="true" aria-labelledby="feedback-heading" novalidate>
+    <div class="head">
+      <span id="feedback-heading">Feedback on this page</span>
+      <button id="feedback-dismiss" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="body">
+      <label for="fb-feedback">What is wrong, unclear or missing?</label>
+      <textarea id="fb-feedback" name="Feedback" rows="5" maxlength="5000"></textarea>
+      <label for="fb-where">Where on the page? <span class="opt">optional</span></label>
+      <input id="fb-where" name="Where" type="text" maxlength="500" placeholder="a section, an example or an output">
+      <label for="fb-expected">What did you expect instead? <span class="opt">optional</span></label>
+      <textarea id="fb-expected" name="Expected" rows="2" maxlength="2000"></textarea>
+      <label>Screenshots or files <span class="opt">optional, up to three</span></label>
+      <div id="fb-drop">Paste a screenshot (Cmd+V or Ctrl+V), drop files here, or
+        <button id="fb-browse" type="button">choose files</button>.
+        <input id="fb-files" type="file" multiple hidden>
+      </div>
+      <ul id="fb-list"></ul>
+      <label for="fb-email">Your email <span class="opt">optional, if you would like a reply</span></label>
+      <input id="fb-email" name="Email" type="email" maxlength="200" placeholder="you@example.org">
+      <input class="hp" name="Website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <p id="fb-status" role="status"></p>
+      <div id="fb-thanks"><strong>Thank you</strong>Your feedback was sent.</div>
+    </div>
+    <div class="foot">
+      <span class="links"><a id="fb-all" target="_blank" rel="noopener"
+          title="The feedback this site has collected, for its team">All feedback</a><span id="fb-mailline" hidden> &middot;
+        or email <a id="feedback-mail" target="_top"></a></span></span>
+      <button id="fb-send" type="submit">Send feedback</button>
+    </div>
+  </form>
+</div>
+<script type="application/json" id="pp-config">`config`</script>
+<div id="notebook-embed"></div>
+<iframe id="resource-frame" title="resource page"></iframe>
+<div id="err">This page could not be loaded.</div>
+<script>
+(function () {
+  var C = JSON.parse(document.getElementById('pp-config').textContent),
+      node = document.getElementById('notebook-embed'),
+      toggle = document.getElementById('viewtoggle'),
+      params = new URLSearchParams(location.search),
+      site = null;
+  // the shell this page is framed in, on the same origin; null when the page is opened alone
+  try { if (window.parent !== window && window.parent.ppSite) site = window.parent.ppSite; } catch (e) {}
+
+  function safeDecode(s) {
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
+  function pagePath(id) {
+    var k = id.indexOf('/');
+    return id.slice(0, k + 1) + encodeURI(id.slice(k + 1));
+  }
+  function publishedURL(id) {
+    return id.indexOf('resource/') === 0 ? C.resource : C.docBase + pagePath(id) + '.html';
+  }
+
+  function fail(message, id) {
+    var err = document.getElementById('err');
+    err.textContent = message;
+    if (id) {
+      var a = document.createElement('a');
+      a.href = publishedURL(id);
+      a.target = '_top';
+      a.textContent = 'Open the published page';
+      err.appendChild(document.createElement('br'));
+      err.appendChild(a);
+    }
+    err.style.display = 'block';
+  }
+
+  var id = params.get('p') || '';
+  if (!/^(guide|ref|tutorial|resource)\/[^\/]+$/.test(id) || (site && !site.has(id))) { fail('This page could not be loaded.'); return; }
+  var name = id.slice(id.indexOf('/') + 1),
+      // the static render's width, matched to this frame and rounded to 100px so the cloud's
+      // per-width render cache gets hits
+      w = Math.round(Math.min(1400, Math.max(500, document.documentElement.clientWidth - 48)) / 100) * 100;
+  document.title = (site ? site.title(id) : name) + ' - ' + C.title;
+
+  // The notebook behind the page, under C.notebooks: named by the nb parameter when the
+  // published name differs from the id, else the id. Only a plain relative path is taken, so
+  // this page shows notebooks of this paclet and nothing else.
+  var nb = params.get('nb') || pagePath(id) + '.nb';
+  if (!/^[A-Za-z0-9_$%\-.\/]+\.nb$/.test(nb) || /(^|\/)\.\.?(\/|$)/.test(nb) || nb.charAt(0) === '/') {
+    fail('This page could not be loaded.', id);
+    return;
+  }
+
+  // Which notebook to show, when the site also publishes the authoring notebooks: the built page
+  // or its source. The shell navigates without a view parameter, so the choice is kept in
+  // sessionStorage; an explicit ?v= wins. Storage may be absent or throw, and the built view is
+  // what a failure falls back to.
+  var KEY = 'pp-view:' + C.site;
+  function remembered() {
+    try { return sessionStorage.getItem(KEY); } catch (e) { return null; }
+  }
+  function remember(v) {
+    try { v === 'source' ? sessionStorage.setItem(KEY, v) : sessionStorage.removeItem(KEY); } catch (e) {}
+  }
+  var view = (params.get('v') === 'source' || params.get('v') === 'built')
+    ? params.get('v')
+    : (remembered() === 'source' ? 'source' : 'built');
+
+  // The definition page's built view is the resource page as published; its source is the
+  // definition notebook: the paclet's own when the site publishes its sources, else the one the
+  // resource was deployed with. Every other page's notebook is under C.notebooks.
+  var definitionPage = id.indexOf('resource/') === 0,
+      sourceURL = definitionPage && !C.source ? C.definition : C.source + '/' + pagePath(id) + '.nb';
+  if (definitionPage && !C.definition) { fail('This page could not be loaded.'); return; }
+  var hasSource = !!(C.source || definitionPage);
+  if (!hasSource) view = 'built';
+  var nbURL = view === 'source' ? sourceURL : (definitionPage ? C.resource : C.notebooks + nb),
+      staticURL = nbURL.replace('/obj/', '/statichtml/') + '?maxwaitmillis=8000&width=' + w,
+      viewLabel = view === 'source' ? 'authoring notebook' : 'built page';
+
+  if (hasSource) {
+    toggle.style.display = 'block';
+    toggle.dataset.view = view;
+    toggle.textContent = view === 'source' ? 'View built page' : 'View source';
+    toggle.title = view === 'source'
+      ? 'Showing the authoring notebook this page is built from. Click for the built page.'
+      : 'Show the authoring notebook this page is built from.';
+    toggle.addEventListener('click', function () {
+      var next = view === 'source' ? 'built' : 'source';
+      remember(next);
+      // a reload rather than re-embedding in place: the embedder owns the subtree it hydrated;
+      // in the site's frame it replaces this page, so Back still steps through pages
+      params.set('v', next);
+      if (site) location.replace('?' + params.toString()); else location.search = '?' + params.toString();
+    });
+  }
+
+  // ---- feedback --------------------------------------------------------------------------------
+  // The Feedback button opens the panel when the site has a feedback form, and an email prefilled
+  // from the template when the template names a recipient; with neither it stays hidden.
+  var FORM = C.form,
+      feedback = document.getElementById('feedback'),
+      link = C.site ? C.site + '#' + id : location.href,
+      info = {
+        title: site ? site.title(id) : name,
+        page: id,
+        link: link,
+        view: viewLabel,
+        notebook: nbURL,
+        date: new Date().toISOString().slice(0, 10)
+      };
+
+  function feedbackMessage(tpl) {
+    var lines = tpl.replace(/\r\n?/g, '\n').split('\n'), headers = {}, i = 0, h;
+    while (i < lines.length && lines[i].trim() === '') i++;
+    for (; i < lines.length && lines[i].trim() !== ''; i++) {
+      h = lines[i].match(/^\s*([A-Za-z-]+):\s*(.*?)\s*$/);
+      if (h) headers[h[1].toLowerCase()] = h[2];
+    }
+    if (!headers.to || !/^[^\s@]+@[^\s@]+$/.test(headers.to.replace(/\s+/g, ''))) return null;
+    function fill(s) {
+      return s.replace(/\{(\w+)\}/g, function (all, k) {
+        return Object.prototype.hasOwnProperty.call(info, k) ? info[k] : all;
+      });
+    }
+    return { to: headers.to.replace(/\s+/g, ''), subject: fill(headers.subject || ''),
+             body: fill(lines.slice(i + 1).join('\n')) };
+  }
+  // C.mail, the email template: "To:" and "Subject:" lines, a blank line, then the body, with
+  // {title}, {page}, {link}, {view}, {notebook} and {date} filled in from info
+  var msg = feedbackMessage(C.mail || ''),
+      note = document.getElementById('feedback-note'),
+      noteTimer;
+
+  function showNote() {
+    document.getElementById('feedback-copy').textContent = 'Copy message';
+    note.classList.add('on');
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(function () { note.classList.remove('on'); }, 30000);
+  }
+
+  if (msg) {
+    // RFC 6068: the address stays readable; subject and body are percent-encoded, breaks as CRLF
+    var mailto = 'mailto:' + msg.to + '?subject=' + encodeURIComponent(msg.subject) +
+      '&body=' + encodeURIComponent(msg.body.replace(/\n/g, '\r\n'));
+    feedback.href = mailto;
+    document.getElementById('feedback-to').textContent = msg.to;
+    var mail = document.getElementById('feedback-mail');
+    mail.href = mailto;
+    mail.textContent = msg.to;
+    document.getElementById('fb-mailline').hidden = false;
+    mail.addEventListener('click', function () { closeForm(); showNote(); });
+    var copy = document.getElementById('feedback-copy');
+    copy.addEventListener('click', function () {
+      var text = 'To: ' + msg.to + '\nSubject: ' + msg.subject + '\n\n' + msg.body;
+      function legacyCopy() {
+        var ta = document.createElement('textarea'), ok = false;
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { ok = document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+        return ok;
+      }
+      function done(ok) { copy.textContent = ok ? 'Copied' : 'Copy failed: select the address'; }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(legacyCopy()); });
+      } else {
+        done(legacyCopy());
+      }
+    });
+    document.getElementById('feedback-close').addEventListener('click', function () {
+      note.classList.remove('on');
+    });
+  }
+  if (FORM || msg) {
+    feedback.title = FORM ? 'Report a problem with this page or suggest an improvement'
+                          : 'Report a problem with this page (opens an email to ' + msg.to + ')';
+    feedback.style.display = 'block';
+    if (!msg) feedback.href = '#';
+    feedback.addEventListener('click', function (e) {
+      if (FORM) { e.preventDefault(); openForm(); } else { showNote(); }
+    });
+  }
+
+  // The panel posts to the feedback form on this origin: the answers, up to three files, and the
+  // page's identity in five context fields. The form answers a stored submission with a page
+  // carrying #pp-feedback-thanks; anything else keeps the panel open with the reason.
+  // the team's list of everything the form has collected, beside the form
+  if (FORM) document.getElementById('fb-all').href = FORM.replace(/\/Form$/, '/All');
+  var MAX_FILES = 3, MAX_BYTES = 20 * 1000 * 1000,
+      overlay = document.getElementById('feedback-overlay'),
+      form = document.getElementById('feedback-form'),
+      text = document.getElementById('fb-feedback'),
+      email = document.getElementById('fb-email'),
+      drop = document.getElementById('fb-drop'),
+      picker = document.getElementById('fb-files'),
+      list = document.getElementById('fb-list'),
+      status = document.getElementById('fb-status'),
+      send = document.getElementById('fb-send'),
+      attached = [], closeTimer, signedInAs;
+  function say(message, isError) {
+    status.textContent = message || '';
+    status.className = isError ? 'error' : '';
+  }
+  function closeForm() {
+    clearTimeout(closeTimer);
+    overlay.hidden = true;
+    if (form.classList.contains('sent')) resetForm();
+  }
+  function resetForm() {
+    form.reset();
+    if (signedInAs) email.value = signedInAs;
+    form.classList.remove('sent');
+    attached = [];
+    renderFiles();
+    say('');
+    send.disabled = false;
+  }
+  function openForm() {
+    clearTimeout(closeTimer);
+    if (form.classList.contains('sent')) resetForm();
+    overlay.hidden = false;
+    text.focus();
+    prefillEmail();
+  }
+  // A reader signed in to the Wolfram Cloud finds the email field filled with their Wolfram ID:
+  // Me, beside the form, answers this site's pages with it (null when signed out). Asked once a
+  // page, and it never overwrites what the reader typed.
+  function prefillEmail() {
+    function fill() { if (signedInAs && !email.value) email.value = signedInAs; }
+    if (signedInAs !== undefined) { fill(); return; }
+    signedInAs = null;
+    fetch(FORM.replace(/\/Form$/, '/Me'), { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { signedInAs = j && typeof j.email === 'string' ? j.email : null; fill(); }, function () {});
+  }
+  function stamp() { return new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-'); }
+  function renderFiles() {
+    list.innerHTML = '';
+    attached.forEach(function (file, i) {
+      var li = document.createElement('li'), label = document.createElement('span'), remove = document.createElement('button');
+      if (/^image\//.test(file.type)) {
+        var img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        img.alt = '';
+        li.appendChild(img);
+      }
+      label.className = 'name';
+      label.textContent = file.name;
+      li.title = file.name + ' (' + Math.max(1, Math.round(file.size / 1000)) + ' KB)';
+      remove.className = 'remove';
+      remove.type = 'button';
+      remove.setAttribute('aria-label', 'Remove ' + file.name);
+      remove.textContent = '\u00d7';
+      remove.addEventListener('click', function () { attached.splice(i, 1); renderFiles(); say(''); });
+      li.appendChild(label);
+      li.appendChild(remove);
+      list.appendChild(li);
+    });
+  }
+  function attach(files) {
+    var skipped = 0;
+    Array.prototype.forEach.call(files || [], function (file, i) {
+      if (attached.length >= MAX_FILES || file.size > MAX_BYTES) { skipped++; return; }
+      // a pasted screenshot arrives as "image.png"; give it a name that says what it is
+      if (/^image\.\w+$/.test(file.name)) {
+        file = new File([file], 'screenshot-' + stamp() + (i ? '-' + (i + 1) : '') + '.' + file.name.split('.').pop(), { type: file.type });
+      }
+      attached.push(file);
+    });
+    renderFiles();
+    say(skipped ? 'Up to three files of at most 20 MB each are attached; ' + skipped + ' left out.' : '', skipped > 0);
+  }
+  document.getElementById('fb-browse').addEventListener('click', function () { picker.click(); });
+  picker.addEventListener('change', function () { attach(picker.files); picker.value = ''; });
+  document.addEventListener('paste', function (e) {
+    var files = e.clipboardData && e.clipboardData.files;
+    if (overlay.hidden || !files || !files.length) return;
+    e.preventDefault();
+    attach(files);
+  });
+  ['dragenter', 'dragover'].forEach(function (type) {
+    form.addEventListener(type, function (e) {
+      if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') >= 0) {
+        e.preventDefault();
+        drop.classList.add('dragging');
+      }
+    });
+  });
+  form.addEventListener('dragleave', function (e) { if (!form.contains(e.relatedTarget)) drop.classList.remove('dragging'); });
+  form.addEventListener('drop', function (e) {
+    drop.classList.remove('dragging');
+    if (e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); attach(e.dataTransfer.files); }
+  });
+  var failText = msg ? 'Sorry, that did not go through. Please try again, or email ' + msg.to + '.'
+                     : 'Sorry, that did not go through. Please try again.';
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!text.value.trim()) { say('Please say what is wrong, unclear or missing.', true); text.focus(); return; }
+    if (email.value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) {
+      say('That email address does not look right.', true); email.focus(); return;
+    }
+    var data = new FormData(form);
+    attached.forEach(function (file, i) { data.append('Attachment' + (i + 1), file, file.name); });
+    // the form receives each file without its name, so the names travel alongside
+    data.append('AttachmentNames', attached.map(function (file) { return file.name; }).join('\n'));
+    data.append('Page', id);
+    data.append('Title', info.title);
+    data.append('Link', link);
+    data.append('View', viewLabel);
+    data.append('Notebook', nbURL);
+    send.disabled = true;
+    say('Sending\u2026');
+    fetch(FORM, { method: 'POST', body: data, credentials: 'same-origin' })
+      .then(function (r) { return r.text(); })
+      .then(function (body) {
+        if (body.indexOf('id="pp-feedback-thanks"') >= 0) {
+          form.classList.add('sent');
+          closeTimer = setTimeout(closeForm, 2500);
+        } else {
+          send.disabled = false;
+          say(body.indexOf('has-error') >= 0
+            ? 'The form could not read one of the fields; please check the email address.'
+            : failText, true);
+        }
+      }, function () {
+        send.disabled = false;
+        say(failText, true);
+      });
+  });
+  document.getElementById('feedback-dismiss').addEventListener('click', closeForm);
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) closeForm(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !overlay.hidden) closeForm(); });
+
+  // ---- the notebook ------------------------------------------------------------------------------
+  function hydrate() {
+    var sc = document.createElement('script');
+    sc.crossOrigin = 'anonymous';
+    sc.src = 'https://www.wolframcdn.com/notebook-embedder/0.3/wolfram-notebook-embedder.min.js';
+    sc.onload = function () {
+      window.WolframNotebookEmbedder.embed(nbURL, node, { showRenderProgress: false });
+    };
+    sc.onerror = function () { if (!node.firstChild) fail('This page could not be loaded.', id); };
+    document.head.appendChild(sc);
+  }
+
+  // The resource page, framed as published: its stock chrome hidden and its links routed as the
+  // shell does for a page it frames itself, from the moment it is framed until well after it has
+  // loaded, since it builds its content as it loads.
+  function routeResourceFrame(frame) {
+    try {
+      var d = frame.contentDocument;
+      if (!d) return;
+      if (d.head && !d.getElementById('pp-hide-chrome')) {
+        var st = d.createElement('style');
+        st.id = 'pp-hide-chrome';
+        st.textContent = C.hide;
+        d.head.appendChild(st);
+      }
+      // the resource page always has an Examples section; one whose definition had no examples
+      // is empty, and then hidden with its heading. A page that embeds its example notebook fills
+      // the section as the notebook renders, so it is never hidden.
+      var examples = d.getElementById('nbCollapseExampleNotebook');
+      if (examples) {
+        var embeds = d.documentElement.innerHTML.indexOf('ExampleNotebook_embed') >= 0;
+        var empty = !embeds && !examples.textContent.replace(/\s+/g, '') && !examples.querySelector('img, svg, canvas, iframe');
+        examples.style.display = empty ? 'none' : '';
+        var heading = d.querySelector('[data-target="#nbCollapseExampleNotebook"]');
+        if (heading) heading.style.display = empty ? 'none' : '';
+      }
+      var as = d.querySelectorAll('a[href]');
+      for (var i = 0; i < as.length; i++) {
+        (function (a) {
+          if (a.__pp) return;
+          a.__pp = 1;
+          var target = site ? site.pageID(a.href) : ownID(a.href);
+          if (target) {
+            a.addEventListener('click', function (e) {
+              e.preventDefault();
+              if (site) window.parent.postMessage({ ppNav: target }, location.origin);
+              else location.search = '?p=' + encodeURIComponent(target);
+            });
+          } else if (/^https?:$/.test(a.protocol)) {
+            a.target = '_blank';
+            a.rel = 'noopener';
+          }
+        })(as[i]);
+      }
+    } catch (e) {}
+  }
+  if (definitionPage && view === 'built') {
+    var resourceFrame = document.getElementById('resource-frame');
+    resourceFrame.style.display = 'block';
+    resourceFrame.src = C.resource;
+    var watched = 0, watch = setInterval(function () {
+      routeResourceFrame(resourceFrame);
+      if (++watched >= 120) clearInterval(watch);
+    }, 250);
+    resourceFrame.addEventListener('load', function () { routeResourceFrame(resourceFrame); });
+    return;
+  }
+
+  // 404 and 403 both mean nothing to show: the cloud answers an anonymous reader 403 for an
+  // object it will not serve. Anything else (a render timeout, a network blip) is no evidence of
+  // absence, so the embedder still gets its turn.
+  fetch(staticURL, { credentials: 'omit' })
+    .then(function (r) { return r.ok ? r.text() : ((r.status === 404 || r.status === 403) ? null : ''); })
+    .catch(function () { return ''; })
+    .then(function (html) {
+      if (html === null) {
+        fail(view === 'source' ? 'No authoring notebook for this page.' : 'This page is not published, or not public.',
+             view === 'source' ? null : id);
+        return;
+      }
+      if (html) {
+        node.innerHTML = html;
+        var nh = node.querySelector('.notebook-html');
+        if (nh) nh.style.display = 'block';
+      }
+      hydrate();
+    });
+
+  // ---- links -------------------------------------------------------------------------------------
+  // A link to a page of the site goes to the shell, which opens it; a link anywhere else opens in a
+  // new tab, since another site may refuse to be framed.
+  function ownID(href) {
+    var s = href.split('#')[0].split('?')[0];
+    for (var i = 0; i < C.routes.length; i++) {
+      if (s.indexOf(C.routes[i]) !== 0) continue;
+      var m = s.slice(C.routes[i].length).match(/^(guide|ref|tutorial)\/([^\/]+?)(?:\.(?:html|nb))?$/);
+      if (m) return m[1] + '/' + safeDecode(m[2]);
+    }
+    return null;
+  }
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || a.closest('#pagetools, #feedback-note, #feedback-overlay')) return;
+    var href = a.href, target;
+    if (site) {
+      target = site.pageID(href);
+      if (target) {
+        e.preventDefault();
+        window.parent.postMessage({ ppNav: target }, location.origin);
+        return;
+      }
+    } else {
+      target = ownID(href);
+      if (target) {
+        e.preventDefault();
+        if (C.kind === 'cloud') location.search = '?p=' + encodeURIComponent(target);
+        else window.open(publishedURL(target), '_top');
+        return;
+      }
+    }
+    if (/^https?:$/.test(a.protocol) && a.origin + a.pathname !== location.origin + location.pathname) {
+      e.preventDefault();
+      window.open(href, '_blank', 'noopener');
+    }
+  });
+})();
+</script>
+</body>
+</html>
