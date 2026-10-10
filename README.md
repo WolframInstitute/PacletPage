@@ -18,12 +18,37 @@ paclet with a documentation site, without a front end and without scripts of the
 | `SetPacletPagePermissions[dir, permissions]` | set permissions over a cloud tree, directory by directory |
 | `CheckPacletPage[catalog, name]` | check, as an anonymous reader, that everything is reachable |
 
-The site frames the published pages: a filter over every title and keyword, the definition
-notebook, the guide tree and the tutorials in the left rail, the symbols in the right rail, and each
-page rendered in the middle from the notebook behind it, painted at once from the cloud's static
-render and then made live by the Wolfram notebook embedder. Links to the paclet's own pages stay
-inside the site; any other link opens in a new tab. Every page has a Feedback button, whose panel
-links to the team's list of everything collected, and a toggle to the page's source.
+## Features
+
+- One call per release: `PublishPacletPage` builds the documentation, deploys the paclet resource,
+  submits it to the Paclet Repository when asked and publishes the site, from one kernel connected
+  to the publishing account; `"Account"` refuses any other.
+- Documentation from markdown: the pages under `docs/` and `ResourceDefinition.md` become notebooks
+  through MarkdownToNotebook, with their examples evaluated. Unchanged pages come from a cache that a
+  build server can keep, the others convert on parallel kernels when asked, and examples run again
+  when the code they run changes.
+- Checked releases: nothing is published unless the archive holds every documentation page and
+  loads alone in a fresh kernel. A version already published from another commit, a link leading
+  outside the paclet, and LibraryLink libraries declared but not shipped are refused.
+- A complete resource page from its first visit, on any cloud subscription: Details, examples, the
+  main guide, the hero image and the source link, with the paclet's version and commit recorded.
+  The examples link the paclet's symbols, so code copied from them runs in a fresh kernel.
+- Paclet Repository submission without a front end, after the definition notebook's own checks and
+  the release's.
+- A documentation site around the published pages: a filter over every title and keyword, the
+  definition notebook, the guides and the tutorials in the left rail, the symbols in the right, and
+  each page painted at once from the cloud's static render, then made live. Every page has its own
+  address, Back and Forward step through the pages read, links to the paclet's own pages stay in
+  the site, and any other link opens in a new tab.
+- Feedback on every page: text in any language and attachments, kept in a Databin of the
+  publishing account and confirmed to the reader once stored. The team reads and triages it, each
+  entry with a status, on pages open to the account, named readers and whole email domains.
+- Every page's source a toggle away: the notebook the page was built from.
+- Any published paclet: a site frames pages from the Paclet Repository or from a paclet resource
+  deployed to a cloud account.
+- Upkeep: `CheckPacletPage` checks, as an anonymous reader, that the site, its pages and its
+  feedback form are reachable, and `SetPacletPagePermissions` sets permissions over a whole cloud
+  tree. Cleaning up removes only the site's own objects.
 
 ## Use
 
@@ -76,26 +101,6 @@ Site* does, and publishes PacletPage's own site.
 
 The site must live on `https://www.wolframcloud.com`, the origin of the notebooks it renders.
 
-## What it fixes
-
-PacletPage replaces seven hand-copied site builders. Among the fixes it starts with:
-
-- pages of `$`-named symbols open like any other;
-- the frame is navigated without adding history entries, so Back steps through pages;
-- only links to the paclet's own pages are taken over, System documentation opens in a new tab;
-- pages are ASCII with character references, and are exported as UTF-8 HTML;
-- feedback text is stored in the Databin as ASCII: a non-ASCII submission made `DatabinAdd` fail
-  although it stored the entry;
-- the panel recognizes a stored submission by its element's id, so a failure page is never taken
-  for a thank-you;
-- the Feedback button shows whenever there is a form or an address;
-- the `Me` endpoint answers only the site's own pages, matched exactly, not by prefix;
-- cleanup deletes only objects strictly beneath its own directory;
-- directories are enumerated by listing subdirectories, never by probing each object, and no
-  permissions pass is skipped;
-- no personal account is named anywhere: the account is whichever is connected, guarded by
-  `"Account"`.
-
 ## Layout
 
 ```
@@ -135,20 +140,3 @@ resource already deployed; a first release into an account therefore runs `deplo
 `release.wls`. The build caches each page's notebook under a key of everything it depends on, in
 `build/cache`, and converts a page with the converter's example cache off whenever the code its
 examples last ran against has changed.
-
-`DeployPacletResource` checks the fresh archive holds every documentation page before it deploys,
-and works around the stock deploy: it drops the `AppearanceElements` option where the account's
-subscription rejects it (probed on each run), defines the missing `htmlFragmentExport` the resource
-page's Details section needs, scrapes the definition notebook's data and deploys with the notebook
-open (so the page has its examples, hero image and source link), warms only the renders the
-resource page inlines (the main guide and the examples) rather than every notebook, and replaces
-the resource page, main guide and example notebooks in place instead of deleting them first. The documentation directory is still replaced whole. It
-refuses a version already deployed from another commit (the resource records both in its
-MetaInformation), a symbolic link that leads outside the paclet (a runtime linked from a toolchain
-would be packed whole), and a paclet that declares LibraryLink libraries without shipping any. A
-paclet that declares no symbols gets its public ones declared in the archive's `PacletInfo.wl`
-(never its own), so the resource page's examples link them and copied code runs in a fresh
-kernel; the deployed resource has the paclet's version.
-`SubmitPacletResource` makes the Paclet Repository submission the definition notebook's dialog
-would, headless: the notebook checked, the archive built (from the authoring notebooks, which a 15.1
-build needs) and checked, the scrape read with the notebook open, the version matched.

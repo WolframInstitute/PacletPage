@@ -168,7 +168,7 @@ Whether everything is reachable:
 report["OK"]
 ```
 
-A page whose notebook answers 403 is not public. `SetPacletPagePermissions` sets permissions over the resource's tree, listing each directory's subdirectories rather than probing every object:
+A page whose notebook answers 403 is not public. `SetPacletPagePermissions` sets permissions over the resource's tree, directory by directory:
 
 ```wl
 SetPacletPagePermissions[resource, "Public"]
