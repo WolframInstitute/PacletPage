@@ -26,7 +26,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 - Each conversion has `"TimeConstraint"` seconds. A page that runs past them fails, unless it wrote its whole notebook first.
 - The cache is in `build/cache`, or the directory given as `"CacheDirectory"`, which a build server can keep between runs. After a build of every page, it keeps only what that build used.
 - With `"Prune" -> True`, the notebooks under the target that a whole build did not write, pages whose markdown is gone, are deleted; only after a build of every file with no failure, since a page that did not convert keeps its last notebook.
-- The result has `"Notebooks"`, the notebooks written; `"Definition"`, the definition notebook or `None`; `"Failed"`, the pages that did not convert; `"Converted"`, the pages converted; `"Cached"`, the pages copied from the cache; `"Evaluated"`, the pages whose examples were evaluated afresh; `"Skipped"`, the markdown that is no page; `"Pruned"`, the notebooks deleted; and `"Kernels"`, the number of parallel kernels.
+- The result has `"Notebooks"`, the notebooks written; `"Definition"`, the definition notebook or `None`; `"Failed"`, the pages that did not convert; `"Converted"`, the pages converted; `"Cached"`, the pages copied from the cache; `"Evaluated"`, the pages whose examples were evaluated afresh; `"Skipped"`, the markdown that is no page; `"Pruned"`, the notebooks deleted; `"Kernels"`, the number of parallel kernels; and `"Unevaluated"`, by page, the sections that use names an earlier section defines, which the converter reports since they come out unevaluated. Such a page stays out of the cache, so every build converts and reports it until it is fixed.
 - The following options can be given:
 
 | Option | Default | Description |

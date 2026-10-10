@@ -456,11 +456,15 @@ VerificationTest[
 ]
 
 (* === building: the conversions, with a converter that writes the page's text and the options
-   it was given, fails on "FAIL", hangs before writing on "HANG" and after writing on "LATE" === *)
+   it was given, fails on "FAIL", hangs before writing on "HANG" and after writing on "LATE", and
+   reports a section using a name from an earlier one on "STALE" === *)
+
+MarkdownToNotebook::section = "`1`, under \"`2`\": `3` come out unevaluated.";
 
 fakeConvert[file_String, out_String, opts : OptionsPattern[]] := Module[{text = Import[file, "Text"]},
     If[ StringContainsQ[text, "FAIL"], Return[$Failed, Module]];
     If[ StringContainsQ[text, "HANG"], Pause[20]];
+    If[ StringContainsQ[text, "STALE"], Message[MarkdownToNotebook::section, FileBaseName[file], "Scope", {"x"}]];
     Put[Notebook[{Cell[text, "Text"], Cell[ToString[{opts}, InputForm], "Text"]}], out];
     If[ StringContainsQ[text, "LATE"], Pause[20]];
     out
@@ -556,6 +560,17 @@ VerificationTest[
         "{\"UseCache\" -> False, \"EvaluateSeparator\" -> Automatic}"
     },
     TestID -> "Build: a tutorial runs in one context, whatever a by-template separator names for other pages"
+]
+
+VerificationTest[
+    withFixtureDocs[Function[dir, Module[{built},
+        Export[FileNameJoin[{dir, "docs", "Symbols", "foo-page.md"}], "---\nTemplate: Symbol\nURI: Pub/Fixture/ref/Foo\n---\n\nFoo text. STALE\n", "Text"];
+        built = BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None];
+        {KeyMap[FileNameTake, built["Unevaluated"]], Length[built["Notebooks"]], Length[FileNames["*.nb", FileNameJoin[{dir, "build", "cache", "pages"}]]]}
+    ]]],
+    {<|"foo-page.md" -> {<|"Heading" -> "Scope", "Symbols" -> {"x"}|>}|>, 3, 2},
+    {MarkdownToNotebook::section},
+    TestID -> "Build: a page whose sections use names from earlier ones is reported, and stays out of the cache"
 ]
 
 VerificationTest[
@@ -882,6 +897,25 @@ VerificationTest[
     ],
     True,
     TestID -> "Build: a version bump changes the code the examples run against"
+]
+
+VerificationTest[
+    Module[{calls = 0, catalog, once, waited},
+        catalog = <|"Kind" -> "Deployed", "RootGuide" -> "guide/G",
+            "Pages" -> <|"guide/G" -> <|"Kind" -> "guide", "Notebook" -> "https://example.org/obj/u/G.nb"|>|>|>;
+        Block[{
+            catalogQ = True &,
+            anonymousBody = Function[url, "<html id=\"pp-config\">"],
+            anonymousStatus = Function[url, calls++; <|"Status" -> If[calls <= 1, 404, 200], "Type" -> ""|>]
+        },
+            once = CheckPacletPage[catalog, "https://example.org/obj/u/Site", "Feedback" -> False];
+            calls = 0;
+            waited = CheckPacletPage[catalog, "https://example.org/obj/u/Site", "Feedback" -> False, "Wait" -> 15]
+        ];
+        {once["OK"], Lookup[once["Failed"], "Check"], waited["OK"], waited["Failed"]}
+    ],
+    {False, {"Page guide/G"}, True, {}},
+    TestID -> "Check: a page the cloud has not rendered yet is checked again until it renders"
 ]
 
 VerificationTest[

@@ -145,18 +145,27 @@ buildKernels[n_Integer] := (If[ Length[Kernels[]] < n, LaunchKernels[n - Length[
 
 (* One page converted into its work file, under a time limit: "OK", "Result". A converter that
    wrote its notebook and then hung still counts, when the notebook it wrote is whole. *)
-convertPage[convert_, task_Association, limit_] := Module[{work = task["Work"], result},
+(* a converted page, with the sections the converter reports: a page that resets its context at
+   each heading names, with MarkdownToNotebook::section, what a section uses from an earlier one,
+   since those names come out unevaluated without a message of their own *)
+convertPage[convert_, task_Association, limit_] := Module[{work = task["Work"], run, result},
     If[ FileExistsQ[work], DeleteFile[work]];
-    result = TimeConstrained[convert[task["File"], work, "UseCache" -> task["UseCache"], Sequence @@ task["Options"]], limit, $TimedOut];
+    run = EvaluationData[TimeConstrained[convert[task["File"], work, "UseCache" -> task["UseCache"], Sequence @@ task["Options"]], limit, $TimedOut]];
+    result = run["Result"];
     <|
         "OK" -> Which[
             FailureQ[result], False,
             result === $TimedOut, FileExistsQ[work] && SyntaxQ[ReadString[work]],
             True, FileExistsQ[work]
         ],
-        "Result" -> If[FailureQ[result] || result === $TimedOut, result, Null]
+        "Result" -> If[FailureQ[result] || result === $TimedOut, result, Null],
+        "Unevaluated" -> sectionReports[run["MessagesExpressions"]]
     |>
 ];
+
+sectionReports[messages_List] := Cases[messages,
+    Hold[Message[MessageName[_, "section"], _, heading_String, names_List]] :> <|"Heading" -> heading, "Symbols" -> names|>];
+sectionReports[_] := {};
 
 convertHere[spec_Association, setup_Association][task_Association] := With[{done = convertPage[spec["Function"], task, setup["TimeConstraint"]]},
     If[ setup["Monitor"], Print[If[done["OK"], "converted ", "failed "], task["Page"]]];
@@ -247,7 +256,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     {
         paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, code, useCache, separator,
         all, files, metas, guides, definitionSource, tasks, misses, kernelsBefore, kernels, setup, results, outcomes,
-        ok, failed, pruned, pageFiles, skipped
+        ok, failed, pruned, pageFiles, skipped, unevaluated
     },
     If[ ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] && ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]],
         Message[BuildPacletDocumentation::dir, dir]; Return[$Failed, Module]];
@@ -364,6 +373,13 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
         ],
         ok
     ];
+    (* a page with names left unevaluated stays out of the cache, so the next build converts it
+       again and reports it until it is fixed *)
+    unevaluated = DeleteCases[
+        Association @ Map[#["File"] -> Lookup[Lookup[results, #["Entry"], <||>], "Unevaluated", {}] &, Pick[tasks, outcomes, "Converted"]],
+        {}
+    ];
+    Scan[If[KeyExistsQ[unevaluated, #["File"]] && FileExistsQ[#["Entry"]], DeleteFile[#["Entry"]]] &, Pick[tasks, outcomes, "Converted"]];
     evaluated = Join[evaluated, AssociationMap[code &, Lookup[ok, "Page", {}]]];
     failed = Lookup[Pick[tasks, outcomes, "Failed"], "File", {}];
     DeleteDirectory[workDir, DeleteContents -> True];
@@ -389,7 +405,8 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
         "Evaluated" -> Lookup[Select[Pick[tasks, outcomes, "Converted"], ! #UseCache &], "File", {}],
         "Skipped" -> skipped,
         "Pruned" -> pruned,
-        "Kernels" -> Length[kernels]
+        "Kernels" -> Length[kernels],
+        "Unevaluated" -> unevaluated
     |>
 ];
 
@@ -1266,7 +1283,9 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Catch[Mod
     If[ catalog === $Failed, Throw[$Failed, "publish"]];
     site = DeployPacletPage[catalog, name, "Source" -> dir, "Account" -> OptionValue["Account"], Sequence @@ OptionValue["SiteOptions"]];
     If[ site === $Failed, Throw[$Failed, "publish"]];
-    check = If[ TrueQ[OptionValue["Check"]], CheckPacletPage[catalog, name, "Pages" -> All], None];
+    (* a site just published may have pages the cloud has not rendered yet: what fails is checked
+       again for up to two minutes *)
+    check = If[ TrueQ[OptionValue["Check"]], CheckPacletPage[catalog, name, "Pages" -> All, "Wait" -> 120], None];
     <|
         "Build" -> build, "Resource" -> resource, "Site" -> site, "Check" -> check,
         "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], submissionOptions[OptionValue["ResourceOptions"]]], None]

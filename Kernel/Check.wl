@@ -29,71 +29,81 @@ checkedPages[catalog_Association, n_Integer] := Take[
     UpTo[n]
 ];
 
-Options[CheckPacletPage] = {"Pages" -> 10, "Feedback" -> True};
+(* Each check is a function and its arguments, so that a check that fails can run again: a site
+   checked right after it is published may have pages the cloud has not rendered yet. *)
 
-CheckPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[{site, page, results, ids, directory},
+(* the shell and the host page *)
+shellCheck[url_String, site_String] := With[{body = anonymousBody[url]},
+    check[If[url === site, "Site", "Host page"], url,
+        StringQ[body] && StringContainsQ[body, "id=\"pp-config\""],
+        If[StringQ[body], "public, " <> IntegerString[StringLength[body]] <> " characters", "not readable anonymously"]]
+];
+
+(* a notebook a page shows, through the cloud's static render *)
+pageCheck[id_String, notebook_String] := With[{status = anonymousStatus[staticRenderURL[notebook]]},
+    check["Page " <> id, notebook, status["Status"] === 200,
+        Replace[status["Status"], {200 -> "rendered", 403 -> "not public", 404 -> "not found: publish the site again from a new catalog", other_ :> "HTTP " <> TextString[other]}]]
+];
+
+(* a Paclet Repository page still shows the notebook the catalog names *)
+catalogCheck[url_String, notebook_String] := With[{html = fetchText[url]},
+    check["Catalog current", url, StringQ[html] && repositoryNotebook[html] === notebook,
+        Which[
+            ! StringQ[html], "not readable",
+            repositoryNotebook[html] === notebook, "the catalog matches the published pages",
+            True, "the published notebooks changed: publish the site again from a new catalog"
+        ]]
+];
+
+(* the feedback: the form public, Me answering a stranger with null, the team pages closed *)
+formCheck[directory_String] := With[{form = anonymousStatus[directory <> "/Form"]},
+    check["Feedback form", directory <> "/Form", form["Status"] === 200,
+        If[form["Status"] === 200, "public", "HTTP " <> TextString[form["Status"]]]]
+];
+meCheck[directory_String] := With[{me = anonymousBody[directory <> "/Me"]},
+    check["Feedback Me", directory <> "/Me", StringQ[me] && StringContainsQ[StringDelete[me, Whitespace], "\"email\":null"],
+        If[StringQ[me], "answers " <> StringTrim[me], "not readable anonymously"]]
+];
+closedCheck[directory_String, endpoint_String] := With[{status = anonymousStatus[directory <> "/" <> endpoint]},
+    check["Feedback " <> endpoint, directory <> "/" <> endpoint, status["Status"] =!= 200,
+        If[status["Status"] === 200, "OPEN to anonymous readers", "closed to anonymous readers (HTTP " <> TextString[status["Status"]] <> ")"]]
+];
+
+runCheck[{f_, arguments___}] := f[arguments];
+
+waitSeconds[seconds_?NumericQ] := Max[0, seconds];
+waitSeconds[time_Quantity] := Max[0, QuantityMagnitude[UnitConvert[time, "Seconds"]]];
+waitSeconds[_] := 0;
+
+Options[CheckPacletPage] = {"Pages" -> 10, "Feedback" -> True, "Wait" -> 0};
+
+CheckPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[{site, directory, root, checks, results, deadline},
     Which[
         ! catalogQ[catalog], Message[PacletPageFiles::catalog, catalog]; Return[$Failed, Module],
         ! StringQ[name] || ! (siteNameQ[name] || StringStartsQ[name, "https://"]), Message[DeployPacletPage::name, name]; Return[$Failed, Module],
         ! StringStartsQ[name, "https://"] && ! TrueQ[$CloudConnected], Message[DeployPacletPage::cloud]; Return[$Failed, Module]
     ];
     site = siteURL[name];
-    page = site <> "Page";
-    results = {};
-
-    (* the shell and the host page *)
-    Scan[
-        Function[url,
-            With[{body = anonymousBody[url]},
-                AppendTo[results, check[If[url === site, "Site", "Host page"], url,
-                    StringQ[body] && StringContainsQ[body, "id=\"pp-config\""],
-                    If[StringQ[body], "public, " <> IntegerString[StringLength[body]] <> " characters", "not readable anonymously"]]]
-            ]
+    directory = site <> "Feedback";
+    root = catalog["RootGuide"];
+    checks = Join[
+        {{shellCheck, site, site}, {shellCheck, site <> "Page", site}},
+        {pageCheck, #, catalog["Pages"][#]["Notebook"]} & /@ checkedPages[catalog, OptionValue["Pages"]],
+        If[ catalog["Kind"] === "Repository" && KeyExistsQ[catalog["Pages"], root],
+            {{catalogCheck, catalog["Pages"][root]["HTML"], catalog["Pages"][root]["Notebook"]}},
+            {}
         ],
-        {site, page}
-    ];
-
-    (* the notebooks the pages show, through the cloud's static render *)
-    ids = checkedPages[catalog, OptionValue["Pages"]];
-    Scan[
-        Function[id,
-            With[{status = anonymousStatus[staticRenderURL[catalog["Pages"][id]["Notebook"]]]},
-                AppendTo[results, check["Page " <> id, catalog["Pages"][id]["Notebook"], status["Status"] === 200,
-                    Replace[status["Status"], {200 -> "rendered", 403 -> "not public", 404 -> "not found: publish the site again from a new catalog", other_ :> "HTTP " <> TextString[other]}]]]
-            ]
-        ],
-        ids
-    ];
-
-    (* a Paclet Repository page still shows the notebook the catalog names *)
-    If[ catalog["Kind"] === "Repository" && KeyExistsQ[catalog["Pages"], catalog["RootGuide"]],
-        With[{html = fetchText[catalog["Pages"][catalog["RootGuide"]]["HTML"]]},
-            AppendTo[results, check["Catalog current", catalog["Pages"][catalog["RootGuide"]]["HTML"],
-                StringQ[html] && repositoryNotebook[html] === catalog["Pages"][catalog["RootGuide"]]["Notebook"],
-                If[StringQ[html] && repositoryNotebook[html] =!= catalog["Pages"][catalog["RootGuide"]]["Notebook"],
-                    "the published notebooks changed: publish the site again from a new catalog", "the catalog matches the published pages"]]]
+        If[ TrueQ[OptionValue["Feedback"]],
+            Join[{{formCheck, directory}, {meCheck, directory}}, {closedCheck, directory, #} & /@ {"All", "File", "SetStatus"}],
+            {}
         ]
     ];
-
-    (* the feedback: the form public, Me answering a stranger with null, the team pages closed *)
-    If[ TrueQ[OptionValue["Feedback"]],
-        directory = site <> "Feedback";
-        With[{form = anonymousStatus[directory <> "/Form"], me = anonymousBody[directory <> "/Me"]},
-            AppendTo[results, check["Feedback form", directory <> "/Form", form["Status"] === 200,
-                If[form["Status"] === 200, "public", "HTTP " <> TextString[form["Status"]]]]];
-            AppendTo[results, check["Feedback Me", directory <> "/Me", StringQ[me] && StringContainsQ[StringDelete[me, Whitespace], "\"email\":null"],
-                If[StringQ[me], "answers " <> StringTrim[me], "not readable anonymously"]]]
-        ];
-        Scan[
-            Function[endpoint,
-                With[{status = anonymousStatus[directory <> "/" <> endpoint]},
-                    AppendTo[results, check["Feedback " <> endpoint, directory <> "/" <> endpoint, status["Status"] =!= 200,
-                        If[status["Status"] === 200, "OPEN to anonymous readers", "closed to anonymous readers (HTTP " <> TextString[status["Status"]] <> ")"]]]
-                ]
-            ],
-            {"All", "File", "SetStatus"}
-        ]
+    results = runCheck /@ checks;
+    (* the checks that failed run again, every 10 seconds, until they pass or the wait is over *)
+    deadline = AbsoluteTime[] + waitSeconds[OptionValue["Wait"]];
+    While[ ! AllTrue[results, #["OK"] &] && AbsoluteTime[] < deadline,
+        Pause[Min[10, deadline - AbsoluteTime[]]];
+        results = MapThread[If[#1["OK"], #1, runCheck[#2]] &, {results, checks}]
     ];
-
-    <|"OK" -> AllTrue[results, #["OK"] &], "Site" -> site, "Checks" -> Dataset[results]|>
+    <|"OK" -> AllTrue[results, #["OK"] &], "Site" -> site, "Failed" -> Select[results, ! #["OK"] &], "Checks" -> Dataset[results]|>
 ];

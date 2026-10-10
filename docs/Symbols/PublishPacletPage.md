@@ -32,7 +32,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 |---|---|---|
 | `"Account"` | `Automatic` | the Wolfram ID that must be connected |
 | `"Build"` | `True` | whether to build the documentation first |
-| `"Check"` | `True` | whether to check the site |
+| `"Check"` | `True` | whether to check the site; what fails is checked again for up to two minutes, while the cloud renders the new pages |
 | `"Submit"` | `False` | whether to submit the paclet to the Paclet Repository |
 | `"DryRun"` | `False` | build and scrape, deploy nothing |
 | `"BuildOptions"` | `{}` | options for `BuildPacletDocumentation` |
