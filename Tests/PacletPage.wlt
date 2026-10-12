@@ -625,6 +625,15 @@ VerificationTest[
 ]
 
 VerificationTest[
+    staleDocumentation[
+        {"guide/A.nb", "guide/A.html", "ref/B.nb", "ref/B.html", "ref/Gone.nb", "ref/Gone.html", "images/x.png"},
+        {"guide/A.nb", "ref/B.nb"}
+    ],
+    {"ref/Gone.nb", "ref/Gone.html"},
+    TestID -> "Publish: only the notebooks the new documentation lacks, and their pages, are stale"
+]
+
+VerificationTest[
     {stopsQ[False, False], stopsQ[False, True], stopsQ[True, False], stopsQ[True, True]},
     {True, False, False, False},
     TestID -> "Publish: a failed check stops a real run, and only reports in a dry run"

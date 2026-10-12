@@ -487,12 +487,25 @@ cloudRelativePath[target_CloudObject, object_CloudObject] :=
     FileNameJoin[URLDecode /@ StringSplit[StringDrop[First[object], StringLength[First[target]]], "/"]];
 
 pruneDocumentation[] := If[ ! AssociationQ[$deployedDocumentation], 0,
-    Module[{target = $deployedDocumentation["Target"], keep = $deployedDocumentation["Files"], files, stale},
+    Module[{target = $deployedDocumentation["Target"], files, stale},
         files = Replace[ResourceSystemClient`Private`recursiveCloudObjects[target, "Association"], {listing_Association :> Lookup[listing, "Files", {}], _ -> {}}];
-        stale = Select[files, ! MemberQ[keep, cloudRelativePath[target, #]] &];
+        stale = With[{relatives = cloudRelativePath[target, #] & /@ files},
+            Pick[files, MemberQ[staleDocumentation[relatives, $deployedDocumentation["Files"]], #] & /@ relatives]];
         Scan[DeleteObject, stale];
         Length[stale]
     ]
+];
+
+(* The stale pages among a documentation tree's files: a notebook the new documentation does not
+   have, and the page <name>.html the resource builds around such a notebook. The resource builds
+   the pages of the notebooks it keeps after the documentation is written, and any other file is
+   none of the documentation's. *)
+staleDocumentation[relatives_List, written_List] := Select[relatives,
+    Switch[FileExtension[#],
+        "nb", ! MemberQ[written, #],
+        "html", ! MemberQ[written, StringReplace[#, ".html" ~~ EndOfString -> ".nb"]],
+        _, False
+    ] &
 ];
 
 deployFunctions[] := {
