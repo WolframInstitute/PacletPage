@@ -592,6 +592,38 @@ VerificationTest[
     TestID -> "Cloud: cloud writes go to the parallel kernels only when every one acts as this kernel's account"
 ]
 
+probeWrite::srverr = "Cloud server is not able to complete a request.";
+
+(* the test runner takes every message before a message handler sees it, so the handler is called
+   here as the message machinery calls it; the stop itself runs in stopOnCloudWriteFailure *)
+VerificationTest[
+    Block[{$deployStep = "Copying documentation notebooks"},
+        {
+            With[{failure = Catch[cloudWriteFailure[Hold[Message[probeWrite::srverr], True]], "cloudwrite"]},
+                {FailureQ[failure], failure["Step"], failure["CloudMessage"]}],
+            With[{failure = Catch[cloudWriteFailure[Hold[Message[probeWrite::srverr], False]], "cloudwrite"]}, FailureQ[failure]],
+            cloudWriteFailure[Hold[Message[probeWrite::other], True]]
+        }
+    ],
+    {{True, "Copying documentation notebooks", "probeWrite::srverr"}, True, Null},
+    TestID -> "Publish: a failed cloud write, shown or captured, stops the deploy with a failure naming the step"
+]
+
+VerificationTest[
+    stopOnCloudWriteFailure[PacletResource`Private`setDNCProgress["Deploying HTML"]; "deployed"],
+    "deployed",
+    TestID -> "Publish: a deploy with no failed write gives its result"
+]
+
+VerificationTest[
+    cloudRelativePath[
+        CloudObject["https://www.wolframcloud.com/obj/u/R/Documentation"],
+        CloudObject["https://www.wolframcloud.com/obj/u/R/Documentation/English/Guides/My%20Guide.nb"]
+    ],
+    FileNameJoin[{"English", "Guides", "My Guide.nb"}],
+    TestID -> "Publish: a deployed page is matched to the documentation file it came from"
+]
+
 VerificationTest[
     {stopsQ[False, False], stopsQ[False, True], stopsQ[True, False], stopsQ[True, True]},
     {True, False, False, False},

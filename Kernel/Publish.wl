@@ -422,11 +422,78 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
    - each notebook's render is warmed by a one-second request that a render rarely beats; only the
      main guide and the examples, which the resource page inlines, are warmed, until they render;
    - the resource page, main guide and example notebooks are deleted before a copy that
-     overwrites them anyway; the deletions go, so they stay in place while they are replaced.
-     The documentation directory is copied whole by a copy that cannot overwrite, so it is still
-     deleted first. *)
+     overwrites them anyway; the deletions go, so they stay in place while they are replaced;
+   - the documentation directory is deleted and copied whole by a copy that cannot overwrite and
+     ignores a file it fails to write; it is replaced in place instead, file by file
+     (replaceDocumentation), and a failed write stops the deploy (stopOnCloudWriteFailure). *)
 $deployFixesInstalled = False;
 $appearanceElements = None;
+
+(* The first failed cloud write stops the deploy, as a Failure naming the step it stopped at: the
+   stock deploy carries on past one, and then deploys a resource page built from the failure. *)
+$cloudWriteFailures = "srverr" | "notperm" | "notauth" | "unavailable" | "cloudprecondition";
+$deployStep = None;
+
+SetAttributes[stopOnCloudWriteFailure, HoldFirst];
+stopOnCloudWriteFailure[expr_] := Block[
+    (* the stock deploy names each step as it starts it *)
+    {$deployStep = None, PacletResource`Private`setDNCProgress = Function[step, $deployStep = step]},
+    Catch[Internal`HandlerBlock[{"Message", cloudWriteFailure}, expr], "cloudwrite"]
+];
+
+(* a failed write stops the deploy whether its message shows or is captured, as in a test or a
+   documentation example *)
+cloudWriteFailure[Hold[Message[MessageName[symbol_, tag_String], ___], _]] /; MatchQ[tag, $cloudWriteFailures] :=
+    Throw[cloudWriteFailureObject[messageText[symbol, tag], SymbolName[Unevaluated[symbol]] <> "::" <> tag], "cloudwrite"];
+cloudWriteFailure[_] := Null;
+
+cloudWriteFailureObject[what_String, name_String] := Failure["CloudWrite", <|
+    "MessageTemplate" -> "The deploy stopped at \"`1`\": `2`",
+    "MessageParameters" -> {Replace[$deployStep, None -> "its start"], what},
+    "Step" -> $deployStep,
+    "CloudMessage" -> name
+|>];
+
+messageText[symbol_, tag_String] := With[{text = MessageName[symbol, tag]},
+    If[StringQ[text], text, Replace[MessageName[General, tag], Except[_String] -> tag]]
+];
+
+(* The documentation, replaced in place, file by file, rather than deleted and copied whole: a
+   deploy that stops leaves every page served. A file not written stops the deploy; the pages the
+   new documentation no longer has are deleted once the deploy is complete (pruneDocumentation). *)
+$deployedDocumentation = None;
+
+replaceDocumentation[dir_String, target_CloudObject, permissions_] := Module[{files, written},
+    files = Select[FileNames["*", dir, Infinity], FileType[#] === File &];
+    written = Map[
+        Function[file, With[{to = documentationObject[target, relativePath[dir, file], permissions]},
+            Replace[CopyFile[file, to, OverwriteTarget -> True],
+                Except[_CloudObject] :> Throw[cloudWriteFailureObject[First[to] <> " was not written.", "CopyFile"], "cloudwrite"]]
+        ]],
+        files
+    ];
+    PacletResource`Private`setCODirectoryPermissions[target, permissions];
+    $deployedDocumentation = <|"Target" -> target, "Files" -> (relativePath[dir, #] & /@ files)|>;
+    written
+];
+
+documentationObject[target_CloudObject, relative_String, permissions_] := PacletResource`Private`addEmbeddedOptions @ If[ permissions === Automatic,
+    FileNameJoin[Prepend[FileNameSplit[relative], target]],
+    CloudObject[First[FileNameJoin[Prepend[FileNameSplit[relative], target]]], Permissions -> permissions]
+];
+
+(* the path of a cloud object within a cloud directory *)
+cloudRelativePath[target_CloudObject, object_CloudObject] :=
+    FileNameJoin[URLDecode /@ StringSplit[StringDrop[First[object], StringLength[First[target]]], "/"]];
+
+pruneDocumentation[] := If[ ! AssociationQ[$deployedDocumentation], 0,
+    Module[{target = $deployedDocumentation["Target"], keep = $deployedDocumentation["Files"], files, stale},
+        files = Replace[ResourceSystemClient`Private`recursiveCloudObjects[target, "Association"], {listing_Association :> Lookup[listing, "Files", {}], _ -> {}}];
+        stale = Select[files, ! MemberQ[keep, cloudRelativePath[target, #]] &];
+        Scan[DeleteObject, stale];
+        Length[stale]
+    ]
+];
 
 deployFunctions[] := {
     PacletResource`Private`cloudExportPacletResourceContent,
@@ -468,6 +535,13 @@ installDeployFixes[] := If[ ! TrueQ[$deployFixesInstalled], Module[{probe = Clou
         )
     ];
     patchDeployFunctions[HoldPattern[Quiet[DeleteObject[_], ___]] :> Null, ! FreeQ[#, CopyDirectory] &];
+    Unprotect[PacletResource`Private`cloudDeployPacletWebFile];
+    DownValues[PacletResource`Private`cloudDeployPacletWebFile] = DeleteCases[
+        DownValues[PacletResource`Private`cloudDeployPacletWebFile],
+        rule_ /; MemberQ[rule[[1]], "DocumentationNotebooks", Infinity]
+    ];
+    PacletResource`Private`cloudDeployPacletWebFile[_, root_CloudObject, "DocumentationNotebooks", dir_?DirectoryQ, opts : OptionsPattern[CloudObject]] :=
+        replaceDocumentation[dir, FileNameJoin[{root, "Documentation"}], OptionValue[CloudObject, {opts}, Permissions]];
     $deployFixesInstalled = True
 ]];
 
@@ -1021,6 +1095,7 @@ Options[DeployPacletResource] = {
     Permissions -> "Public"
 };
 
+DeployPacletResource::write = "`1` Nothing was deleted, so the resource keeps its pages; deploy again.";
 DeployPacletResource::nodef = "`1` has no ResourceDefinition.nb or no documentation: build it first with BuildPacletDocumentation.";
 DeployPacletResource::build = "PacletBuild failed: `1`.";
 DeployPacletResource::pages = "The built archive holds `1` of the `2` documentation pages; nothing was deployed. Missing: `3`.";
@@ -1039,10 +1114,11 @@ DeployPacletResource::unknowncommit = "`1` is already published from commit `2`,
 DeployPacletResource::nocommit = "`1` is already published and records no commit; nothing was deployed. Use \"Republish\" -> True to replace it.";
 
 DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
-    {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK},
+    {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed},
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];
     If[ ! readyToPublishQ[DeployPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "deploy"]];
     offline = offlineDryRunQ[OptionValue["DryRun"]];
+    $deployedDocumentation = None;
     accountOK = offline || publishingAccountQ[DeployPacletResource, OptionValue["Account"]];
     If[ stopsQ[accountOK, OptionValue["DryRun"]], Throw[$Failed, "deploy"]];
     PacletDirectoryLoad[dir];
@@ -1116,16 +1192,19 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
                 TrueQ[OptionValue["DryRun"]],
                     {versioned, where, None},
                 True,
-                    {versioned, where, Block[{$heroImage = hero}, CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]}
+                    With[{deploy = Block[{$heroImage = hero}, stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]]},
+                        If[ FailureQ[deploy], Message[DeployPacletResource::write, deploy["Message"]]; deploy, {versioned, where, deploy}]
+                    ]
             ];
             (* the deploy reads the notebook's data, so the notebook closes after it *)
             NotebookClose[notebook];
             done
         ]],
-        $Failed :> Throw[$Failed, "deploy"]
+        {$Failed :> Throw[$Failed, "deploy"], failure_Failure :> Throw[failure, "deploy"]}
     ];
     If[ deployed =!= None && ! MatchQ[deployed, _CloudObject], Message[DeployPacletResource::deploy, deployed]; Throw[$Failed, "deploy"]];
     If[ deployed =!= None, recordRelease[location, paclet["Version"], commit]; URLRead[First[location] <> "/", TimeConstraint -> 60]];
+    removed = If[deployed =!= None, pruneDocumentation[], 0];
     archive = Replace[OptionValue["Archive"], {
         None -> None,
         dirName_String /; TrueQ[OptionValue["DryRun"]] :> None,
@@ -1147,7 +1226,8 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         "Version" -> paclet["Version"],
         "Commit" -> commit,
         "Load" -> built["Load"],
-        "AppearanceElements" -> $appearanceElements
+        "AppearanceElements" -> $appearanceElements,
+        "Removed" -> removed
     |>
 ], "deploy"];
 
@@ -1286,7 +1366,7 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Catch[Mod
     build = If[ TrueQ[OptionValue["Build"]], BuildPacletDocumentation[dir, Sequence @@ OptionValue["BuildOptions"]], None];
     If[ build === $Failed, Throw[$Failed, "publish"]];
     resource = DeployPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> OptionValue["DryRun"], Sequence @@ OptionValue["ResourceOptions"]];
-    If[ resource === $Failed, Throw[$Failed, "publish"]];
+    If[ resource === $Failed || FailureQ[resource], Throw[resource, "publish"]];
     If[ TrueQ[OptionValue["DryRun"]],
         Throw[<|"Build" -> build, "Resource" -> resource, "Site" -> None, "Check" -> None,
             "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[OptionValue["ResourceOptions"]]], None]|>, "publish"]];
