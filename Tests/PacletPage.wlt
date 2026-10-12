@@ -985,6 +985,24 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{catalog, report},
+        catalog = <|"Kind" -> "Cloud", "RootGuide" -> "guide/G",
+            "Pages" -> <|"guide/G" -> <|"Kind" -> "guide", "Notebook" -> "https://example.org/obj/u/R/Documentation/guide/G.nb",
+                "HTML" -> "https://example.org/obj/u/R/Documentation/guide/G.html"|>|>|>;
+        Block[{
+            catalogQ = True &,
+            anonymousBody = Function[url, "<html id=\"pp-config\">"],
+            anonymousStatus = Function[url, <|"Status" -> If[StringEndsQ[url, ".html"], 404, 200], "Type" -> ""|>]
+        },
+            report = CheckPacletPage[catalog, "https://example.org/obj/u/Site", "Feedback" -> False]
+        ];
+        {report["OK"], Lookup[report["Failed"], "Check"]}
+    ],
+    {False, {"Page HTML guide/G"}},
+    TestID -> "Check: a page whose notebook renders but whose own page is gone fails the check"
+]
+
+VerificationTest[
     {newerVersionQ["1.0.10", "1.0.9"], newerVersionQ["1.0.9", "1.0.9"], newerVersionQ["1.1", "1.0.9"], newerVersionQ["0.9.9", "1.0"], newerVersionQ["1.0.0.1", "1.0"]},
     {True, False, True, False, True},
     TestID -> "Publish: versions compare by their numbers"

@@ -45,6 +45,12 @@ pageCheck[id_String, notebook_String] := With[{status = anonymousStatus[staticRe
         Replace[status["Status"], {200 -> "rendered", 403 -> "not public", 404 -> "not found: publish the site again from a new catalog", other_ :> "HTTP " <> TextString[other]}]]
 ];
 
+(* the page a reader opens from the resource page or the repository *)
+htmlCheck[id_String, url_String] := With[{status = anonymousStatus[url]},
+    check["Page HTML " <> id, url, status["Status"] === 200,
+        Replace[status["Status"], {200 -> "served", 403 -> "not public", 404 -> "not found: deploy the resource again", other_ :> "HTTP " <> TextString[other]}]]
+];
+
 (* a Paclet Repository page still shows the notebook the catalog names *)
 catalogCheck[url_String, notebook_String] := With[{html = fetchText[url]},
     check["Catalog current", url, StringQ[html] && repositoryNotebook[html] === notebook,
@@ -89,6 +95,7 @@ CheckPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[{site, direc
     checks = Join[
         {{shellCheck, site, site}, {shellCheck, site <> "Page", site}},
         {pageCheck, #, catalog["Pages"][#]["Notebook"]} & /@ checkedPages[catalog, OptionValue["Pages"]],
+        Cases[checkedPages[catalog, OptionValue["Pages"]], id_ /; StringQ[catalog["Pages"][id]["HTML"]] :> {htmlCheck, id, catalog["Pages"][id]["HTML"]}],
         If[ catalog["Kind"] === "Repository" && KeyExistsQ[catalog["Pages"], root],
             {{catalogCheck, catalog["Pages"][root]["HTML"], catalog["Pages"][root]["Notebook"]}},
             {}
