@@ -1138,6 +1138,46 @@ VerificationTest[
 ]
 
 VerificationTest[
+    {
+        processLayers[<|10 -> {1, "kernel", "S"}, 11 -> {10, "fe", "S"}, 12 -> {11, "helper", "S"}, 13 -> {10, "<defunct>", "Z"}, 20 -> {1, "other", "S"}|>, {10}],
+        livingProcesses[<|11 -> {10, "fe", "S"}, 13 -> {10, "<defunct>", "Z+"}|>, {11, 13, 99}]
+    },
+    {{{11, 13}, {12}}, {11}},
+    TestID -> "Build: the processes a process started come a generation at a time, and one exited is no longer living"
+]
+
+VerificationTest[
+    Module[{script = FileNameJoin[{$TemporaryDirectory, CreateUUID["end-"] <> ".wl"}], out = FileNameJoin[{$TemporaryDirectory, CreateUUID["end-"] <> ".wl"}], result},
+        Export[script, StringJoin[
+            "Get[", wlString[FileNameJoin[{$packageDirectory, "Processes.wl"}]], "];\n",
+            "LaunchKernels[1];\n",
+            "ParallelEvaluate[UsingFrontEnd[ToBoxes[Graphics[Disk[]]]]];\n",
+            "UsingFrontEnd[ToBoxes[Graphics[Circle[]]]];\n",
+            "before = descendantProcesses[processTable[], {$ProcessID}];\n",
+            $endScriptCode,
+            "Put[{Length[before], descendantProcesses[processTable[], {$ProcessID}]}, ", wlString[out], "];\n"
+        ], "Text"];
+        TimeConstrained[RunProcess[{kernelExecutable[], "-noprompt", "-script", script}], 240];
+        result = If[FileExistsQ[out], Get[out], None];
+        Scan[If[FileExistsQ[#], DeleteFile[#]] &, {script, out}];
+        Replace[result, {{n_Integer, left_List} :> {n >= 3, left}, other_ :> other}]
+    ],
+    {True, {}},
+    TestID -> "Build: a script ends its front ends and kernels before it exits, and none of them is left"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], work = CreateDirectory[], runs},
+        runs = pageShareRuns[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", Table["p" <> IntegerString[i] <> ".nb", {i, 100}], 4, 900, {}, work, "share"];
+        DeleteDirectory[dir, DeleteContents -> True];
+        DeleteDirectory[work, DeleteContents -> True];
+        {Length /@ Lookup[runs, "Pages"], Lookup[First[runs], {"Deadline", "Stall"}], First[First[runs]["Progress"]]}
+    ],
+    {{13, 13, 13, 13, 13, 13, 13, 9}, {900 * 13 + 600, 1500}, FileNameJoin[{"/b/Documentation", "p1.nb"}]},
+    TestID -> "Archive: the changed pages come in two shares a process, each with its time and the pages it builds to watch"
+]
+
+VerificationTest[
     Module[{lines = {}},
         Block[{Kernels = Function[{}, {"k1", "k2"}], kernelAccounts = Function[{}, {"b@x.example", "b@x.example"}], cloudAccount = Function[{}, "a@x.example"],
                 ParallelMap = Function[Null, "parallel"], $accountsNoted = {}, $deployMonitor = True, Print = Function[Null, AppendTo[lines, StringJoin[ToString /@ {##}]]]},

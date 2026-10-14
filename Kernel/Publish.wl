@@ -1385,12 +1385,13 @@ runEnded[run_Association, how_String] := If[StringQ[Lookup[run, "Label", None]],
 stalledQ[run_Association] := NumericQ[Lookup[run, "Stall", None]] && AbsoluteTime[] - Max[run["Start"],
     Map[If[FileExistsQ[#], AbsoluteTime[FileDate[#]], 0] &, Select[Flatten[{Lookup[run, "Record", {}], Lookup[run, "Progress", {}]}], StringQ]]] > run["Stall"];
 
-(* a process killed with the processes it started; a process object gives its "PID" itself, where
+(* a process killed with the processes it started: the process first, so that it starts no more,
+   then what it started, the youngest first; a process object gives its "PID" itself, where
    ProcessInformation does not *)
 killProcessTree[process_ProcessObject] := With[{pid = process["PID"]},
-    With[{descendants = If[IntegerQ[pid], descendantProcesses[processTable[], {pid}], {}]},
+    With[{table = If[IntegerQ[pid], processTable[], <||>]},
         KillProcess[process];
-        If[descendants =!= {}, RunProcess[Join[{"kill", "-KILL"}, IntegerString /@ descendants]]]
+        If[IntegerQ[pid], endProcesses[table, First[processLayers[table, {pid}], {}]]]
     ]
 ];
 
@@ -1425,11 +1426,12 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
     Count[Lookup[record, changed, None], KeyValuePattern["Result" -> Except[_?FailureQ]]]
 ];
 
-(* the shares of pages and their processes' scripts, small enough to keep every process busy to the
-   end; a share that has built none of its pages for a page's time and ten minutes, the time the
-   stock build takes to read the whole documentation tree first, has stalled *)
+(* the shares of pages and their processes' scripts, two a process: each share reads the whole
+   documentation tree once, and two keep every process busy to the end; a share that has built
+   none of its pages for a page's time and ten minutes, the time the stock build takes to read the
+   tree first, has stalled *)
 pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_Integer, limit_, dependencies_List, work_String, kind_String] := With[
-    {shares = Partition[pages, UpTo[Max[1, Min[25, Ceiling[Length[pages] / (4 n)]]]]]},
+    {shares = Partition[pages, UpTo[Max[1, Ceiling[Length[pages] / (2 n)]]]]},
     MapIndexed[
         Function[{share, index}, With[{base = FileNameJoin[{work, kind <> "-" <> IntegerString[First[index]]}]},
             Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies], "Text"];
@@ -1649,68 +1651,27 @@ loadResourceTools[] := (
 
 (* The start of a script that builds documentation pages: one parallel kernel, which the stock
    build's notebook export finds; with none it launches as many as the processors, in every process.
-   And the end of such a script: the front ends it started, in it or in its kernel, ended at once
-   with KILL, since a front end that quits, or loses its kernel, can crash on its way out; then its
-   kernels closed. *)
+   And the end of every script run as a separate kernel process: Processes.wl read into it, then its
+   endScript[], which ends what the script started and closes its kernels. *)
 $pageKernelCode = "LaunchKernels[1];\n";
 
-$endScriptCode = StringJoin[
-    "Module[{table, found = {}, frontier = {$ProcessID}},\n",
-    "    table = Association[Cases[StringSplit[StringTrim /@ StringSplit[Replace[RunProcess[{\"ps\", \"-e\", \"-o\", \"pid=,ppid=,comm=\"}], {run_Association :> run[\"StandardOutput\"], _ -> \"\"}], \"\\n\"], Whitespace, 3],\n",
-    "        {pid_String, parent_String, command_String} /; StringMatchQ[pid <> parent, DigitCharacter ..] :> (FromDigits[pid] -> {FromDigits[parent], command})]];\n",
-    "    While[frontier =!= {}, frontier = Complement[Select[Keys[table], MemberQ[frontier, First[table[#]]] &], found]; found = Join[found, frontier]];\n",
-    "    found = Select[found, StringMatchQ[FileNameTake[Last[table[#]]], \"WolframNB\" | \"MathematicaServer\" | \"Mathematica\" | \"WolframFrontEnd\"] &];\n",
-    "    If[found =!= {}, RunProcess[Join[{\"kill\", \"-KILL\"}, ToString /@ found]]]\n",
-    "];\n",
-    "CloseKernels[];\n"
-];
+$endScriptCode = StringJoin["Get[", wlString[FileNameJoin[{$packageDirectory, "Processes.wl"}]], "];\nendScript[];\n"];
 
-(* Parallel kernels closed, each with the front ends it started ended first, at once, with KILL: a
-   front end that quits, or loses its kernel, can crash on its way out, and KILL is no signal it
-   handles *)
+(* Parallel kernels closed: each ended first with KILL, with the processes it started, its front
+   ends before it, since a front end that quits, or loses its kernel, can crash on its way out, and
+   a kernel this kernel kills it reaps, where one left to exit by itself after CloseKernels it may
+   not *)
 closeKernels[{}] := {};
-closeKernels[kernels_List] := With[{frontEnds = kernelFrontEnds[kernels]},
-    If[frontEnds =!= {}, RunProcess[Join[{"kill", "-KILL"}, IntegerString /@ frontEnds]]];
+closeKernels[kernels_List] := With[{pids = kernelProcessIDs[kernels]},
+    With[{table = processTable[]}, endProcesses[table, frontEndProcesses[table, pids]]];
+    endProcesses[processTable[], pids];
     CloseKernels[kernels]
 ];
 
+kernelProcessIDs[kernels_List] := Select[Flatten[{TimeConstrained[ParallelEvaluate[$ProcessID, kernels, DistributedContexts -> None], 30, {}]}], IntegerQ];
+
 (* the front end processes the kernels started, among the processes descended from them *)
-kernelFrontEnds[kernels_List] := With[
-    {table = processTable[], pids = Select[Flatten[{TimeConstrained[ParallelEvaluate[$ProcessID, kernels, DistributedContexts -> None], 30, {}]}], IntegerQ]},
-    Select[descendantProcesses[table, pids], frontEndProcessQ[Last[table[#]]] &]
-];
-
-frontEndProcessQ[command_String] := StringMatchQ[FileNameTake[command], "WolframNB" | "MathematicaServer" | "Mathematica" | "WolframFrontEnd"];
-
-(* the processes, by id: the id of each one's parent and its command; none where there is no ps *)
-processTable[] := If[ $OperatingSystem === "Windows", <||>,
-    With[{run = RunProcess[{"ps", "-e", "-o", "pid=,ppid=,comm="}]},
-        If[ ! AssociationQ[run] || run["ExitCode"] =!= 0, <||>,
-            Association @ Map[
-                Function[line, With[{fields = StringSplit[StringTrim[line], Whitespace, 3]},
-                    If[Length[fields] === 3 && StringMatchQ[fields[[1]] <> fields[[2]], DigitCharacter ..],
-                        FromDigits[fields[[1]]] -> {FromDigits[fields[[2]]], fields[[3]]}, Nothing]]],
-                StringSplit[run["StandardOutput"], "\n"]
-            ]
-        ]
-    ]
-];
-
-descendantProcesses[table_Association, roots_List] := Module[{found = {}, frontier = roots},
-    While[ frontier =!= {},
-        frontier = Complement[Select[Keys[table], MemberQ[frontier, First[table[#]]] &], found];
-        found = Join[found, frontier]
-    ];
-    found
-];
-
-livingProcesses[pids_List] := Intersection[pids, Keys[processTable[]]];
-
-(* whether the processes have all exited within the seconds given *)
-waitForExit[pids_List, seconds_] := Module[{deadline = AbsoluteTime[] + seconds},
-    While[ livingProcesses[pids] =!= {} && AbsoluteTime[] < deadline, Pause[0.1]];
-    livingProcesses[pids] === {}
-];
+kernelFrontEnds[kernels_List] := frontEndProcesses[processTable[], kernelProcessIDs[kernels]];
 
 (* The parallel kernels of a deploy, launched for it and closed after it: those "Parallel" asks for,
    as buildKernels counts them; f gets the kernels *)

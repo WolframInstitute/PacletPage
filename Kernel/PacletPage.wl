@@ -81,7 +81,7 @@ $packageDirectory = DirectoryName[$InputFileName];
 
 $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web"}];
 
-Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl"}];
+Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl"}];
 
 End[]
 
