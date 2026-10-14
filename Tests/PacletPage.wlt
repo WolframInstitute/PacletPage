@@ -628,7 +628,7 @@ VerificationTest[
 VerificationTest[
     Module[{dir = CreateDirectory[], write, keys},
         write[name_, uuid_, built_, text_] := Export[FileNameJoin[{dir, name}],
-            "(* Content-type: application/vnd.wolfram.mathematica *)\n(*CacheID: " <> ToString[RandomInteger[10^6]] <> "*)\nNotebook[{Cell[\"" <> text <> "\", \"Text\", ExpressionUUID -> \"" <> uuid <> "\"]}, TaggingRules -> {\"Metadata\" -> {\"built\" -> \"" <> built <> "\", \"title\" -> \"T\"}}]\n", "Text"];
+            "(* Content-type: application/vnd.wolfram.mathematica *)\n(*CacheID: " <> ToString[RandomInteger[10^6]] <> "*)\nNotebook[{Cell[\"" <> text <> "\", \"Text\", CellID -> " <> ToString[RandomInteger[10^9]] <> ", ExpressionUUID -> \"" <> uuid <> "\"]}, TaggingRules -> {\"Metadata\" -> {\"built\" -> \"" <> built <> "\", \"title\" -> \"T\"}}]\n", "Text"];
         write["a.nb", "6018d88b-58bd-4b3a-9a41-e01b06eb14aa", "{2026, 5, 27, 1, 26, 16.08}", "Some text"];
         write["b.nb", "16f8fa60-c06d-4452-990a-eee8e93b8841", "{2026, 10, 14, 9, 1, 2.5}", "Some text"];
         write["c.nb", "16f8fa60-c06d-4452-990a-eee8e93b8841", "{2026, 10, 14, 9, 1, 2.5}", "Other text"];
@@ -662,10 +662,10 @@ VerificationTest[
         CreateDirectory[FileNameJoin[{dir, "ref"}]];
         Export[FileNameJoin[{dir, "ref", #}], "Notebook[{Cell[\"" <> # <> "\", \"Text\"]}]", "Text"] & /@ {"A.nb", "B.nb", "C.nb"};
         run[existing_, failing_] := Block[{
-                $pages = newPages[], $deployedDocumentation = None, $uploadAll = False,
+                $pages = newPages[], $deployedDocumentation = None, $rewrite = {},
                 cloudFiles = Function[target, existing],
-                readRecord = Function[{r, kind}, Lookup[records, kind, <||>]],
-                writeRecord = Function[{r, kind, record}, records[kind] = record],
+                readDeployRecord = Function[{r, kind}, Lookup[records, kind, <||>]],
+                writeDeployRecord = Function[{r, kind, record}, records[kind] = record],
                 CopyFile = Function[{from, to, opt}, If[StringEndsQ[from, failing], $Failed, AppendTo[copied, FileNameTake[from]]; to]],
                 SetPermissions = Function[{object, p}, AppendTo[permissions, First[object]]; object],
                 PacletResource`Private`addEmbeddedOptions = Identity
@@ -724,7 +724,7 @@ VerificationTest[
 
 VerificationTest[
     Module[{writes = {}},
-        Block[{writeRecord = Function[{r, kind, record}, AppendTo[writes, record]]},
+        Block[{writeDeployRecord = Function[{r, kind, record}, AppendTo[writes, record]]},
             Block[{$pages = Join[newPages[], <|"Root" -> CloudObject["https://c.example/obj/u/R"], "Signatures" -> <|"a" -> 1, "gone" -> 2|>, "Recorded" -> <|"a" -> 1, "gone" -> 2|>, "Seen" -> {"a"}|>]},
                 savePages[False]; savePages[True]
             ];
@@ -751,6 +751,127 @@ VerificationTest[
     ],
     {2, {"https://c.example/obj/u/R/Documentation/ref/Gone.nb", "https://c.example/obj/u/R/Documentation/ref/Gone.html"}},
     TestID -> "Publish: the notebooks the new documentation lacks, and their pages, are deleted once the deploy is complete"
+]
+
+VerificationTest[
+    {rewriteKinds[Automatic], rewriteKinds[All], rewriteKinds["Pages"], rewriteKinds[{"Documentation"}]},
+    {{}, {"Documentation", "Pages"}, {"Pages"}, {"Documentation"}},
+    TestID -> "Publish: \"Upload\" names what a deploy writes and makes again whatever its record says"
+]
+
+VerificationTest[
+    Module[{f, flag},
+        f[x_] := "stock";
+        installRules[f, {HoldPattern[f[x_] /; TrueQ[flag]] :> "patched"}];
+        {Block[{flag = True}, f[1]], f[1], installRules[f, {}]}
+    ],
+    {"patched", "stock", False},
+    TestID -> "Publish: rules placed before a function's own apply first, and only where their condition holds"
+]
+
+(* the page transform, with the stock transform stubbed *)
+VerificationTest[
+    Module[{dir = CreateDirectory[], write, keys, valid, options},
+        write[name_, uuid_, link_] := Export[FileNameJoin[{dir, name}],
+            "Notebook[{Cell[BoxData[TemplateBox[{\"F\", \"" <> link <> "\"}, \"RefLink\"]], \"Text\", ExpressionUUID -> \"" <> uuid <> "\"]}]", "Text"];
+        write["a.nb", "6018d88b-58bd-4b3a-9a41-e01b06eb14aa", "paclet:Pub/Sym/ref/F"];
+        write["b.nb", "16f8fa60-c06d-4452-990a-eee8e93b8841", "paclet:Pub/Sym/ref/F"];
+        write["c.nb", "16f8fa60-c06d-4452-990a-eee8e93b8841", "paclet:Other/ref/F"];
+        options = {OverwriteTarget -> True, "PacletName" -> "Pub/Sym"};
+        Block[{$transform = <|"Context" -> {}|>},
+            keys = {
+                transformKey[FileNameJoin[{dir, "a.nb"}], Automatic, options, <||>],
+                transformKey[FileNameJoin[{dir, "b.nb"}], Automatic, options, <||>],
+                transformKey[FileNameJoin[{dir, "b.nb"}], Automatic, options, <|"paclet:Pub/Sym/ref/F" -> True|>],
+                transformKey[FileNameJoin[{dir, "c.nb"}], Automatic, options, <||>],
+                transformKey[FileNameJoin[{dir, "c.nb"}], Automatic, options, <|"paclet:Other/ref/F" -> True|>]
+            }
+        ];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {keys[[1]] === keys[[2]], keys[[2]] === keys[[3]], keys[[4]] === keys[[5]]}
+    ],
+    {True, False, True},
+    TestID -> "Transform: a page's key ignores its cells' ids, and follows whether a page is there for each of its links into the paclet"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], cache, transformed = {}, run, result},
+        cache = FileNameJoin[{dir, "cache"}];
+        CreateDirectory[FileNameJoin[{dir, "docs"}]];
+        Export[FileNameJoin[{dir, "docs", #}], "Notebook[{Cell[\"" <> # <> "\", \"Text\"]}]", "Text"] & /@ {"A.nb", "B.nb"};
+        run[] := Block[{
+                $transform = newTransform[cache, {}, {}, {}, {}],
+                $pageTransform = Function[{file, type, options}, AppendTo[transformed, FileNameTake[file]]; Export[file, "Notebook[{Cell[\"made\", \"Text\"]}]", "Text"]]
+            },
+            transformed = {};
+            {Map[FileNameTake, transformPages[FileNameJoin[{dir, "docs"}], Automatic, {OverwriteTarget -> True, "PackageURIs" -> {}}]], transformed, $transform["Cached"], $transform["Used"]}
+        ];
+        result = {run[], (Export[FileNameJoin[{dir, "docs", #}], "Notebook[{Cell[\"" <> # <> "\", \"Text\"]}]", "Text"] & /@ {"A.nb", "B.nb"}; run[])};
+        result = {result[[1, 1]], result[[1, 2]], result[[2, 2]], result[[2, 3]], Import[FileNameJoin[{dir, "docs", "A.nb"}], "Text"], Length[FileNames["*.nb", cache]]};
+        DeleteDirectory[dir, DeleteContents -> True];
+        result
+    ],
+    {{"A.nb", "B.nb"}, {"A.nb", "B.nb"}, {}, 2, "Notebook[{Cell[\"made\", \"Text\"]}]", 2},
+    TestID -> "Transform: a page transformed before is taken from build/transform, the same as the transform made it"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], first, again, edited},
+        CreateDirectory[FileNameJoin[{dir, "Kernel"}]];
+        Export[FileNameJoin[{dir, "Kernel", "Code.wl"}], "f[x_] := x", "Text"];
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/Sym\", \"Version\" -> \"1.0.0\"|>]", "Text"];
+        first = sourceHash[dir, Automatic, <||>];
+        CreateDirectory[FileNameJoin[{dir, "build"}]];
+        Export[FileNameJoin[{dir, "build", "anything.wl"}], "1", "Text"];
+        Export[FileNameJoin[{dir, ".hidden"}], "1", "Text"];
+        again = sourceHash[dir, Automatic, <||>];
+        Export[FileNameJoin[{dir, "Kernel", "Code.wl"}], "f[x_] := 2 x", "Text"];
+        edited = sourceHash[dir, Automatic, <||>];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {first === again, first === edited}
+    ],
+    {True, False},
+    TestID -> "Archive: the sources' hash leaves out build/ and hidden files, and follows every other file"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], archive, result},
+        CreateDirectory[FileNameJoin[{dir, "build"}]];
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/Sym\", \"Version\" -> \"1.0.0\"|>]", "Text"];
+        archive = FileNameJoin[{dir, "build", "Pub__Sym-1.0.0.paclet"}];
+        Export[archive, "not really an archive", "Text"];
+        Put[<|"Archive" -> FileNameTake[archive], "ArchiveHash" -> FileHash[archive, "SHA256", "HexString"], "Source" -> sourceHash[dir, Automatic, <||>], "Result" -> <|"Pages" -> 3|>|>,
+            FileNameJoin[{dir, "build", "archive.wl"}]];
+        result = {builtArchive[DeployPacletResource, dir, "Pub/Sym", Automatic, <||>]};
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/Sym\", \"Version\" -> \"1.0.1\"|>]", "Text"];
+        AppendTo[result, builtArchive[DeployPacletResource, dir, "Pub/Sym", Automatic, <||>]];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {result[[1]]["Pages"], FileNameTake[result[[1]]["Archive"]], result[[2]]}
+    ],
+    {3, "Pub__Sym-1.0.0.paclet", $Failed},
+    {DeployPacletResource::nobuild},
+    TestID -> "Archive: a deploy takes the archive an earlier build made, only from the same sources"
+]
+
+VerificationTest[
+    Module[{section = guideTreeSection[
+            {<|"URL" -> "https://c.example/D/guide/Main.html", "Title" -> "Main"|>, <|"URL" -> "https://c.example/D/guide/A.html", "Title" -> "Area A"|>,
+             <|"URL" -> "https://c.example/D/guide/B.html", "Title" -> "Area B"|>, <|"URL" -> "https://c.example/D/guide/Lone.html", "Title" -> "Lone"|>},
+            <|"Main" -> {"A"}, "A" -> {"B", "Main"}, "B" -> {"A"}, "Lone" -> {}|>, "Main"]},
+        {
+            section["Label"],
+            Cases[section["Links"], XMLElement["summary", {}, {XMLElement["a", _, {title_}]}] :> title, Infinity],
+            Cases[section["Links"], XMLElement["a", {"href" -> href_}, _] :> FileBaseName[href], Infinity]
+        }
+    ],
+    {"Guides", {"Area A"}, {"A", "B", "Lone"}},
+    TestID -> "Publish: the pages' sidebar lists the guides as a tree under the root guide, cycles cut, the guides it misses after"
+]
+
+VerificationTest[
+    {guideTreeRules[<|"Main" -> {}|>, "Main"], Length[guideTreeRules[<|"Main" -> {"A"}, "A" -> {}|>, "Main"]]},
+    {{}, 1},
+    TestID -> "Publish: a paclet with one guide keeps the stock list of guides"
 ]
 
 VerificationTest[

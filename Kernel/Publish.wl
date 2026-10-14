@@ -465,27 +465,37 @@ messageText[symbol_, tag_String] := With[{text = MessageName[symbol, tag]},
 (* The documentation, replaced in place, file by file, rather than deleted and copied whole: a
    deploy that stops leaves every page served. A file is written only when the cloud lacks it or
    its content changed since the resource's record of what it holds was written; with
-   "Upload" -> All, every file is. A file not written stops the deploy, and the record keeps only
+   "Upload" -> All or "Documentation", every file is. A file not written stops the deploy, and the record keeps only
    what was written; the pages the new documentation no longer has are deleted once the deploy is
    complete (pruneDocumentation). *)
 $deployedDocumentation = None;
-$uploadAll = False;
+
+(* what every build or deploy of a page makes afresh, which says nothing of its content *)
+$buildNoise = {((ExpressionUUID | CellID) -> _) -> Sequence[], ("built" -> _) -> Sequence[]};
+
+(* what a deploy writes and makes again whatever the record says: "Documentation", "Pages" *)
+$rewrite = {};
+rewriteQ[kind_String] := MemberQ[$rewrite, kind];
+rewriteKinds[All] := {"Documentation", "Pages"};
+rewriteKinds[kind_String] := {kind};
+rewriteKinds[kinds : {___String}] := kinds;
+rewriteKinds[_] := {};
 
 replaceDocumentation[dir_String, root_CloudObject, permissions_] := Module[
     {target = FileNameJoin[{root, "Documentation"}], relatives, existing, record, keys, changed, written, failure},
     relatives = relativePath[dir, #] & /@ Select[FileNames["*", dir, Infinity], FileType[#] === File &];
     existing = cloudFiles[target];
-    record = If[TrueQ[$uploadAll], <||>, readRecord[root, "Documentation"]];
+    record = If[rewriteQ["Documentation"], <||>, readDeployRecord[root, "Documentation"]];
     keys = AssociationMap[contentKey[FileNameJoin[{dir, #}]] &, relatives];
     changed = changedFiles[keys, existing, record];
     monitor["documentation: " <> ToString[Length[changed]] <> " of " <> ToString[Length[relatives]] <> " files to write"];
     {written, failure} = writeDocumentation[dir, target, permissions, changed];
-    writeRecord[root, "Documentation", Join[KeyTake[record, Complement[relatives, changed]], KeyTake[keys, written]]];
+    writeDeployRecord[root, "Documentation", Join[KeyTake[record, Complement[relatives, changed]], KeyTake[keys, written]]];
     If[ failure =!= None, Throw[failure, "cloudwrite"]];
     setDocumentationPermissions[target, relatives, permissions];
     $deployedDocumentation = <|"Root" -> root, "Target" -> target, "Files" -> relatives, "Existing" -> Keys[existing], "Written" -> Length[written]|>;
     $pages = Join[$pages, <|"Root" -> root, "Existing" -> existing, "Keys" -> keys|>,
-        With[{record = If[TrueQ[$uploadAll], <||>, readRecord[root, "Pages"]]}, <|"Signatures" -> record, "Recorded" -> record|>]];
+        With[{record = If[rewriteQ["Pages"], <||>, readDeployRecord[root, "Pages"]]}, <|"Signatures" -> record, "Recorded" -> record|>]];
     documentationObject[target, #, permissions] & /@ relatives
 ];
 
@@ -494,12 +504,12 @@ changedFiles[keys_Association, existing_Association, record_Association] :=
     Select[Keys[keys], ! KeyExistsQ[existing, #] || Lookup[record, #] =!= keys[#] &];
 
 (* A file's content, for telling whether it changed. A notebook's is its expression, parsed but not
-   evaluated, without what every build or deploy makes afresh: the cells' random ids and the time
-   the page was built. *)
+   evaluated, without what every build or deploy makes afresh: the random ids of its cells, and of
+   the cells the build adds, and the time the page was built. *)
 contentKey[file_String] := If[ ToLowerCase[FileExtension[file]] === "nb",
     With[{held = ToExpression[ReadString[file], InputForm, HoldComplete]},
         If[ MatchQ[held, _HoldComplete],
-            Hash[held /. {(ExpressionUUID -> _) -> Sequence[], ("built" -> _) -> Sequence[]}, "SHA256", "HexString"],
+            Hash[held /. $buildNoise, "SHA256", "HexString"],
             FileHash[file, "SHA256", "HexString"]
         ]
     ],
@@ -566,11 +576,11 @@ cloudRelativePath[target_CloudObject, object_CloudObject] :=
    and each page's signature *)
 recordObject[root_CloudObject, kind_String] := FileNameJoin[{root, "DeployRecord", kind <> ".wl"}];
 
-readRecord[root_CloudObject, kind_String] := With[{object = recordObject[root, kind]},
+readDeployRecord[root_CloudObject, kind_String] := With[{object = recordObject[root, kind]},
     If[ TrueQ[FileExistsQ[object]], Replace[CloudGet[object], Except[_Association] -> <||>], <||>]
 ];
 
-writeRecord[root_CloudObject, kind_String, record_Association] := CloudPut[record, recordObject[root, kind], Permissions -> "Private"];
+writeDeployRecord[root_CloudObject, kind_String, record_Association] := CloudPut[record, recordObject[root, kind], Permissions -> "Private"];
 
 pruneDocumentation[] := If[ ! AssociationQ[$deployedDocumentation], 0,
     With[{target = $deployedDocumentation["Target"], stale = staleDocumentation[$deployedDocumentation["Existing"], $deployedDocumentation["Files"]]},
@@ -609,7 +619,7 @@ makePage[as_Association, sidebar_String, url_String] := Module[{signature},
             If[ MatchQ[made, _CloudObject],
                 $pages["Signatures", url] = signature;
                 $pages["Made"]++;
-                If[ Mod[$pages["Made"], 100] === 0 && MatchQ[$pages["Root"], _CloudObject], writeRecord[$pages["Root"], "Pages", $pages["Signatures"]]]
+                If[ Mod[$pages["Made"], 100] === 0 && MatchQ[$pages["Root"], _CloudObject], writeDeployRecord[$pages["Root"], "Pages", $pages["Signatures"]]]
             ];
             made
         ]
@@ -630,7 +640,188 @@ pageRelative[url_String] := If[ MatchQ[$pages["Root"], _CloudObject], cloudRelat
 (* The record of the pages once the deploy is done: a page no longer shown is dropped when every
    page was made or seen unchanged *)
 savePages[complete_] := With[{record = If[TrueQ[complete], KeyTake[$pages["Signatures"], $pages["Seen"]], $pages["Signatures"]]},
-    If[ MatchQ[$pages["Root"], _CloudObject] && record =!= $pages["Recorded"], writeRecord[$pages["Root"], "Pages", record]]
+    If[ MatchQ[$pages["Root"], _CloudObject] && record =!= $pages["Recorded"], writeDeployRecord[$pages["Root"], "Pages", record]]
+];
+
+(* ==================== the guides in the pages' sidebar ==================== *)
+
+(* The sidebar of the resource's documentation pages lists the guides as a tree, as the site's left
+   rail does: under the root guide, the guide named after the paclet, which the resource page
+   shows, each guide its section headings link, then the guides it does not reach. A branch opens
+   and closes, and stays as it was left, with the sidebar's scroll, while a reader moves between
+   the pages. A paclet with one guide keeps the stock list. *)
+guideChildren[guidesDir_String, name_String] := Association @ Map[
+    FileBaseName[#] -> DeleteCases[StringDrop[#, 6] & /@ guideStructure[name, Import[#, "NB"]]["Children"], FileBaseName[#]] &,
+    FileNames["*.nb", guidesDir]
+];
+
+guideTreeRules[children_Association, root_String] /; Length[children] > 1 := {
+    HoldPattern[PacletResource`Private`createSidebarLinkSection["Guides", entries_List]] :> guideTreeSection[entries, children, root]
+};
+guideTreeRules[_, _] := {};
+
+guideTreeSection[entries_List, children_Association, root_String] := Module[{url, byName, link, item, tree, reached},
+    url[entry_] := If[AssociationQ[entry], Lookup[entry, "URL", ""], entry];
+    byName = Association[(FileBaseName[url[#]] -> #) & /@ entries];
+    link[name_] := If[ KeyExistsQ[byName, name],
+        XMLElement["a", {"href" -> url[byName[name]]}, {Replace[byName[name], {entry_Association :> Lookup[entry, "Title", name], _ -> name}]}],
+        name
+    ];
+    item[name_, path_] := If[ MemberQ[path, name], Nothing,
+        With[{kids = Select[Lookup[children, name, {}], ! MemberQ[Append[path, name], #] &]},
+            If[ kids === {},
+                XMLElement["li", {}, {link[name]}],
+                XMLElement["li", {}, {XMLElement["details", {}, {
+                    XMLElement["summary", {}, {link[name]}],
+                    XMLElement["ul", {}, item[#, Append[path, name]] & /@ kids]
+                }]}]
+            ]
+        ]
+    ];
+    tree = item[#, {root}] & /@ Lookup[children, root, {}];
+    reached = Append[Cases[tree, XMLElement["a", {"href" -> href_}, _] :> FileBaseName[href], Infinity], root];
+    <|
+        "Label" -> "Guides",
+        "Links" -> {XMLElement["div", {}, {
+            XMLElement["style", {}, {$guideTreeCSS}],
+            XMLElement["ul", {"class" -> "guide-tree"}, Join[tree, item[#, reached] & /@ Sort[Complement[Keys[byName], reached]]]],
+            XMLElement["script", {}, {$guideTreeScript}]
+        }]}
+    |>
+];
+
+$guideTreeCSS = StringJoin[
+    ".guide-tree,.guide-tree ul{list-style:none;margin:0;padding:0}",
+    ".guide-tree ul{padding-left:1em}",
+    ".guide-tree details>summary{display:block;position:relative;cursor:pointer;list-style:none;padding-right:1.6em}",
+    ".guide-tree details>summary::-webkit-details-marker{display:none}",
+    ".guide-tree details>summary::after{content:\"\\25B8\";position:absolute;right:.8em;top:50%;transform:translateY(-50%);color:#999}",
+    ".guide-tree details[open]>summary::after{content:\"\\25BE\"}",
+    ".guide-tree summary>a{display:inline}"
+];
+
+(* the branches a reader opened, and the sidebar's scroll, kept for the browser tab's session *)
+$guideTreeScript = StringJoin[
+    "(function(){function R(){try{var SK='ppSidebarScroll',OK='ppSidebarOpen';",
+    "var sb=document.getElementById('pac-nav-sidebar')||document.getElementById('pac-nav-sidebar-frame');if(!sb)return;",
+    "var sc=sb;while(sc&&sc.scrollHeight<=sc.clientHeight&&sc.parentElement)sc=sc.parentElement;",
+    "var o={};try{o=JSON.parse(sessionStorage.getItem(OK)||'{}')}catch(e){}",
+    "var ds=document.querySelectorAll('.guide-tree details');",
+    "for(var i=0;i<ds.length;i++){(function(d){var s=d.querySelector('summary');var k=s?s.textContent.trim():String(i);",
+    "if(o[k])d.open=true;d.addEventListener('toggle',function(){o[k]=d.open;try{sessionStorage.setItem(OK,JSON.stringify(o))}catch(e){}})})(ds[i])}",
+    "var v=sessionStorage.getItem(SK);if(v!==null)sc.scrollTop=parseFloat(v);",
+    "sb.addEventListener('click',function(e){var t=e.target;if(t&&t.closest&&t.closest('a')){try{sessionStorage.setItem(SK,String(sc.scrollTop))}catch(x){}}})",
+    "}catch(e){}}if(document.readyState!=='loading')R();else document.addEventListener('DOMContentLoaded',R)})();"
+];
+
+(* ==================== the page transform ==================== *)
+
+(* The deploy makes each documentation notebook into its web page (ProcessNotebookForEmbedding),
+   one after another. With parallel kernels it does so over them, when there are many pages; a page
+   whose transform fails there, or takes over five minutes, is transformed again in this kernel.
+   Each page's transform is kept in build/transform, keyed by everything it is made from: the
+   notebook, its links into the paclet and whether a page is there for each, the transform's
+   options and version, and the symbols' form. A page whose key is kept is taken from there, and
+   the transforms a completed deploy did not use are deleted. *)
+$transform = None;
+
+newTransform[cache_String, context_, symbolRules_List, pinned_List, kernels_List] := <|
+    "Cache" -> cache, "Context" -> context, "SymbolRules" -> symbolRules, "PinRules" -> pinned, "Kernels" -> kernels,
+    "Used" -> {}, "Cached" -> 0, "Transformed" -> 0, "Again" -> 0
+|>;
+
+transformRule[] := HoldPattern[PacletResource`Notebooks`ProcessNotebookForEmbedding[dir_?DirectoryQ, type_, opts : OptionsPattern[]] /;
+    AssociationQ[$transform] && ! TrueQ[$transforming]] :> transformPages[dir, type, Flatten[{opts}]];
+
+(* the stock transform of one notebook, in place *)
+$pageTransform = Function[{file, type, options}, PacletResource`Notebooks`ProcessNotebookForEmbedding[file, type, Sequence @@ options]];
+
+transformPages[dir_String, type_, opts_List] := Module[{files, options, valid, keys, cached, misses, results},
+    files = FileNames["*.nb", dir, Infinity, IgnoreCase -> True];
+    (* a transform into new files, rather than in place, is the stock one *)
+    If[ ! TrueQ[Lookup[opts, OverwriteTarget, False]],
+        Return[Block[{$transforming = True}, PacletResource`Notebooks`ProcessNotebookForEmbedding[dir, type, Sequence @@ opts]], Module]];
+    If[ ! DirectoryQ[$transform["Cache"]], CreateDirectory[$transform["Cache"], CreateIntermediateDirectories -> True]];
+    options = Append[DeleteCases[opts, "PackageURIs" -> _],
+        "PackageURIs" -> Replace[Lookup[opts, "PackageURIs", Automatic], Automatic :> PacletResource`Notebooks`Private`$validRefs]];
+    valid = AssociationThread[Replace[Lookup[options, "PackageURIs"], Except[_List] -> {}] -> True];
+    keys = AssociationMap[transformKey[#, type, options, valid] &, files];
+    cached = Select[files, FileExistsQ[transformFile[keys[#]]] &];
+    Scan[CopyFile[transformFile[keys[#]], #, OverwriteTarget -> True] &, cached];
+    misses = Select[files, ! MemberQ[cached, #] &];
+    monitor["pages: " <> ToString[Length[cached]] <> " transformed before, " <> ToString[Length[misses]] <> " to transform"];
+    results = transformFiles[misses, type, options];
+    Scan[If[StringQ[results[#]], CopyFile[#, transformFile[keys[#]], OverwriteTarget -> True]] &, misses];
+    $transform["Used"] = Join[$transform["Used"], Values[keys]];
+    $transform["Cached"] += Length[cached];
+    $transform["Transformed"] += Length[misses];
+    DeleteMissing[Lookup[Join[AssociationThread[cached -> cached], results], files]]
+];
+
+transformFile[key_String] := FileNameJoin[{$transform["Cache"], key <> ".nb"}];
+
+(* everything a page's transform is made from *)
+transformKey[file_String, type_, options_List, valid_Association] := With[{held = ToExpression[ReadString[file], InputForm, HoldComplete]},
+    Hash[{
+        If[ MatchQ[held, _HoldComplete], held /. $buildNoise, FileHash[file, "SHA256", "HexString"]],
+        pacletLinks[held, Lookup[options, "PacletName", None], valid],
+        type,
+        DeleteCases[options, ("PackageURIs" | "PacletInfo") -> _],
+        $transform["Context"]
+    }, "SHA256", "HexString"]
+];
+
+(* a page's links into the paclet, each with whether a page is there for it, which is all the
+   transform reads of the paclet's pages *)
+pacletLinks[held_HoldComplete, name_String, valid_Association] := Map[
+    {#, KeyExistsQ[valid, StringDelete[#, "#" ~~ ___ ~~ EndOfString]]} &,
+    Union[Cases[held, link_String /; StringStartsQ[link, ("paclet:" ~~ name) | name], Infinity]]
+];
+pacletLinks[_, _, _] := {};
+
+(* The transforms: over the parallel kernels, in blocks, each kernel with the symbols' rules for
+   the duration of a page; the pages that failed there, here *)
+transformFiles[{}, _, _] := <||>;
+transformFiles[files_List, type_, options_List] := Module[{results = <||>, again},
+    If[ Length[files] >= 24 && $transform["Kernels"] =!= {},
+        With[{setup = <|"Type" -> type, "Options" -> options, "SymbolRules" -> $transform["SymbolRules"], "PinRules" -> $transform["PinRules"]|>},
+            ParallelEvaluate[$transformSetup = setup, DistributedContexts -> None]
+        ];
+        Scan[
+            Function[block,
+                results = Join[results, AssociationThread[block -> ParallelMap[
+                    Function[file,
+                        Needs["PacletResource`"];
+                        Internal`InheritedBlock[{PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols},
+                            Unprotect[PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols];
+                            DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = Join[$transformSetup["SymbolRules"], DownValues[PacletResource`Private`fancyPacletSymbolBoxes]];
+                            DownValues[PacletResource`Private`pacletDeclaredSymbols] = Join[$transformSetup["PinRules"], DownValues[PacletResource`Private`pacletDeclaredSymbols]];
+                            Replace[
+                                TimeConstrained[PacletResource`Notebooks`ProcessNotebookForEmbedding[file, $transformSetup["Type"], Sequence @@ $transformSetup["Options"]], 300, $TimedOut],
+                                Except[_String] -> $Failed
+                            ]
+                        ]
+                    ],
+                    block,
+                    DistributedContexts -> None
+                ]]];
+                monitor["pages: " <> ToString[Length[results]] <> " of " <> ToString[Length[files]] <> " transformed"]
+            ],
+            Partition[files, UpTo[8 Length[$transform["Kernels"]]]]
+        ];
+        ParallelEvaluate[Clear[$transformSetup], DistributedContexts -> None]
+    ];
+    again = Select[files, ! StringQ[Lookup[results, #]] &];
+    If[ results =!= <||> && again =!= {}, monitor["pages: " <> ToString[Length[again]] <> " transformed again here"]];
+    $transform["Again"] += If[results =!= <||>, Length[again], 0];
+    Join[results, AssociationMap[$pageTransform[#, type, options] &, again]]
+];
+
+(* the transforms a completed deploy did not use *)
+pruneTransforms[] := If[ AssociationQ[$transform] && DirectoryQ[$transform["Cache"]],
+    With[{used = AssociationThread[$transform["Used"] -> True]},
+        Scan[If[! KeyExistsQ[used, FileBaseName[#]], DeleteFile[#]] &, FileNames["*.nb", $transform["Cache"]]]
+    ]
 ];
 
 (* The stale pages among a documentation tree's files: a notebook the new documentation does not
@@ -650,40 +841,39 @@ staleDocumentation[relatives_List, written_List] := Select[relatives,
    paclet name and never finding it, so every fresh session downloads the resource again. These
    paste a form that installs the paclet once, from its published archive or else its resource,
    and resolves it by name after. The stock boxes are kept per id, so this is a rule placed before
-   them, for the ids of this resource. *)
-resourceURLQ[url_String, name_String] := StringStartsQ[url, "https://wolfr.am/"] || StringContainsQ[url, "DeployedResources/Paclet/" <> name];
+   them, for the ids of this resource: its short URL or its deployed location. The rules here hold
+   all they test, so a parallel kernel that transforms pages takes them as they are. *)
 
 installForm[name_String, archive_String, _] := With[{n = name, a = archive}, HoldComplete[If[PacletFind[n] === {}, PacletInstall[a], n]]];
 installForm[name_String, None, resource_String] := With[{n = name, r = resource}, HoldComplete[If[PacletFind[n] === {}, PacletInstall[ResourceObject[r]], n]]];
 installForm[_, _, _] := None;
 
-symbolBoxRule[name_String, form_HoldComplete] :=
-    HoldPattern[PacletResource`Private`fancyPacletSymbolBoxes[HoldComplete[url_String /; resourceURLQ[url, name]], paclet_, symbol_]] :>
-        PacletResource`Private`fancyPacletSymbolBoxes[form, paclet, symbol];
-
-installSymbolBoxes[name_String, form_HoldComplete] := If[ DownValues[PacletResource`Private`fancyPacletSymbolBoxes] =!= {},
-    Unprotect[PacletResource`Private`fancyPacletSymbolBoxes];
-    DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = Prepend[DownValues[PacletResource`Private`fancyPacletSymbolBoxes], symbolBoxRule[name, form]];
-    True,
-    False
-];
-installSymbolBoxes[_, _] := False;
+symbolBoxRules[name_String, form_HoldComplete] := {
+    HoldPattern[PacletResource`Private`fancyPacletSymbolBoxes[
+        HoldComplete[url_String /; StringStartsQ[url, "https://wolfr.am/"] || StringContainsQ[url, "DeployedResources/Paclet/" <> name]], paclet_, symbol_]] :>
+        PacletResource`Private`fancyPacletSymbolBoxes[form, paclet, symbol]
+};
+symbolBoxRules[_, _] := {};
 
 (* The symbols the resource page's examples link: the deploy looks the paclet up by name again, which
    can find another copy of it, one whose PacletInfo declares none or others *)
-pinDeclaredSymbols[name_String, symbols : {__String}] := If[ DownValues[PacletResource`Private`pacletDeclaredSymbols] =!= {},
-    Unprotect[PacletResource`Private`pacletDeclaredSymbols];
-    DownValues[PacletResource`Private`pacletDeclaredSymbols] = Join[
-        {
-            HoldPattern[PacletResource`Private`pacletDeclaredSymbols[name]] :> symbols,
-            HoldPattern[PacletResource`Private`pacletDeclaredSymbols[KeyValuePattern["Name" -> name]]] :> symbols
-        },
-        DownValues[PacletResource`Private`pacletDeclaredSymbols]
-    ];
+pinRules[name_String, symbols : {__String}] := {
+    HoldPattern[PacletResource`Private`pacletDeclaredSymbols[name]] :> symbols,
+    HoldPattern[PacletResource`Private`pacletDeclaredSymbols[KeyValuePattern["Name" -> name]]] :> symbols
+};
+pinRules[_, _] := {};
+
+(* rules placed before a stock function's own, when it is loaded *)
+SetAttributes[installRules, HoldFirst];
+installRules[symbol_Symbol, rules_List] := If[ rules =!= {} && DownValues[symbol] =!= {},
+    Unprotect[symbol];
+    DownValues[symbol] = Join[rules, DownValues[symbol]];
     True,
     False
 ];
-pinDeclaredSymbols[_, _] := False;
+
+installSymbolBoxes[name_String, form_] := installRules[PacletResource`Private`fancyPacletSymbolBoxes, symbolBoxRules[name, form]];
+pinDeclaredSymbols[name_String, symbols_] := installRules[PacletResource`Private`pacletDeclaredSymbols, pinRules[name, symbols]];
 
 (* The scrape lints the paclet's code with CodeInspector, which says nothing about its documentation
    and, on some images, trips an assertion in the code parser that fails the scrape *)
@@ -1166,7 +1356,7 @@ pageProcesses[_] := 0;
    built on parallel kernels first. *)
 freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True, pageOptions_Association : <||>] := Module[
     {buildDir, prefix, recordFile, builtDocsDir, authoring, stageRoot, source, built, pages, load, dependencies, processes, changed, parallel, pruned,
-     excludedQ, links, missing, declared},
+     excludedQ, links, missing, declared, sources},
     (* the files the archive leaves out; a symbolic link that leads outside the paclet must be one *)
     excludedQ = Function[path, AnyTrue[Flatten[{Lookup[pageOptions, "Exclude", {}]}], StringMatchQ[path, #] &]];
     links = outsideLinks[dir];
@@ -1174,11 +1364,13 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
     buildDir = FileNameJoin[{dir, "build"}];
     prefix = StringReplace[name, "/" -> "__"];
     recordFile = builtPagesRecord[buildDir, prefix];
+    sources = sourceHash[dir, docSource, pageOptions];
     builtDocsDir = FileNameJoin[{buildDir, prefix, "Documentation"}];
     authoring = FileNames["*.nb", Replace[docSource, Automatic -> FileNameJoin[{dir, "Documentation"}]], Infinity];
-    (* the archives of earlier builds, which the scrape would pack; without "Incremental", the pages
-       built last time too *)
+    (* the archives of earlier builds, which the scrape would pack, and their record; without
+       "Incremental", the pages built last time too *)
     Scan[DeleteFile, FileNames[prefix ~~ ("" | ("-" ~~ ___)) ~~ ".paclet", buildDir]];
+    If[ FileExistsQ[FileNameJoin[{buildDir, "archive.wl"}]], DeleteFile[FileNameJoin[{buildDir, "archive.wl"}]]];
     If[ ! TrueQ[Lookup[pageOptions, "Incremental", False]],
         If[ DirectoryQ[FileNameJoin[{buildDir, prefix}]], DeleteDirectory[FileNameJoin[{buildDir, prefix}], DeleteContents -> True]];
         If[ FileExistsQ[recordFile], DeleteFile[recordFile]]
@@ -1229,8 +1421,41 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
         names : {__String} :> declareSymbols[built["Archive"], FileNameJoin[{buildDir, prefix}], names, True],
         _ -> None
     }];
-    <|"Archive" -> built["Archive"], "Pages" -> Length[pages], "Load" -> load, "DeclaredSymbols" -> declared, "Symbols" -> archiveSymbols[FileNameJoin[{buildDir, prefix}]], "ArchiveSize" -> Quantity[FileByteCount[built["Archive"]], "Bytes"],
-      "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel|>|>
+    With[{result = <|"Archive" -> built["Archive"], "Pages" -> Length[pages], "Load" -> load, "DeclaredSymbols" -> declared, "Symbols" -> archiveSymbols[FileNameJoin[{buildDir, prefix}]], "ArchiveSize" -> Quantity[FileByteCount[built["Archive"]], "Bytes"],
+          "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel|>|>},
+        Put[
+            <|"Archive" -> FileNameTake[built["Archive"]], "ArchiveHash" -> FileHash[built["Archive"], "SHA256", "HexString"], "Source" -> sources, "Result" -> result|>,
+            FileNameJoin[{buildDir, "archive.wl"}]
+        ];
+        result
+    ]
+];
+
+(* The archive an earlier build made, from the same sources, when "Build" -> False: the build and
+   the deploy can run in separate processes. The build records, in build/archive.wl, what it
+   made, a hash of the archive, and a hash of the sources: every file of the paclet but build/,
+   hidden files and the files left out, the authoring notebooks, and the options that change the
+   archive. *)
+builtArchive[head_Symbol, dir_String, name_String, docSource_, pageOptions_Association] := Module[
+    {buildDir = FileNameJoin[{dir, "build"}], stamp, archive},
+    stamp = If[FileExistsQ[FileNameJoin[{buildDir, "archive.wl"}]], Get[FileNameJoin[{buildDir, "archive.wl"}]], None];
+    archive = If[AssociationQ[stamp] && StringQ[stamp["Archive"]], FileNameJoin[{buildDir, stamp["Archive"]}], None];
+    If[ ! StringQ[archive] || ! FileExistsQ[archive] || FileHash[archive, "SHA256", "HexString"] =!= stamp["ArchiveHash"] ||
+            stamp["Source"] =!= sourceHash[dir, docSource, pageOptions],
+        Message[head::nobuild, dir]; Return[$Failed, Module]];
+    Append[stamp["Result"], "Archive" -> archive]
+];
+
+sourceHash[dir_String, docSource_, pageOptions_Association] := With[
+    {excludedQ = Function[path, AnyTrue[Flatten[{Lookup[pageOptions, "Exclude", {}]}], StringMatchQ[path, #] &]]},
+    Hash[{
+        Map[{#, FileHash[FileNameJoin[{dir, #}], "SHA256", "HexString"]} &,
+            Sort @ Select[relativePath[dir, #] & /@ Select[FileNames["*", dir, Infinity], FileType[#] === File &],
+                FileNameSplit[#][[1]] =!= "build" && ! AnyTrue[FileNameSplit[#], StringStartsQ[#, "."] &] && ! excludedQ[#] &]],
+        If[ docSource === Automatic, None,
+            Map[{relativePath[docSource, #], FileHash[#, "SHA256", "HexString"]} &, Sort @ Select[FileNames["*", docSource, Infinity], FileType[#] === File &]]],
+        KeyTake[pageOptions, {"Exclude", "Symbols"}]
+    }, "SHA256", "HexString"]
 ];
 
 (* The archive repacked with the given symbols as its Kernel extension's "Symbols", which the
@@ -1297,12 +1522,31 @@ readyToPublishQ[head_Symbol, dir_String, docSource_] := Or[
 
 loadResourceTools[] := (
     Needs["DefinitionNotebookClient`"];
+    (* loaded whole before a deploy patches any of its functions for the deploy's duration: what
+       loaded during it would be dropped with the patches *)
+    Needs["PacletResource`"];
     Needs["PacletResource`DefinitionNotebook`"];
     Needs["ResourceSystemClient`"];
     (* the scrape computes the documentation's paths with PacletTools`, which a headless kernel
        does not load by itself; without it a $Failed lands in the scraped file listing *)
     Needs["PacletTools`"]
 );
+
+(* The parallel kernels of a deploy, launched for it and closed after it: those "Parallel" asks for,
+   as buildKernels counts them; f gets the kernels *)
+withDeployKernels[parallel_, f_] := Module[{before = Kernels[], kernels},
+    kernels = buildKernels[parallel];
+    WithCleanup[f[kernels], CloseKernels[Complement[Kernels[], before]]]
+];
+
+(* what every page's transform is made with: the versions of the stock transform and of
+   PacletPage, and the rules the symbols' boxes are made with *)
+transformContext[symbolRules_List, pinned_List] := {
+    $VersionNumber,
+    Replace[PacletFind["PacletResource"], {{paclet_, ___} :> paclet["Version"], _ -> None}],
+    Replace[PacletFind["WolframInstitute/PacletPage"], {{paclet_, ___} :> paclet["Version"], _ -> None}],
+    symbolRules, pinned
+};
 
 Options[DeployPacletResource] = {
     "Account" -> Automatic,
@@ -1321,10 +1565,12 @@ Options[DeployPacletResource] = {
     "Symbols" -> Automatic,
     "Monitor" -> False,
     "Upload" -> Automatic,
+    "Build" -> True,
     Permissions -> "Public"
 };
 
 DeployPacletResource::blockers = "The definition notebook's own check finds these errors: `1`.";
+DeployPacletResource::nobuild = "`1`/build holds no archive built from the paclet's present sources; build it first, with \"DryRun\" -> True, or deploy with \"Build\" -> True.";
 DeployPacletResource::write = "`1` Nothing was deleted, so the resource keeps its pages; deploy again.";
 DeployPacletResource::nodef = "`1` has no ResourceDefinition.nb or no documentation: build it first with BuildPacletDocumentation.";
 DeployPacletResource::build = "PacletBuild failed: `1`.";
@@ -1344,12 +1590,13 @@ DeployPacletResource::unknowncommit = "`1` is already published from commit `2`,
 DeployPacletResource::nocommit = "`1` is already published and records no commit; nothing was deployed. Use \"Republish\" -> True to replace it.";
 
 DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
-    {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed},
+    {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed, symbolRules, pinned},
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];
     If[ ! readyToPublishQ[DeployPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "deploy"]];
     offline = offlineDryRunQ[OptionValue["DryRun"]];
     $deployedDocumentation = None;
     $pages = newPages[];
+    $transform = None;
     accountOK = offline || publishingAccountQ[DeployPacletResource, OptionValue["Account"]];
     If[ stopsQ[accountOK, OptionValue["DryRun"]], Throw[$Failed, "deploy"]];
     PacletDirectoryLoad[dir];
@@ -1377,8 +1624,13 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         If[ StringQ[versioned] && stopsQ[releaseAllowedQ[DeployPacletResource, versioned, publishedCommit[versioned], commit], OptionValue["DryRun"]],
             Throw[$Failed, "deploy"]]
     ];
-    built = freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], OptionValue["LoadCheck"],
-        <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"]|>];
+    built = With[
+        {pageOptions = <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"]|>},
+        If[ TrueQ[OptionValue["Build"]],
+            freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], OptionValue["LoadCheck"], pageOptions],
+            builtArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], pageOptions]
+        ]
+    ];
     If[ built === $Failed, Throw[$Failed, "deploy"]];
     (* where the definition notebook's Deploy button puts a resource:
        <account>/DeployedResources/Paclet/<Publisher>/<Name>. A freshly opened definition notebook
@@ -1392,17 +1644,22 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
        definition notebook. The scrape makes a ResourceObject, which needs a cloud session; an
        offline dry run stops before it. *)
     hero = heroImage[OptionValue["HeroImage"], definition];
+    (* the symbols' copied form and the declared symbols, in this kernel and the parallel ones *)
+    symbolRules = If[ offline, {}, symbolBoxRules[name, installForm[name, archiveURL[OptionValue["Archive"], name], If[MatchQ[target, _CloudObject], First[target], None]]]];
+    pinned = pinRules[name, built["Symbols"]];
     {resource, location, deployed} = Replace[
         If[ offline, {None, None, None}, UsingFrontEnd @ Internal`InheritedBlock[
             {PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols, DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ,
-             PacletResource`Private`createDocumentationEmbedPage, $deployMonitor, $uploadAll},
+             PacletResource`Private`createDocumentationEmbedPage, PacletResource`Notebooks`ProcessNotebookForEmbedding, PacletResource`Private`createSidebarLinkSection,
+             $deployMonitor, $rewrite},
             $deployMonitor = TrueQ[OptionValue["Monitor"]];
-            $uploadAll = OptionValue["Upload"] === All;
+            $rewrite = rewriteKinds[OptionValue["Upload"]];
             installPageRule[];
-            With[{form = installForm[name, archiveURL[OptionValue["Archive"], name], If[MatchQ[target, _CloudObject], First[target], None]]},
-                If[ MatchQ[form, _HoldComplete], installSymbolBoxes[name, form]]
-            ];
-            pinDeclaredSymbols[name, built["Symbols"]];
+            installRules[PacletResource`Private`fancyPacletSymbolBoxes, symbolRules];
+            installRules[PacletResource`Private`pacletDeclaredSymbols, pinned];
+            installRules[PacletResource`Notebooks`ProcessNotebookForEmbedding, {transformRule[]}];
+            installRules[PacletResource`Private`createSidebarLinkSection,
+                guideTreeRules[guideChildren[FileNameJoin[{dir, "build", StringReplace[name, "/" -> "__"], "Documentation", "English", "Guides"}], name], Last[StringSplit[name, "/"]]]];
             codeLintOff[];
             Module[{notebook, scraped, versioned, where, packed, done},
             monitor["scraping " <> definition];
@@ -1437,7 +1694,14 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
                 TrueQ[OptionValue["DryRun"]],
                     {versioned, where, None},
                 True,
-                    With[{deploy = Block[{$heroImage = hero}, stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]]},
+                    With[{deploy = Block[{$heroImage = hero}, withDeployKernels[
+                            If[built["Pages"] >= 24, OptionValue["Parallel"], False],
+                            Function[kernels,
+                                $transform = newTransform[FileNameJoin[{dir, "build", "transform"}], transformContext[symbolRules, pinned], symbolRules, pinned, kernels];
+                                stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]
+                            ]
+                        ]]},
+                        If[ MatchQ[deploy, _CloudObject], pruneTransforms[]];
                         savePages[MatchQ[deploy, _CloudObject]];
                         monitor["pages: " <> ToString[$pages["Made"]] <> " made, " <> ToString[$pages["Unchanged"]] <> " unchanged"];
                         If[ FailureQ[deploy], Message[DeployPacletResource::write, deploy["Message"]]; deploy, {versioned, where, deploy}]
@@ -1479,7 +1743,11 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
             "Files" -> If[AssociationQ[$deployedDocumentation], $deployedDocumentation["Written"], 0],
             "Pages" -> $pages["Made"],
             "UnchangedPages" -> $pages["Unchanged"]
-        |>
+        |>,
+        "Transformed" -> If[ AssociationQ[$transform],
+            <|"Transformed" -> $transform["Transformed"], "Cached" -> $transform["Cached"], "TransformedAgain" -> $transform["Again"]|>,
+            <|"Transformed" -> 0, "Cached" -> 0, "TransformedAgain" -> 0|>
+        ]
     |>
 ], "deploy"];
 
