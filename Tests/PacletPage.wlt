@@ -1117,6 +1117,16 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{kernels = LaunchKernels[1]},
+        ParallelEvaluate[UsingFrontEnd[ToBoxes[Graphics[Disk[]]]]; 1, kernels];
+        closeKernels[kernels];
+        {closeKernels[{}], Intersection[Kernels[], kernels]}
+    ],
+    {{}, {}},
+    TestID -> "Build: parallel kernels close after the front ends they started quit"
+]
+
+VerificationTest[
     staleDocumentation[
         {"guide/A.nb", "guide/A.html", "ref/B.nb", "ref/B.html", "ref/Gone.nb", "ref/Gone.html", "images/x.png"},
         {"guide/A.nb", "ref/B.nb"}

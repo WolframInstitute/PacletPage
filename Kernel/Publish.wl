@@ -356,7 +356,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
         "TimeConstraint" -> OptionValue["TimeConstraint"], "Monitor" -> TrueQ[OptionValue["Monitor"]]
     |>;
     results = AssociationThread[Lookup[misses, "Entry", {}], convertTasks[misses, spec, setup, kernels]];
-    If[ kernels =!= {}, CloseKernels[Complement[Kernels[], kernelsBefore]]];
+    If[ kernels =!= {}, closeKernels[Complement[Kernels[], kernelsBefore]]];
     (* each converted page enters the cache; every page that has its notebook is copied to it *)
     outcomes = Map[
         Function[task, Which[
@@ -1205,7 +1205,8 @@ pacletBuildScript[source_String, buildDir_String, dependencies_List : {}] := Str
     "        With[{done = stock[extension, root, built, files]}, WolframInstitute`PacletPage`Private`tidyBuiltPages[built]; done]]];\n",
     "result = PacletTools`PacletBuild[", wlString[source], ", ", wlString[buildDir], ", PacletTools`PacletExtensionHandlers -> handlers];\n",
     "report = If[MatchQ[result, _Success], <|\"Archive\" -> result[\"PacletArchive\"]|>, <|\"Failure\" -> ToString[result, InputForm]|>];\n",
-    "WriteString[\"stdout\", \"PACLETPAGE-BUILD \" <> ExportString[report, \"RawJSON\", \"Compact\" -> True] <> \"\\n\"];\n"
+    "WriteString[\"stdout\", \"PACLETPAGE-BUILD \" <> ExportString[report, \"RawJSON\", \"Compact\" -> True] <> \"\\n\"];\n",
+    "Developer`UninstallFrontEnd[];\n"
 ];
 
 freshKernelBuild[source_String, buildDir_String, dependencies_List : {}] := Module[{kernel = kernelExecutable[], script, run, line},
@@ -1320,7 +1321,8 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "        With[{built = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[built === page, built -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
     "        Replace[processed, Except[_Association] -> <||>]]]];\n",
     "    Put[record, ", wlString[recordOut], "],\n",
-    "    {page, pages}];\n"
+    "    {page, pages}];\n",
+    "Developer`UninstallFrontEnd[];\n"
 ];
 
 (* Scripts run as separate kernel processes, at most n at a time, each one killed past its
@@ -1634,11 +1636,19 @@ loadResourceTools[] := (
     Needs["PacletTools`"]
 );
 
+(* Parallel kernels closed, each with the front end it started quit first: a front end whose
+   kernel closes under it crashes on its way out *)
+closeKernels[{}] := {};
+closeKernels[kernels_List] := (
+    ParallelEvaluate[Developer`UninstallFrontEnd[], kernels, DistributedContexts -> None];
+    CloseKernels[kernels]
+);
+
 (* The parallel kernels of a deploy, launched for it and closed after it: those "Parallel" asks for,
    as buildKernels counts them; f gets the kernels *)
 withDeployKernels[parallel_, f_] := Module[{before = Kernels[], kernels},
     kernels = buildKernels[parallel];
-    WithCleanup[f[kernels], CloseKernels[Complement[Kernels[], before]]]
+    WithCleanup[f[kernels], closeKernels[Complement[Kernels[], before]]]
 ];
 
 (* what every page's transform is made with: the versions of the stock transform and of
