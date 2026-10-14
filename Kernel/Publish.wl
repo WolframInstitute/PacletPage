@@ -451,7 +451,7 @@ stopOnCloudWriteFailure[expr_] := Block[
 
 (* a failed write stops the deploy whether its message shows or is captured, as in a test or a
    documentation example *)
-cloudWriteFailure[Hold[Message[MessageName[symbol_, tag_String], ___], _]] /; MatchQ[tag, $cloudWriteFailures] :=
+cloudWriteFailure[Hold[Message[MessageName[symbol_, tag_String], ___], _]] /; ! TrueQ[$cloudWriteRetry] && MatchQ[tag, $cloudWriteFailures] :=
     Throw[cloudWriteFailureObject[messageText[symbol, tag], SymbolName[Unevaluated[symbol]] <> "::" <> tag], "cloudwrite"];
 cloudWriteFailure[_] := Null;
 
@@ -461,6 +461,22 @@ cloudWriteFailureObject[what_String, name_String] := Failure["CloudWrite", <|
     "Step" -> $deployStep,
     "CloudMessage" -> name
 |>];
+
+(* A file copied to the cloud, sent again when the cloud fails it, three times in all, after five
+   seconds and then fifteen: the cloud now and then fails a write, with CopyFile::cloudunknown, that
+   succeeds when sent again. An attempt that is tried again keeps its messages off the output, the
+   one purpose of this Quiet, and does not stop the deploy; the last attempt's messages show, and
+   stop it as any failed write does. *)
+$cloudWriteRetry = False;
+$cloudCopyPauses = {5, 15};
+(* the archive and the files the stock deploy copies, sent the same way *)
+$cloudCopyRule = HoldPattern[CopyFile[from_, to_, OverwriteTarget -> True]] :> cloudCopy[from, to];
+cloudCopy[from_, to_] := cloudCopy[from, to, $cloudCopyPauses];
+cloudCopy[from_, to_, {}] := CopyFile[from, to, OverwriteTarget -> True];
+cloudCopy[from_, to_, {pause_, rest___}] := Replace[
+    Block[{$cloudWriteRetry = True}, Quiet[CopyFile[from, to, OverwriteTarget -> True]]],
+    Except[_CloudObject] :> (Pause[pause]; cloudCopy[from, to, {rest}])
+];
 
 messageText[symbol_, tag_String] := With[{text = MessageName[symbol, tag]},
     If[StringQ[text], text, Replace[MessageName[General, tag], Except[_String] -> tag]]
@@ -527,7 +543,7 @@ writeDocumentation[dir_String, target_CloudObject, permissions_, relatives_List]
         Scan[
             Function[block, With[
                 {results = mapBlocks[
-                    Function[task, MatchQ[CopyFile[First[task], Last[task], OverwriteTarget -> True], _CloudObject]],
+                    Function[task, MatchQ[cloudCopy[First[task], Last[task]], _CloudObject]],
                     {FileNameJoin[{dir, #}], documentationObject[target, #, permissions]} & /@ block
                 ]},
                 written = Join[written, Pick[block, results, True]];
@@ -956,6 +972,7 @@ installDeployFixes[] := If[ ! TrueQ[$deployFixesInstalled], Module[{probe = Clou
         )
     ];
     patchDeployFunctions[HoldPattern[Quiet[DeleteObject[_], ___]] :> Null, ! FreeQ[#, CopyDirectory] &];
+    patchDeployFunctions[$cloudCopyRule];
     Unprotect[PacletResource`Private`cloudDeployPacletWebFile];
     DownValues[PacletResource`Private`cloudDeployPacletWebFile] = DeleteCases[
         DownValues[PacletResource`Private`cloudDeployPacletWebFile],
@@ -1025,7 +1042,7 @@ publishArchive[archive_String, dir_String, name_String, permissions_, commit_] :
      meta = If[StringQ[commit], <|"Commit" -> commit|>, <||>]},
     (* the commit is set after the copy, which replacing an object does not carry over *)
     Map[
-        With[{copied = CopyFile[archive, CloudObject[#, Permissions -> permissions], OverwriteTarget -> True]},
+        With[{copied = cloudCopy[archive, CloudObject[#, Permissions -> permissions]]},
             If[MatchQ[copied, _CloudObject] && meta =!= <||>, SetOptions[copied, MetaInformation -> meta]];
             copied
         ] &,
@@ -1055,7 +1072,7 @@ publishSourceArchive[dir_String, dirName_String, name_String, version_String, pe
     {packed = sourceArchive[dir, exclude], names = sourceArchiveNames[dirName, name, version], meta = If[StringQ[commit], <|"Commit" -> commit|>, <||>], copied},
     If[ ! StringQ[packed], Return[packed, Module]];
     copied = Map[
-        With[{object = CopyFile[packed, CloudObject[#, Permissions -> permissions], OverwriteTarget -> True]},
+        With[{object = cloudCopy[packed, CloudObject[#, Permissions -> permissions]]},
             If[MatchQ[object, _CloudObject] && meta =!= <||>, SetOptions[object, MetaInformation -> meta]];
             object
         ] &,

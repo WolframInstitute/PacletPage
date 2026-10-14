@@ -135,7 +135,7 @@ publishSource[dir_String, sourceURL_String, manifestURL_String, permissions_, sh
             {results = Association @ mapBlocks[
                 Function[task,
                     Last[task] -> MatchQ[
-                        CopyFile[First[task], CloudObject[sourceURL <> "/" <> Last[task], Permissions -> permissions], OverwriteTarget -> True],
+                        cloudCopy[First[task], CloudObject[sourceURL <> "/" <> Last[task], Permissions -> permissions]],
                         _CloudObject
                     ]
                 ],

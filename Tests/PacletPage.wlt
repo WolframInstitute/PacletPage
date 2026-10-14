@@ -1138,6 +1138,39 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{calls = 0, result},
+        (* a cloud copy goes through CloudObject's own rules, which no definition for CopyFile precedes *)
+        Block[{$cloudCopyPauses = {0, 0}, CopyFile = Function[{from, to, option}, If[++calls < 3, Message[CopyFile::cloudunknown]; $Failed, to]]},
+            result = cloudCopy["/x", CloudObject["https://www.wolframcloud.com/obj/user/x"]]
+        ];
+        {calls, MatchQ[result, _CloudObject]}
+    ],
+    {3, True},
+    TestID -> "Deploy: a file the cloud fails to write is sent again, and the attempts that failed show nothing"
+]
+
+VerificationTest[
+    Module[{calls = 0, result},
+        Block[{$cloudCopyPauses = {0, 0}, CopyFile = Function[{from, to, option}, ++calls; Message[CopyFile::cloudunknown]; $Failed]},
+            result = cloudCopy["/x", CloudObject["https://www.wolframcloud.com/obj/user/x"]]
+        ];
+        {calls, result}
+    ],
+    {3, $Failed},
+    {CopyFile::cloudunknown},
+    TestID -> "Deploy: a file the cloud fails three times is not written, and only the last attempt's message shows"
+]
+
+VerificationTest[
+    Needs["PacletResource`"];
+    With[{patched = DownValues[PacletResource`Private`cloudExportPacletResourceContent] /. $cloudCopyRule},
+        {FreeQ[patched, HoldPattern[CopyFile[_, _, OverwriteTarget -> True]]], ! FreeQ[patched, cloudCopy]}
+    ],
+    {True, True},
+    TestID -> "Deploy: the stock deploy's archive upload is sent again when the cloud fails it"
+]
+
+VerificationTest[
     {
         processLayers[<|10 -> {1, "kernel", "S"}, 11 -> {10, "fe", "S"}, 12 -> {11, "helper", "S"}, 13 -> {10, "<defunct>", "Z"}, 20 -> {1, "other", "S"}|>, {10}],
         livingProcesses[<|11 -> {10, "fe", "S"}, 13 -> {10, "<defunct>", "Z+"}|>, {11, 13, 99}]
