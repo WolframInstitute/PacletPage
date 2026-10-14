@@ -39,17 +39,46 @@ shellCheck[url_String, site_String] := With[{body = anonymousBody[url]},
         If[StringQ[body], "public, " <> IntegerString[StringLength[body]] <> " characters", "not readable anonymously"]]
 ];
 
-(* a notebook a page shows, through the cloud's static render *)
-pageCheck[id_String, notebook_String] := With[{status = anonymousStatus[staticRenderURL[notebook]]},
-    check["Page " <> id, notebook, status["Status"] === 200,
-        Replace[status["Status"], {200 -> "rendered", 403 -> "not public", 404 -> "not found: publish the site again from a new catalog", other_ :> "HTTP " <> TextString[other]}]]
+(* the anonymous statuses of many URLs, sixteen at a time, with a line every ten blocks when monitored *)
+anonymousStatuses[urls_List] := Module[{done = 0},
+    Catenate @ Map[
+        Function[block, With[{responses = URLRead[HTTPRequest /@ block, {"StatusCode", "Headers"}, Authentication -> None, TimeConstraint -> 120]},
+            done += Length[block];
+            If[ Length[urls] > 16 && (Mod[done, 160] < Length[block] || done === Length[urls]),
+                monitor["check", "pages: " <> ToString[done] <> " of " <> ToString[Length[urls]] <> " requested"]];
+            Map[responseStatus, If[ListQ[responses], responses, ConstantArray[responses, Length[block]]]]
+        ]],
+        Partition[urls, UpTo[16]]
+    ]
 ];
 
-(* the page a reader opens from the resource page or the repository *)
-htmlCheck[id_String, url_String] := With[{status = anonymousStatus[url]},
-    check["Page HTML " <> id, url, status["Status"] === 200,
-        Replace[status["Status"], {200 -> "served", 403 -> "not public", 404 -> "not found: deploy the resource again", other_ :> "HTTP " <> TextString[other]}]]
+responseStatus[response_Association] := <|"Status" -> response["StatusCode"],
+    "Type" -> Lookup[toAssociation[response["Headers"]], "content-type", Lookup[toAssociation[response["Headers"]], "Content-Type", ""]]|>;
+responseStatus[_] := <|"Status" -> Missing["NoResponse"], "Type" -> ""|>;
+
+(* the checks run: the pages' requests together, the others one by one *)
+runChecks[checks_List] := With[{urls = DeleteDuplicates[checkURL /@ Select[checks, batchedCheckQ]]},
+    With[{statuses = AssociationThread[urls -> anonymousStatuses[urls]]},
+        Map[If[batchedCheckQ[#], Append[#, statuses[checkURL[#]]], #] &, checks] // Map[runCheck]
+    ]
 ];
+batchedCheckQ[{pageCheck | htmlCheck, ___}] := True;
+batchedCheckQ[_] := False;
+checkURL[{pageCheck, _, notebook_String, ___}] := staticRenderURL[notebook];
+checkURL[{htmlCheck, _, url_String, ___}] := url;
+
+(* a notebook a page shows, through the cloud's static render *)
+pageCheck[id_String, notebook_String] := pageCheck[id, notebook, anonymousStatus[staticRenderURL[notebook]]];
+pageCheck[id_String, notebook_String, status_Association] := (
+    check["Page " <> id, notebook, status["Status"] === 200,
+        Replace[status["Status"], {200 -> "rendered", 403 -> "not public", 404 -> "not found: publish the site again from a new catalog", other_ :> "HTTP " <> TextString[other]}]]
+);
+
+(* the page a reader opens from the resource page or the repository *)
+htmlCheck[id_String, url_String] := htmlCheck[id, url, anonymousStatus[url]];
+htmlCheck[id_String, url_String, status_Association] :=
+    check["Page HTML " <> id, url, status["Status"] === 200,
+        Replace[status["Status"], {200 -> "served", 403 -> "not public", 404 -> "not found: deploy the resource again", other_ :> "HTTP " <> TextString[other]}]];
 
 (* a Paclet Repository page still shows the notebook the catalog names *)
 catalogCheck[url_String, notebook_String] := With[{html = fetchText[url]},
@@ -108,9 +137,10 @@ waitSeconds[seconds_?NumericQ] := Max[0, seconds];
 waitSeconds[time_Quantity] := Max[0, QuantityMagnitude[UnitConvert[time, "Seconds"]]];
 waitSeconds[_] := 0;
 
-Options[CheckPacletPage] = {"Pages" -> 10, "Feedback" -> True, "Wait" -> 0};
+Options[CheckPacletPage] = {"Pages" -> 10, "Feedback" -> True, "Wait" -> 0, "Monitor" -> False};
 
-CheckPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[{site, directory, root, checks, results, deadline},
+CheckPacletPage[catalog_, name_, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Module[
+    {site, directory, root, checks, results, deadline},
     Which[
         ! catalogQ[catalog], Message[PacletPageFiles::catalog, catalog]; Return[$Failed, Module],
         ! StringQ[name] || ! (siteNameQ[name] || StringStartsQ[name, "https://"]), Message[DeployPacletPage::name, name]; Return[$Failed, Module],
@@ -133,12 +163,17 @@ CheckPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[{site, direc
         ],
         If[ OptionValue["Feedback"] === "Send", {{sentCheck, name, directory, site}}, {}]
     ];
-    results = runCheck /@ checks;
+    monitor["check", ToString[Length[checks]] <> " checks"];
+    results = runChecks[checks];
     (* the checks that failed run again, every 10 seconds, until they pass or the wait is over *)
     deadline = AbsoluteTime[] + waitSeconds[OptionValue["Wait"]];
     While[ ! AllTrue[results, #["OK"] &] && AbsoluteTime[] < deadline,
         Pause[Min[10, deadline - AbsoluteTime[]]];
-        results = MapThread[If[#1["OK"], #1, runCheck[#2]] &, {results, checks}]
+        With[{again = Flatten[Position[results, _?(! TrueQ[#["OK"]] &), {1}, Heads -> False]]},
+            monitor["check", ToString[Length[again]] <> " checks again"];
+            results[[again]] = runChecks[checks[[again]]]
+        ]
     ];
+    monitor["check", ToString[Count[results, _?(TrueQ[#["OK"]] &)]] <> " of " <> ToString[Length[results]] <> " passed"];
     <|"OK" -> AllTrue[results, #["OK"] &], "Site" -> site, "Failed" -> Select[results, ! #["OK"] &], "Checks" -> Dataset[results]|>
-];
+]];

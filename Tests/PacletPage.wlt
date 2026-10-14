@@ -1025,6 +1025,71 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{batches = {}},
+        Block[{anonymousStatuses = Function[urls, AppendTo[batches, Length[urls]]; ConstantArray[<|"Status" -> 200, "Type" -> ""|>, Length[urls]]]},
+            {
+                Lookup[runChecks[{{pageCheck, "guide/A", "https://c.example/obj/u/A.nb"}, {htmlCheck, "guide/A", "https://c.example/A.html"}, {pageCheck, "ref/B", "https://c.example/obj/u/B.nb"}}], "OK"],
+                batches
+            }
+        ]
+    ],
+    {{True, True, True}, {3}},
+    TestID -> "Check: the pages' requests go together"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], slow, steady, result},
+        slow = FileNameJoin[{dir, "slow.wl"}];
+        steady = FileNameJoin[{dir, "steady.wl"}];
+        Export[slow, "Pause[60];", "Text"];
+        Export[steady, "Do[Put[i, " <> ToString[FileNameJoin[{dir, "steady-record.wl"}], InputForm] <> "]; Pause[1], {i, 5}];", "Text"];
+        result = runKernelScripts[{
+            <|"Script" -> slow, "Record" -> FileNameJoin[{dir, "slow-record.wl"}], "Deadline" -> 120, "Stall" -> 6|>,
+            <|"Script" -> steady, "Record" -> FileNameJoin[{dir, "steady-record.wl"}], "Deadline" -> 120, "Stall" -> 6|>
+        }, 2];
+        DeleteDirectory[dir, DeleteContents -> True];
+        Lookup[result, {slow, steady}]
+    ],
+    {"Stalled", "Finished"},
+    TestID -> "Archive: a process that records nothing new for too long is stopped; one that keeps recording is not"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], script},
+        script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}, 300];
+        DeleteDirectory[dir, DeleteContents -> True];
+        SyntaxQ[script]
+    ],
+    True,
+    TestID -> "Archive: a page share's script, a page at a time, is Wolfram Language"
+]
+
+VerificationTest[
+    statusUpdate /@ {<|"id" -> "E1", "status" -> "fixed", "note" -> "n"|>, <|"ID" -> "E2", "Status" -> "open"|>},
+    {<|"id" -> "E1", "status" -> "fixed", "note" -> "n"|>, <|"id" -> "E2", "status" -> "open", "note" -> ""|>},
+    TestID -> "Feedback: an update's keys in either case"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], files, puts = 0, result},
+        files = Table[With[{f = FileNameJoin[{dir, "N" <> IntegerString[i] <> ".nb"}]}, Export[f, "Notebook[{}] (* " <> IntegerString[i] <> " *)", "Text"]; f], {i, 60}];
+        Block[{
+                sourceNotebooks = Function[{d, short}, {#, FileNameTake[#]} & /@ files],
+                FileExistsQ = Function[x, If[MatchQ[x, _CloudObject], False, System`FileExistsQ[x]]],
+                mapBlocks = Function[{f, list}, Map[f, list]],
+                CopyFile = Function[{from, to, opt}, to],
+                CloudPut = Function[{expr, object, opt}, puts++; object]
+            },
+            result = publishSource[dir, "https://c.example/obj/u/SiteSource", "https://c.example/obj/u/SiteSourceManifest", "Public", "Name"]
+        ];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {result["Uploaded"], puts}
+    ],
+    {60, 3},
+    TestID -> "Cloud: source notebooks upload in blocks, the manifest written after each"
+]
+
+VerificationTest[
     staleDocumentation[
         {"guide/A.nb", "guide/A.html", "ref/B.nb", "ref/B.html", "ref/Gone.nb", "ref/Gone.html", "images/x.png"},
         {"guide/A.nb", "ref/B.nb"}
@@ -1464,7 +1529,8 @@ VerificationTest[
         Block[{
             catalogQ = True &,
             anonymousBody = Function[url, "<html id=\"pp-config\">"],
-            anonymousStatus = Function[url, calls++; <|"Status" -> If[calls <= 1, 404, 200], "Type" -> ""|>]
+            anonymousStatus = Function[url, calls++; <|"Status" -> If[calls <= 1, 404, 200], "Type" -> ""|>],
+            anonymousStatuses = Function[urls, anonymousStatus /@ urls]
         },
             once = CheckPacletPage[catalog, "https://example.org/obj/u/Site", "Feedback" -> False];
             calls = 0;
@@ -1484,7 +1550,8 @@ VerificationTest[
         Block[{
             catalogQ = True &,
             anonymousBody = Function[url, "<html id=\"pp-config\">"],
-            anonymousStatus = Function[url, <|"Status" -> If[StringEndsQ[url, ".html"], 404, 200], "Type" -> ""|>]
+            anonymousStatus = Function[url, <|"Status" -> If[StringEndsQ[url, ".html"], 404, 200], "Type" -> ""|>],
+            anonymousStatuses = Function[urls, anonymousStatus /@ urls]
         },
             report = CheckPacletPage[catalog, "https://example.org/obj/u/Site", "Feedback" -> False]
         ];

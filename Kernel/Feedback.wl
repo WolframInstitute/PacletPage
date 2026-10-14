@@ -669,6 +669,7 @@ SetPacletPageFeedbackStatus[name_String, updates_List] := With[{list = statusUpd
 statusUpdate[id_String -> status_String] := <|"id" -> id, "status" -> status, "note" -> ""|>;
 statusUpdate[{id_String, status_String}] := <|"id" -> id, "status" -> status, "note" -> ""|>;
 statusUpdate[{id_String, status_String, note_String}] := <|"id" -> id, "status" -> status, "note" -> note|>;
-statusUpdate[update_Association] /; StringQ[Lookup[update, "ID", None]] && StringQ[Lookup[update, "Status", None]] :=
-    <|"id" -> update["ID"], "status" -> update["Status"], "note" -> Replace[Lookup[update, "Note", ""], Except[_String] -> ""]|>;
+statusUpdate[update_Association] /; StringQ[Lookup[update, "ID", Lookup[update, "id", None]]] && StringQ[Lookup[update, "Status", Lookup[update, "status", None]]] :=
+    <|"id" -> Lookup[update, "ID", update["id"]], "status" -> Lookup[update, "Status", update["status"]],
+      "note" -> Replace[Lookup[update, "Note", Lookup[update, "note", ""]], Except[_String] -> ""]|>;
 statusUpdate[_] := $Failed;

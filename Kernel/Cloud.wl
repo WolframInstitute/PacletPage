@@ -103,9 +103,11 @@ sameAccountQ[accounts_List, account_String] := accounts =!= {} && AllTrue[accoun
 sameAccountQ[_, _] := False;
 
 (* Uploads the notebooks whose content changed since the manifest recorded them, deletes the ones
-   no longer there, and records only what landed, so a failed upload is retried next time. *)
+   no longer there, and records only what landed, so a failed upload is retried next time. The
+   uploads go in blocks, with a line and the manifest written after each, so that a publish stopped
+   midway uploads again only what it had not. *)
 publishSource[dir_String, sourceURL_String, manifestURL_String, permissions_, short_String, all_ : False] := Module[
-    {tasks, manifest, hashes, changed, retired, results, failed, removed},
+    {tasks, manifest, hashes, changed, retired, done = <||>, failed = {}, removed},
     tasks = sourceNotebooks[dir, short];
     If[ tasks === {}, Message[DeployPacletPage::source, dir]; Return[$Failed, Module]];
     manifest = If[ ! TrueQ[all] && TrueQ[FileExistsQ[CloudObject[manifestURL]]], CloudGet[CloudObject[manifestURL]], <||>];
@@ -113,16 +115,26 @@ publishSource[dir_String, sourceURL_String, manifestURL_String, permissions_, sh
     hashes = Association @ Map[Last[#] -> FileHash[First[#], "SHA256", "HexString"] &, tasks];
     changed = Select[tasks, Lookup[manifest, Last[#]] =!= hashes[Last[#]] &];
     retired = Complement[Keys[manifest], Keys[hashes]];
-    results = mapBlocks[
-        Function[task,
-            Last[task] -> MatchQ[
-                CopyFile[First[task], CloudObject[sourceURL <> "/" <> Last[task], Permissions -> permissions], OverwriteTarget -> True],
-                _CloudObject
-            ]
-        ],
-        changed
+    monitor["site", "source notebooks: " <> ToString[Length[changed]] <> " of " <> ToString[Length[tasks]] <> " to upload"];
+    Scan[
+        Function[block, With[
+            {results = Association @ mapBlocks[
+                Function[task,
+                    Last[task] -> MatchQ[
+                        CopyFile[First[task], CloudObject[sourceURL <> "/" <> Last[task], Permissions -> permissions], OverwriteTarget -> True],
+                        _CloudObject
+                    ]
+                ],
+                block
+            ]},
+            failed = Join[failed, Keys[Select[results, ! TrueQ[#] &]]];
+            done = Join[done, KeyTake[hashes, Keys[Select[results, TrueQ]]]];
+            CloudPut[Join[KeyDrop[manifest, failed], done], CloudObject[manifestURL], Permissions -> "Private"];
+            If[ Length[changed] > Length[block],
+                monitor["site", "source notebooks: " <> ToString[Length[done] + Length[failed]] <> " of " <> ToString[Length[changed]] <> " uploaded"]]
+        ]],
+        Partition[changed, UpTo[50]]
     ];
-    failed = Keys[Select[Association[results], ! TrueQ[#] &]];
     removed = Select[retired,
         Function[path,
             With[{url = sourceURL <> "/" <> path},
@@ -153,6 +165,7 @@ Options[DeployPacletPage] = Join[
         "Source" -> None,
         "Upload" -> Automatic,
         "Account" -> Automatic,
+        "Monitor" -> False,
         Permissions -> "Public"
     },
     FilterRules[Options[PacletPageFiles], Except["SiteURL" | "PageURL" | "FeedbackURL" | "SourceURL"]]
@@ -160,7 +173,7 @@ Options[DeployPacletPage] = Join[
 
 DeployPacletPage::name = "`1` is not a site name: use letters, digits, \"_\" and \"-\", with \"/\" between directories.";
 
-DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[
+DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Module[
     {site, page, feedback, source, files, result, title, mail, feedbackOptions},
     Which[
         ! catalogQ[catalog], Message[PacletPageFiles::catalog, catalog]; Return[$Failed, Module],
@@ -204,7 +217,7 @@ DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[
         "Source" -> source,
         "Pages" -> Length[catalog["Pages"]]
     |>
-];
+]];
 
 (* One email setting: an address given to the site's email fallback ("FeedbackEmail") or to the
    feedback pages ("Email" of "FeedbackOptions") is the other's too *)

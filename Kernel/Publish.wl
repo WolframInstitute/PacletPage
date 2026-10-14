@@ -270,8 +270,9 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
         pattern_ :> Select[all, StringMatchQ[FileNameTake[#], pattern] &]
     }];
     If[ files === {}, Message[BuildPacletDocumentation::source, source]; Return[$Failed, Module]];
-    (* the paclet itself, for the examples *)
+    (* the paclet itself, and the dependencies given as directories, for the examples *)
     PacletDirectoryLoad[dir];
+    Scan[PacletDirectoryLoad, Select[Replace[OptionValue["Dependencies"], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &]];
     paclet = PacletObject[File[dir]];
     If[ StringQ[paclet["PrimaryContext"]], Needs[paclet["PrimaryContext"]]];
     spec = converterSpec[OptionValue["Converter"]];
@@ -435,8 +436,9 @@ $cloudWriteFailures = "srverr" | "notperm" | "notauth" | "unavailable" | "cloudp
 $deployStep = None;
 $deployMonitor = False;
 
-(* a step of the deploy, printed when it is monitored *)
-monitor[step_] := If[TrueQ[$deployMonitor], Print["deploy: ", step]];
+(* a step of the deploy, or of another part of a publish, printed when it is monitored *)
+monitor[step_] := monitor["deploy", step];
+monitor[part_String, step_] := If[TrueQ[$deployMonitor], Print[part, ": ", step]];
 
 SetAttributes[stopOnCloudWriteFailure, HoldFirst];
 stopOnCloudWriteFailure[expr_] := Block[
@@ -1087,7 +1089,7 @@ archiveLoadCheck[archive_String, version_String, context_String, dependencies_Li
     If[ kernel === None, Return[<|"OK" -> False, "Reason" -> "no kernel executable under " <> $InstallationDirectory|>, Module]];
     script = FileNameJoin[{$TemporaryDirectory, CreateUUID["pacletpage-load-"] <> ".wl"}];
     Export[script, archiveLoadScript[archive, context, dependencies], "Text"];
-    run = RunProcess[{kernel, "-noprompt", "-script", script}];
+    run = runWatched[{kernel, "-noprompt", "-script", script}, "archive: the archive loads alone in a fresh kernel"];
     DeleteFile[script];
     line = If[AssociationQ[run], SelectFirst[StringSplit[run["StandardOutput"], "\n"], StringStartsQ[#, "PACLETPAGE-LOAD "] &, None], None];
     report = If[StringQ[line], ImportString[StringDrop[line, 16], "RawJSON"], <|"Reason" -> "the fresh kernel gave no report: " <> If[AssociationQ[run], StringTake[run["StandardError"] <> run["StandardOutput"], UpTo[500]], ToString[run]]|>];
@@ -1176,7 +1178,7 @@ freshKernelBuild[source_String, buildDir_String, dependencies_List : {}] := Modu
     If[ kernel === None, Return[<|"Failure" -> "no kernel executable under " <> $InstallationDirectory|>, Module]];
     script = FileNameJoin[{$TemporaryDirectory, CreateUUID["pacletpage-build-"] <> ".wl"}];
     Export[script, pacletBuildScript[source, buildDir, dependencies], "Text"];
-    run = RunProcess[{kernel, "-noprompt", "-script", script}];
+    run = runWatched[{kernel, "-noprompt", "-script", script}, "archive: PacletBuild builds what is left, the search index and the archive"];
     DeleteFile[script];
     line = If[AssociationQ[run], SelectFirst[StringSplit[run["StandardOutput"], "\n"], StringStartsQ[#, "PACLETPAGE-BUILD "] &, None], None];
     Replace[If[StringQ[line], ImportString[StringDrop[line, 17], "RawJSON"], None], Except[_Association] :>
@@ -1259,9 +1261,11 @@ documentationLinkBase[paclet_PacletObject] := Replace[
 ];
 
 (* The script a page-building process runs: the stock documentation build over its share of the
-   changed pages, without the search indexes, writing the record entries PacletBuild keeps for them
-   to a file. Its output goes to a log, so that nothing waits on a full pipe. *)
-pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List] := StringJoin[
+   changed pages, without the search indexes, a page at a time, each within limit seconds, writing
+   the record entries PacletBuild keeps for them to a file after each page, so that what a process
+   built is known even when it is stopped. Its output goes to a log, so that nothing waits on a
+   full pipe. *)
+pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List, limit_ : 900] := StringJoin[
     "$ProgressReporting = False;\n",
     "$Output = $Messages = {OpenWrite[", wlString[log], "]};\n",
     dependencyLoadCode[dependencies],
@@ -1271,21 +1275,27 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "pages = {", StringRiffle[wlString /@ pages, ", "], "};\n",
     "paclet = PacletObject[File[", wlString[source], "]];\n",
     "inputDir = ExpandFileName[", wlString[docsDir], "];\n",
-    "result = UsingFrontEnd @ DocumentationBuild`DocumentationBuildNotebooks[inputDir, ", wlString[builtDocsDir], ", MemberQ[pages, #] &,\n",
-    "    \"BuildSearchIndex\" -> False, \"SuccessThreshold\" -> -1, \"LinkBase\" -> ", wlString[documentationLinkBase[PacletObject[File[source]]]], ",\n",
-    "    \"CitationFunction\" -> PacletTools`PacletDocumentationBuild`Private`makePacletCitationFunction[paclet],\n",
-    "    \"TargetWolframVersionNumber\" -> PacletTools`PacletDocumentationBuild`Private`determinePacletDocumentationTargetVersionNumber[paclet]];\n",
-    "processed = Replace[result, {built : (_Success | _Association) :> built[\"ProcessedFiles\"], _ -> <||>}];\n",
-    "Put[Association[KeyValueMap[\n",
-    "    With[{page = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[MemberQ[pages, page], page -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
-    "    Replace[processed, Except[_Association] -> <||>]]], ", wlString[recordOut], "];\n"
+    "record = <||>;\n",
+    "Do[\n",
+    "    result = TimeConstrained[UsingFrontEnd @ DocumentationBuild`DocumentationBuildNotebooks[inputDir, ", wlString[builtDocsDir], ", # === page &,\n",
+    "        \"BuildSearchIndex\" -> False, \"SuccessThreshold\" -> -1, \"LinkBase\" -> ", wlString[documentationLinkBase[PacletObject[File[source]]]], ",\n",
+    "        \"CitationFunction\" -> PacletTools`PacletDocumentationBuild`Private`makePacletCitationFunction[paclet],\n",
+    "        \"TargetWolframVersionNumber\" -> PacletTools`PacletDocumentationBuild`Private`determinePacletDocumentationTargetVersionNumber[paclet]], ", ToString[limit], ", $TimedOut];\n",
+    "    processed = Replace[result, {built : (_Success | _Association) :> built[\"ProcessedFiles\"], _ -> <||>}];\n",
+    "    record = Join[record, Association[KeyValueMap[\n",
+    "        With[{built = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[built === page, built -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
+    "        Replace[processed, Except[_Association] -> <||>]]]];\n",
+    "    Put[record, ", wlString[recordOut], "],\n",
+    "    {page, pages}];\n"
 ];
 
 (* Scripts run as separate kernel processes, at most n at a time, each one killed past its
-   deadline: "Finished" or "TimedOut" by script. A process may start parallel kernels of its own,
-   which a parallel kernel may not, and the stock documentation build does when it installs a
-   format's paclet. *)
-runKernelScripts[runs_List, n_Integer] := Module[{kernel = kernelExecutable[], queue = runs, running = {}, finished = <||>},
+   deadline, or when its "Record" has not changed for "Stall" seconds: "Finished", "TimedOut" or
+   "Stalled" by script. A process may start parallel kernels of its own, which a parallel kernel may
+   not, and the stock documentation build does when it installs a format's paclet. When the deploy
+   is monitored, a line says when each run with a "Label" ends, and every minute how many have. *)
+runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
+    {kernel = kernelExecutable[], queue = runs, running = {}, finished = <||>, next = AbsoluteTime[] + 60},
     If[ kernel === None, Return[AssociationMap["NoKernel" &, Lookup[runs, "Script", {}]], Module]];
     While[ queue =!= {} || running =!= {},
         While[ Length[running] < n && queue =!= {},
@@ -1296,15 +1306,48 @@ runKernelScripts[runs_List, n_Integer] := Module[{kernel = kernelExecutable[], q
         Scan[If[MatchQ[#["Process"], _ProcessObject], drainProcess[#["Process"]]] &, running];
         running = Select[running, Function[run, Which[
             ! MatchQ[run["Process"], _ProcessObject] || ProcessStatus[run["Process"]] =!= "Running",
-                finished[run["Script"]] = "Finished"; False,
+                finished[run["Script"]] = "Finished"; runEnded[run, "finished"]; False,
             AbsoluteTime[] - run["Start"] > run["Deadline"],
-                KillProcess[run["Process"]]; finished[run["Script"]] = "TimedOut"; False,
+                KillProcess[run["Process"]]; finished[run["Script"]] = "TimedOut"; runEnded[run, "stopped past its time"]; False,
+            stalledQ[run],
+                KillProcess[run["Process"]]; finished[run["Script"]] = "Stalled"; runEnded[run, "stopped: nothing new for " <> ToString[run["Stall"]] <> " s"]; False,
             True, True
         ]]];
+        If[ AbsoluteTime[] > next,
+            monitor[what <> ": " <> ToString[Length[finished]] <> " of " <> ToString[Length[runs]] <> " done, " <> ToString[Length[running]] <> " running"];
+            next += 60
+        ];
         If[ running =!= {}, Pause[0.5]]
     ];
     finished
 ];
+
+(* A process run to its end, as RunProcess runs it, with a line when it starts, every minute while
+   it runs, and when it ends, when the deploy is monitored *)
+runWatched[command_List, what_String] := Module[{process, out = {}, err = {}, start = AbsoluteTime[], next},
+    monitor[what];
+    process = StartProcess[command];
+    If[ ! MatchQ[process, _ProcessObject], Return[$Failed, Module]];
+    next = start + 60;
+    While[ ProcessStatus[process] === "Running",
+        AppendTo[out, ReadString[ProcessConnection[process, "StandardOutput"], EndOfBuffer]];
+        AppendTo[err, ReadString[ProcessConnection[process, "StandardError"], EndOfBuffer]];
+        If[ AbsoluteTime[] > next, monitor[what <> ": " <> ToString[Round[(AbsoluteTime[] - start) / 60]] <> " min"]; next += 60];
+        Pause[0.5]
+    ];
+    AppendTo[out, ReadString[ProcessConnection[process, "StandardOutput"], EndOfFile]];
+    AppendTo[err, ReadString[ProcessConnection[process, "StandardError"], EndOfFile]];
+    monitor[what <> ": done in " <> ToString[Round[AbsoluteTime[] - start]] <> " s"];
+    <|"ExitCode" -> ProcessInformation[process, "ExitCode"],
+      "StandardOutput" -> StringJoin[Select[out, StringQ]], "StandardError" -> StringJoin[Select[err, StringQ]]|>
+];
+
+runEnded[run_Association, how_String] := If[StringQ[Lookup[run, "Label", None]], monitor[run["Label"] <> " " <> how]];
+
+(* a run that has recorded nothing new for its "Stall" seconds, since it started or since its record
+   last changed *)
+stalledQ[run_Association] := NumericQ[Lookup[run, "Stall", None]] && AbsoluteTime[] - Max[run["Start"],
+    If[StringQ[Lookup[run, "Record", None]] && FileExistsQ[run["Record"]], AbsoluteTime[FileDate[run["Record"]]], 0]] > run["Stall"];
 
 drainProcess[process_ProcessObject] := (
     ReadString[ProcessConnection[process, "StandardOutput"], EndOfBuffer];
@@ -1316,24 +1359,39 @@ drainProcess[process_ProcessObject] := (
    page and packs. The shares are small, so that the processes stay busy to the end. The number of
    pages built here. *)
 buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordFile_String, changed_List, n_Integer, limit_, dependencies_List] := Module[
-    {work, shares, runs, finished, record},
+    {work, runs, again, retries, record},
     If[ changed === {} || n < 2, Return[0, Module]];
     work = CreateDirectory[];
-    shares = Partition[changed, UpTo[Max[1, Min[25, Ceiling[Length[changed] / (4 n)]]]]];
     If[ ! DirectoryQ[builtDocsDir], CreateDirectory[builtDocsDir, CreateIntermediateDirectories -> True]];
-    runs = MapIndexed[
-        Function[{pages, index}, With[{base = FileNameJoin[{work, "share-" <> IntegerString[First[index]]}]},
-            Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, pages, base <> "-record.wl", base <> ".log", dependencies], "Text"];
-            <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Deadline" -> limit * Length[pages] + 120|>
-        ]],
-        shares
+    monitor["archive: " <> ToString[Length[changed]] <> " changed pages built in " <> ToString[n] <> " processes"];
+    runs = pageShareRuns[source, docsDir, builtDocsDir, changed, n, limit, dependencies, work, "share"];
+    runKernelScripts[runs, n, "archive: page shares"];
+    (* a share stopped before its end leaves its unbuilt pages to one more process each *)
+    again = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ runs];
+    retries = If[ again === {}, {},
+        monitor["archive: " <> ToString[Length[again]] <> " pages again, in new processes"];
+        pageShareRuns[source, docsDir, builtDocsDir, again, n, limit, dependencies, work, "again"]
     ];
-    finished = runKernelScripts[runs, n];
-    record = Join[readRecord[recordFile], Association[Select[Map[readRecord[#["Record"]] &, runs], AssociationQ]]];
+    If[ retries =!= {}, runKernelScripts[retries, n, "archive: pages again"]];
+    record = Join[readRecord[recordFile], Association[Select[Map[readRecord[#["Record"]] &, Join[runs, retries]], AssociationQ]]];
     If[ ! DirectoryQ[DirectoryName[recordFile]], CreateDirectory[DirectoryName[recordFile], CreateIntermediateDirectories -> True]];
     Put[record, recordFile];
     DeleteDirectory[work, DeleteContents -> True];
     Count[Lookup[record, changed, None], KeyValuePattern["Result" -> Except[_?FailureQ]]]
+];
+
+(* the shares of pages and their processes' scripts, small enough to keep every process busy to the
+   end; a share whose record has not changed for a page's time and two minutes has stalled *)
+pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_Integer, limit_, dependencies_List, work_String, kind_String] := With[
+    {shares = Partition[pages, UpTo[Max[1, Min[25, Ceiling[Length[pages] / (4 n)]]]]]},
+    MapIndexed[
+        Function[{share, index}, With[{base = FileNameJoin[{work, kind <> "-" <> IntegerString[First[index]]}]},
+            Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies, limit], "Text"];
+            <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Pages" -> share, "Deadline" -> limit * Length[share] + 120, "Stall" -> limit + 120,
+              "Label" -> "archive: " <> kind <> " " <> IntegerString[First[index]] <> " of " <> IntegerString[Length[shares]] <> " (" <> IntegerString[Length[share]] <> " pages)"|>
+        ]],
+        shares
+    ]
 ];
 
 (* the number of page-building processes: True, as many as the processors and the memory allow
@@ -1389,6 +1447,7 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
     ];
     pruned = pruneBuiltPages[FileNameJoin[{source, "Documentation"}], builtDocsDir, recordFile];
     changed = changedPages[FileNameJoin[{source, "Documentation"}], builtDocsDir, readRecord[recordFile]];
+    monitor["archive: " <> ToString[Length[authoring]] <> " documentation pages, " <> ToString[Length[changed]] <> " to build"];
     processes = If[ Length[changed] > 1, pageProcesses[Lookup[pageOptions, "Parallel", False]], 0];
     parallel = buildPagesInParallel[source, FileNameJoin[{source, "Documentation"}], builtDocsDir, recordFile, changed, processes, Lookup[pageOptions, "TimeConstraint", 900], dependencies];
     built = freshKernelBuild[source, buildDir, dependencies];
@@ -1600,7 +1659,7 @@ DeployPacletResource::commit = "`1` is already published from commit `2`, not `3
 DeployPacletResource::unknowncommit = "`1` is already published from commit `2`, and this paclet's commit is unknown (not a git checkout); nothing was deployed. Pass \"Commit\", or use \"Republish\" -> True.";
 DeployPacletResource::nocommit = "`1` is already published and records no commit; nothing was deployed. Use \"Republish\" -> True to replace it.";
 
-DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
+DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Catch[Module[
     {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed, symbolRules, pinned},
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];
     If[ ! readyToPublishQ[DeployPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "deploy"]];
@@ -1662,8 +1721,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         If[ offline, {None, None, None}, UsingFrontEnd @ Internal`InheritedBlock[
             {PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols, DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ,
              PacletResource`Private`createDocumentationEmbedPage, PacletResource`Notebooks`ProcessNotebookForEmbedding, PacletResource`Private`createSidebarLinkSection,
-             $deployMonitor, $rewrite},
-            $deployMonitor = TrueQ[OptionValue["Monitor"]];
+             $rewrite},
             $rewrite = rewriteKinds[OptionValue["Upload"]];
             installPageRule[];
             installRules[PacletResource`Private`fancyPacletSymbolBoxes, symbolRules];
@@ -1760,7 +1818,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
             <|"Transformed" -> 0, "Cached" -> 0, "TransformedAgain" -> 0|>
         ]
     |>
-], "deploy"];
+], "deploy"]];
 
 (* ==================== submitting to the Paclet Repository ==================== *)
 
@@ -1874,7 +1932,9 @@ Options[PublishPacletPage] = {
     "DryRun" -> False,
     "BuildOptions" -> {},
     "ResourceOptions" -> {},
-    "SiteOptions" -> {}
+    "SiteOptions" -> {},
+    "CheckOptions" -> {},
+    "Monitor" -> False
 };
 
 (* versions compared by their numbers: 1.0.10 is newer than 1.0.9 *)
@@ -1889,28 +1949,32 @@ submissionOptions[options_List] := Sequence @@ FilterRules[options, Except["Acco
 PublishPacletPage::cloud = DeployPacletResource::cloud;
 PublishPacletPage::account = "Connected to the Wolfram Cloud as `1`, not as `2`; nothing was built or published. Connect as `2` to publish this paclet.";
 
-PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Catch[Module[
-    {build, resource, catalog, site, check},
+PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Catch[Module[
+    {build, resource, catalog, site, check, monitored = TrueQ[OptionValue["Monitor"]]},
     (* the account first: a paclet's documentation may publish as it is built, as PacletPage's own
        tutorial does, so a dry run that builds takes the account too; one that does not only reports *)
     If[ stopsQ[offlineDryRunQ[OptionValue["DryRun"]] || publishingAccountQ[PublishPacletPage, OptionValue["Account"]], TrueQ[OptionValue["DryRun"]] && ! TrueQ[OptionValue["Build"]]],
         Throw[$Failed, "publish"]];
-    build = If[ TrueQ[OptionValue["Build"]], BuildPacletDocumentation[dir, Sequence @@ OptionValue["BuildOptions"]], None];
+    build = If[ TrueQ[OptionValue["Build"]], BuildPacletDocumentation[dir, Sequence @@ OptionValue["BuildOptions"], "Monitor" -> monitored], None];
     If[ build === $Failed, Throw[$Failed, "publish"]];
-    resource = DeployPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> OptionValue["DryRun"], Sequence @@ OptionValue["ResourceOptions"]];
-    If[ resource === $Failed || FailureQ[resource], Throw[resource, "publish"]];
-    If[ TrueQ[OptionValue["DryRun"]],
-        Throw[<|"Build" -> build, "Resource" -> resource, "Site" -> None, "Check" -> None,
-            "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[OptionValue["ResourceOptions"]]], None]|>, "publish"]];
-    catalog = PacletPageCatalog[resource["Resource"], "Documentation" -> dir];
-    If[ catalog === $Failed, Throw[$Failed, "publish"]];
-    site = DeployPacletPage[catalog, name, "Source" -> dir, "Account" -> OptionValue["Account"], Sequence @@ OptionValue["SiteOptions"]];
-    If[ site === $Failed, Throw[$Failed, "publish"]];
-    (* a site just published may have pages the cloud has not rendered yet: what fails is checked
-       again for up to two minutes *)
-    check = If[ TrueQ[OptionValue["Check"]], CheckPacletPage[catalog, name, "Pages" -> All, "Wait" -> 120], None];
+    (* the parallel kernels the deploy asks for serve the site's uploads too, so they stay until the
+       site is published and checked *)
+    withDeployKernels[Lookup[Association[Cases[Flatten[{OptionValue["ResourceOptions"]}], _Rule]], "Parallel", False], Function[kernels,
+        resource = DeployPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> OptionValue["DryRun"], Sequence @@ OptionValue["ResourceOptions"]];
+        If[ resource === $Failed || FailureQ[resource], Throw[resource, "publish"]];
+        If[ TrueQ[OptionValue["DryRun"]],
+            Throw[<|"Build" -> build, "Resource" -> resource, "Site" -> None, "Check" -> None,
+                "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[OptionValue["ResourceOptions"]]], None]|>, "publish"]];
+        catalog = PacletPageCatalog[resource["Resource"], "Documentation" -> dir, "Monitor" -> monitored];
+        If[ catalog === $Failed, Throw[$Failed, "publish"]];
+        site = DeployPacletPage[catalog, name, "Source" -> dir, "Account" -> OptionValue["Account"], Sequence @@ OptionValue["SiteOptions"]];
+        If[ site === $Failed, Throw[$Failed, "publish"]];
+        (* a site just published may have pages the cloud has not rendered yet: what fails is
+           checked again for up to two minutes *)
+        check = If[ TrueQ[OptionValue["Check"]], CheckPacletPage[catalog, name, Sequence @@ OptionValue["CheckOptions"], "Pages" -> All, "Wait" -> 120], None]
+    ]];
     <|
         "Build" -> build, "Resource" -> resource, "Site" -> site, "Check" -> check,
         "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], submissionOptions[OptionValue["ResourceOptions"]]], None]
     |>
-], "publish"];
+], "publish"]];

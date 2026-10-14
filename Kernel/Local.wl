@@ -23,9 +23,8 @@ BuildPacletPageSite::dir = "`1` is not a paclet directory with documentation not
 BuildPacletPageSite::render = "`1` pages did not render: `2`.";
 BuildPacletPageSite::pages = "`1` are not pages of the paclet's documentation.";
 
-BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Module[
-    {paclet, local, catalog, target, stage, cache, wanted, keys, cachedQ, hits, misses, results, failed, files, monitor},
-    monitor = TrueQ[OptionValue["Monitor"]];
+BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Module[
+    {paclet, local, catalog, target, stage, cache, wanted, keys, cachedQ, hits, misses, results, failed, files},
     local = If[FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] || FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]], localDocumentation[dir], <||>];
     If[ local === <||>, Message[BuildPacletPageSite::dir, dir]; Return[$Failed, Module]];
     paclet = PacletObject[File[dir]];
@@ -46,7 +45,7 @@ BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Module[
     (* the shared stylesheets, scripts and fonts come with any render: with every page cached, from
        the cache *)
     If[ misses === {} && ! DirectoryQ[FileNameJoin[{cache, "assets"}]], misses = Take[Keys[local], 1]; hits = Rest[hits]];
-    If[ monitor, Print["site: ", Length[hits], " pages rendered before, ", Length[misses], " to render"]];
+    monitor["site", ToString[Length[hits]] <> " pages rendered before, " <> ToString[Length[misses]] <> " to render"];
     results = renderPages[dir, paclet, KeyTake[local, misses], stage, OptionValue["Parallel"], OptionValue["TimeConstraint"]];
     failed = Keys[Select[results, ! TrueQ[#] &]];
     If[ failed =!= {}, Message[BuildPacletPageSite::render, Length[failed], Take[failed, UpTo[10]]]];
@@ -76,7 +75,7 @@ BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Module[
         "Cached" -> Length[hits],
         "Failed" -> failed
     |>
-];
+]];
 
 (* The catalog of a paclet's own documentation notebooks: each page rendered at
    Documentation/<kind>/<name>.html beside the site *)
@@ -147,19 +146,20 @@ takeRender[entry_String, stage_String, id_String] := (
 
 (* The pages rendered in separate kernel processes, each with a front end of its own and a time
    limit a page, and each into a directory of its own, merged into stage after: True or the
-   failure, by page *)
+   failure, by page. A process records each page as it renders; one stopped before its end leaves
+   its unrendered pages to one more process each. *)
 renderPages[_, _, pages_Association, _, _, _] /; pages === <||> := <||>;
 renderPages[dir_String, paclet_PacletObject, pages_Association, stage_String, parallel_, limit_] := Module[
-    {n = Max[1, pageProcesses[parallel]], work = CreateDirectory[], shares, runs, results},
-    shares = Partition[Keys[pages], UpTo[Max[1, Min[25, Ceiling[Length[pages] / (4 n)]]]]];
-    runs = MapIndexed[
-        Function[{ids, index}, With[{base = FileNameJoin[{work, "share-" <> IntegerString[First[index]]}]},
-            Export[base <> ".wl", renderShareScript[FileNameJoin[{dir, "Documentation"}], base, KeyTake[pages, ids], documentationLinkBase[paclet], limit, base <> ".record.wl", base <> ".log"], "Text"];
-            <|"Script" -> base <> ".wl", "Record" -> base <> ".record.wl", "Out" -> base, "Deadline" -> limit * Length[ids] + 120|>
-        ]],
-        shares
+    {n = Max[1, pageProcesses[parallel]], work = CreateDirectory[], runs, again, retries, results},
+    runs = renderRuns[dir, paclet, pages, n, limit, work, "share"];
+    runKernelScripts[runs, n, "site: render shares"];
+    again = Catenate[Complement[#["Pages"], Keys[Replace[If[FileExistsQ[#["Record"]], Get[#["Record"]], <||>], Except[_Association] -> <||>]]] & /@ runs];
+    retries = If[ again === {}, {},
+        monitor["site", ToString[Length[again]] <> " pages again, in new processes"];
+        renderRuns[dir, paclet, KeyTake[pages, again], n, limit, work, "again"]
     ];
-    runKernelScripts[runs, n];
+    If[ retries =!= {}, runKernelScripts[retries, n, "site: pages again"]];
+    runs = Join[runs, retries];
     (* each process's pages, from its own directory, and its shared files when stage has none yet *)
     results = Join @@ Map[
         Function[run, With[{record = Replace[If[FileExistsQ[run["Record"]], Get[run["Record"]], <||>], Except[_Association] -> <||>]},
@@ -178,17 +178,33 @@ renderPages[dir_String, paclet_PacletObject, pages_Association, stage_String, pa
     Join[AssociationMap[Missing["NotRendered"] &, Keys[pages]], KeyTake[results, Keys[pages]]]
 ];
 
-(* a process's script: each page rendered, as the documentation center shows it, within the limit;
-   whether it rendered, by page *)
+(* the shares of pages and their processes, each share's record written as its pages render; a
+   share whose record has not changed for a page's time and two minutes has stalled *)
+renderRuns[dir_String, paclet_PacletObject, pages_Association, n_Integer, limit_, work_String, kind_String] := With[
+    {shares = Partition[Keys[pages], UpTo[Max[1, Min[25, Ceiling[Length[pages] / (4 n)]]]]]},
+    MapIndexed[
+        Function[{ids, index}, With[{base = FileNameJoin[{work, kind <> "-" <> IntegerString[First[index]]}]},
+            Export[base <> ".wl", renderShareScript[FileNameJoin[{dir, "Documentation"}], base, KeyTake[pages, ids], documentationLinkBase[paclet], limit, base <> ".record.wl", base <> ".log"], "Text"];
+            <|"Script" -> base <> ".wl", "Record" -> base <> ".record.wl", "Out" -> base, "Pages" -> ids, "Deadline" -> limit * Length[ids] + 120, "Stall" -> limit + 120,
+              "Label" -> "site: render " <> kind <> " " <> IntegerString[First[index]] <> " of " <> IntegerString[Length[shares]] <> " (" <> IntegerString[Length[ids]] <> " pages)"|>
+        ]],
+        shares
+    ]
+];
+
+(* a process's script: each page rendered, as the documentation center shows it, within the limit,
+   and whether it rendered recorded by page as soon as it has *)
 renderShareScript[docsDir_String, out_String, pages_Association, linkBase_, limit_, recordOut_String, log_String] := StringJoin[
     "$ProgressReporting = False;\n",
     "$Output = $Messages = {OpenWrite[", wlString[log], "]};\n",
     "Needs[\"DocumentationBuild`\"];\n",
     "pages = <|", StringRiffle[KeyValueMap[wlString[#1] <> " -> " <> wlString[#2] &, pages], ", "], "|>;\n",
-    "Put[Association[KeyValueMap[\n",
-    "    #1 -> MatchQ[TimeConstrained[UsingFrontEnd @ DocumentationBuild`DocumentationBuildHTML[", wlString[docsDir], ", ", wlString[out], ",\n",
-    "        \"SingleFile\" -> #2, \"CompleteHTMLQ\" -> True, \"LinkBase\" -> ", If[StringQ[linkBase], wlString[linkBase], "None"], "], ", ToString[limit], ", $TimedOut], _Success] &,\n",
-    "    pages]], ", wlString[recordOut], "];\n"
+    "record = <||>;\n",
+    "KeyValueMap[\n",
+    "    (record[#1] = MatchQ[TimeConstrained[UsingFrontEnd @ DocumentationBuild`DocumentationBuildHTML[", wlString[docsDir], ", ", wlString[out], ",\n",
+    "        \"SingleFile\" -> #2, \"CompleteHTMLQ\" -> True, \"LinkBase\" -> ", If[StringQ[linkBase], wlString[linkBase], "None"], "], ", ToString[limit], ", $TimedOut], _Success];\n",
+    "     Put[record, ", wlString[recordOut], "]) &,\n",
+    "    pages];\n"
 ];
 
 (* The pages under Documentation/, as the shell asks for them. The renders name a stylesheet

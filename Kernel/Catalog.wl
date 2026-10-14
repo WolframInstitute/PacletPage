@@ -318,9 +318,12 @@ PacletPageCatalog[source_, opts : OptionsPattern[]] := Module[
     pages = Select[pages, StringQ[#["Notebook"]] &];
 
     (* keywords, and titles a page lacks, from the built documentation *)
-    Scan[
-        Function[key, pages[key] = withMetadata[pages[key], notebookMetadata[localNotebook[local[key]]]]],
-        Intersection[Keys[pages], Keys[local]]
+    With[{keys = Intersection[Keys[pages], Keys[local]]},
+        Do[
+            pages[keys[[i]]] = withMetadata[pages[keys[[i]]], notebookMetadata[localNotebook[local[keys[[i]]]]]];
+            If[ monitor && (Mod[i, 200] === 0 || i === Length[keys]), Print["PacletPageCatalog: metadata of ", i, " of ", Length[keys], " pages"]],
+            {i, Length[keys]}
+        ]
     ];
 
     pages = Join[definitionPages[spec], pages];

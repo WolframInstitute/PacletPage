@@ -18,7 +18,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 
 - The site is the published site's shell, its filter, its rails and its frame, around the paclet's own documentation notebooks, each rendered as the documentation center shows it. Nothing is read from the cloud or written to it, so it previews the documentation before anything is published, and needs no account.
 - `dir` needs its documentation notebooks, which `BuildPacletDocumentation` writes.
-- Each page renders in a kernel process of its own, with a front end and `"TimeConstraint"` seconds; a page past it is reported and left out. `"Parallel" -> n` renders in `n` processes at once, `True` in as many as the processors and the memory allow.
+- Each page renders in a kernel process of its own, with a front end and `"TimeConstraint"` seconds; a page past it is reported and left out. A process records each page as it renders it; one that renders nothing for a page's time is stopped, and the pages it left get one more process. `"Parallel" -> n` renders in `n` processes at once, `True` in as many as the processors and the memory allow.
 - Each render is kept in *dir*`/build/html`, keyed by its notebook and the versions that render it, so a site built again renders only the pages whose notebooks changed. `"UseCache" -> False` renders every page again.
 - `"Pages" -> {id, ...}` renders those pages, such as `"ref/Name"` or `"guide/Name"`, and takes the others from the cache: a quick look at a page being written.
 - The site is written beside the old one and replaces it whole once it is complete, so a server showing it never shows half a site.

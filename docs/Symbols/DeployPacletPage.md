@@ -19,7 +19,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 - `name` is a cloud object name such as `"PAdic"` or `"Sites/PAdic"`.
 - The site lives in the account as sibling objects: `name`, the site; `name <> "Page"`, the page its frame shows; `name <> "Feedback"`, the feedback form and the team's pages; and, with `"Source"`, `name <> "Source"`, the authoring notebooks.
 - Both pages are published as UTF-8 HTML, the frame's page first, so the site never frames a page that is not there yet.
-- With `"Source" -> dir`, the authoring notebooks under `dir`, and its `ResourceDefinition.nb`, are published beside the site, and each page gets a toggle between the built page and its source. Only notebooks that changed since the last publish are uploaded; notebooks that were removed are deleted. Cleanup only deletes objects strictly beneath the source directory.
+- With `"Source" -> dir`, the authoring notebooks under `dir`, and its `ResourceDefinition.nb`, are published beside the site, and each page gets a toggle between the built page and its source. Only notebooks that changed since the last publish are uploaded, fifty at a time, with the record of what was uploaded written after each fifty, so a publish that stops uploads again only what it had not; notebooks that were removed are deleted. Cleanup only deletes objects strictly beneath the source directory.
 - The following options can be given:
 
 | Option | Default | Description |
@@ -28,6 +28,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"FeedbackOptions"` | `{}` | options for `DeployPacletPageFeedback` |
 | `"Source"` | `None` | a paclet directory, whose authoring notebooks become the pages' sources |
 | `"Upload"` | `Automatic` | `All` uploads every source notebook again, whatever changed |
+| `"Monitor"` | `False` | whether to print the source notebooks' uploads as they go |
 | `"Account"` | `Automatic` | the Wolfram ID that must be connected |
 | `Permissions` | `"Public"` | the permissions of the two pages and the source notebooks |
 
