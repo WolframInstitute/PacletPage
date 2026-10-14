@@ -16,6 +16,9 @@
      page controls */
   #resource-frame { display: none; position: fixed; inset: 0; width: 100%; height: 100%; border: 0; z-index: 1; background: #fff; }
   #notebook-embed .notebook-html { display: block; }
+  /* The cloud draws a summary box's cells top-aligned, so its expand button and icon sit at the
+     top of the box; the desktop draws them centered beside the box's rows. */
+  #notebook-embed .FrameBox-Inner .PaneSelectorBox-Inner td { vertical-align: middle !important; }
   #err {
     display: none; margin: 40vh auto 0; max-width: 420px; text-align: center;
     font: 14px/1.5 "Source Sans Pro", -apple-system, sans-serif; color: #666;

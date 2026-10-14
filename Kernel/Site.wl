@@ -181,6 +181,9 @@ $stockChromeCSS = StringJoin[
     "overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}",
     (* icons the shipped asset bundle lacks, drawn as broken images beside their text labels *)
     "img[src*=\"/img/DetailsOptions-\"],img[src*=\"/img/Options-hamburger-\"]{display:none!important}",
+    (* the cloud draws a summary box's cells top-aligned, so its expand button and icon sit at the
+       top of the box; the desktop draws them centered beside the box's rows *)
+    ".FrameBox-Inner .PaneSelectorBox-Inner td{vertical-align:middle!important}",
     (* the resource page alone: a Paclet Source link for the author, which the site's own toggle
        replaces; an Examples section with no examples is hidden by the page, which can tell *)
     "#Paclet-Source,#Paclet-Source+ul{display:none!important}"
