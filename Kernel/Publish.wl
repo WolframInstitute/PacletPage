@@ -433,11 +433,15 @@ $appearanceElements = None;
    stock deploy carries on past one, and then deploys a resource page built from the failure. *)
 $cloudWriteFailures = "srverr" | "notperm" | "notauth" | "unavailable" | "cloudprecondition";
 $deployStep = None;
+$deployMonitor = False;
+
+(* a step of the deploy, printed when it is monitored *)
+monitor[step_] := If[TrueQ[$deployMonitor], Print["deploy: ", step]];
 
 SetAttributes[stopOnCloudWriteFailure, HoldFirst];
 stopOnCloudWriteFailure[expr_] := Block[
     (* the stock deploy names each step as it starts it *)
-    {$deployStep = None, PacletResource`Private`setDNCProgress = Function[step, $deployStep = step]},
+    {$deployStep = None, PacletResource`Private`setDNCProgress = Function[step, $deployStep = step; monitor[step]]},
     Catch[Internal`HandlerBlock[{"Message", cloudWriteFailure}, expr], "cloudwrite"]
 ];
 
@@ -506,6 +510,83 @@ staleDocumentation[relatives_List, written_List] := Select[relatives,
         "html", ! MemberQ[written, StringReplace[#, ".html" ~~ EndOfString -> ".nb"]],
         _, False
     ] &
+];
+
+(* The copy-to-clipboard form of a documented symbol on the resource page. The stock boxes paste
+   PacletSymbol[<the resource's URL>, symbol], which a kernel resolves by looking the URL up as a
+   paclet name and never finding it, so every fresh session downloads the resource again. These
+   paste a form that installs the paclet once, from its published archive or else its resource,
+   and resolves it by name after. The stock boxes are kept per id, so this is a rule placed before
+   them, for the ids of this resource. *)
+resourceURLQ[url_String, name_String] := StringStartsQ[url, "https://wolfr.am/"] || StringContainsQ[url, "DeployedResources/Paclet/" <> name];
+
+installForm[name_String, archive_String, _] := With[{n = name, a = archive}, HoldComplete[If[PacletFind[n] === {}, PacletInstall[a], n]]];
+installForm[name_String, None, resource_String] := With[{n = name, r = resource}, HoldComplete[If[PacletFind[n] === {}, PacletInstall[ResourceObject[r]], n]]];
+installForm[_, _, _] := None;
+
+symbolBoxRule[name_String, form_HoldComplete] :=
+    HoldPattern[PacletResource`Private`fancyPacletSymbolBoxes[HoldComplete[url_String /; resourceURLQ[url, name]], paclet_, symbol_]] :>
+        PacletResource`Private`fancyPacletSymbolBoxes[form, paclet, symbol];
+
+installSymbolBoxes[name_String, form_HoldComplete] := If[ DownValues[PacletResource`Private`fancyPacletSymbolBoxes] =!= {},
+    Unprotect[PacletResource`Private`fancyPacletSymbolBoxes];
+    DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = Prepend[DownValues[PacletResource`Private`fancyPacletSymbolBoxes], symbolBoxRule[name, form]];
+    True,
+    False
+];
+installSymbolBoxes[_, _] := False;
+
+(* The symbols the resource page's examples link: the deploy looks the paclet up by name again, which
+   can find another copy of it, one whose PacletInfo declares none or others *)
+pinDeclaredSymbols[name_String, symbols : {__String}] := If[ DownValues[PacletResource`Private`pacletDeclaredSymbols] =!= {},
+    Unprotect[PacletResource`Private`pacletDeclaredSymbols];
+    DownValues[PacletResource`Private`pacletDeclaredSymbols] = Join[
+        {
+            HoldPattern[PacletResource`Private`pacletDeclaredSymbols[name]] :> symbols,
+            HoldPattern[PacletResource`Private`pacletDeclaredSymbols[KeyValuePattern["Name" -> name]]] :> symbols
+        },
+        DownValues[PacletResource`Private`pacletDeclaredSymbols]
+    ];
+    True,
+    False
+];
+pinDeclaredSymbols[_, _] := False;
+
+(* The scrape lints the paclet's code with CodeInspector, which says nothing about its documentation
+   and, on some images, trips an assertion in the code parser that fails the scrape *)
+codeLintOff[] := If[ DownValues[DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ] =!= {},
+    Unprotect[DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ];
+    DownValues[DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ] = {
+        HoldPattern[DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ[_]] :> False
+    };
+    True,
+    False
+];
+
+(* The errors the definition notebook's own check finds, which name what stopped a scrape; not the
+   missing PacletInfo cell, which a definition notebook built from markdown never has *)
+$builtNotebookErrors = {"NoPacletInfoFileCell"};
+
+scrapeErrors[notebook_NotebookObject] := DeleteCases[
+    Lookup[
+        Select[Replace[Normal[DefinitionNotebookClient`CheckDefinitionNotebook[notebook]], Except[_List] -> {}], AssociationQ[#] && Lookup[#, "Level", ""] === "Error" &],
+        "Tag", Nothing
+    ],
+    Alternatives @@ $builtNotebookErrors
+];
+
+(* the URL of the archive "Archive" publishes, the latest under its directory *)
+archiveURL[dirName_String, name_String] := First[CloudObject[StringTrim[dirName, "/"] <> "/" <> StringReplace[name, "/" -> "__"] <> ".paclet"]];
+archiveURL[_, _] := None;
+
+(* the symbols a built paclet's PacletInfo declares *)
+archiveSymbols[builtRoot_String] := Module[{file = FileNameJoin[{builtRoot, "PacletInfo.wl"}], info},
+    info = If[FileExistsQ[file], FirstCase[Import[file, "HeldExpressions"], HoldComplete[PacletObject[assoc_Association]] :> assoc, None], None];
+    If[ ! AssociationQ[info], Return[{}, Module]];
+    Replace[
+        FirstCase[Lookup[info, "Extensions", {}], {"Kernel", rules___} :> Lookup[Association[Cases[{rules}, _Rule]], "Symbols", {}], {}],
+        Except[{___String}] -> {}
+    ]
 ];
 
 deployFunctions[] := {
@@ -1015,7 +1096,7 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
         names : {__String} :> declareSymbols[built["Archive"], FileNameJoin[{buildDir, prefix}], names, True],
         _ -> None
     }];
-    <|"Archive" -> built["Archive"], "Pages" -> Length[pages], "Load" -> load, "DeclaredSymbols" -> declared, "ArchiveSize" -> Quantity[FileByteCount[built["Archive"]], "Bytes"],
+    <|"Archive" -> built["Archive"], "Pages" -> Length[pages], "Load" -> load, "DeclaredSymbols" -> declared, "Symbols" -> archiveSymbols[FileNameJoin[{buildDir, prefix}]], "ArchiveSize" -> Quantity[FileByteCount[built["Archive"]], "Bytes"],
       "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel|>|>
 ];
 
@@ -1105,9 +1186,11 @@ Options[DeployPacletResource] = {
     "Exclude" -> {},
     "ArchiveCheck" -> None,
     "Symbols" -> Automatic,
+    "Monitor" -> False,
     Permissions -> "Public"
 };
 
+DeployPacletResource::blockers = "The definition notebook's own check finds these errors: `1`.";
 DeployPacletResource::write = "`1` Nothing was deleted, so the resource keeps its pages; deploy again.";
 DeployPacletResource::nodef = "`1` has no ResourceDefinition.nb or no documentation: build it first with BuildPacletDocumentation.";
 DeployPacletResource::build = "PacletBuild failed: `1`.";
@@ -1175,7 +1258,16 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
        offline dry run stops before it. *)
     hero = heroImage[OptionValue["HeroImage"], definition];
     {resource, location, deployed} = Replace[
-        If[ offline, {None, None, None}, UsingFrontEnd @ Module[{notebook, scraped, versioned, where, packed, done},
+        If[ offline, {None, None, None}, UsingFrontEnd @ Internal`InheritedBlock[
+            {PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols, DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ, $deployMonitor},
+            $deployMonitor = TrueQ[OptionValue["Monitor"]];
+            With[{form = installForm[name, archiveURL[OptionValue["Archive"], name], If[MatchQ[target, _CloudObject], First[target], None]]},
+                If[ MatchQ[form, _HoldComplete], installSymbolBoxes[name, form]]
+            ];
+            pinDeclaredSymbols[name, built["Symbols"]];
+            codeLintOff[];
+            Module[{notebook, scraped, versioned, where, packed, done},
+            monitor["scraping " <> definition];
             notebook = NotebookOpen[definition, Visible -> False];
             PacletObject[name];
             PacletResource`DefinitionNotebook`ScrapePacletDirectory[notebook];
@@ -1199,7 +1291,9 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
             packed = If[ MatchQ[versioned, _ResourceObject], Replace[Lookup[First[versioned], "PacletFile", None], File[file_] :> file], None];
             done = Which[
                 ! MatchQ[versioned, _ResourceObject] || where === None,
-                    Message[DeployPacletResource::scrape, definition, scraped]; $Failed,
+                    Message[DeployPacletResource::scrape, definition, scraped];
+                    With[{errors = scrapeErrors[notebook]}, If[errors =!= {}, Message[DeployPacletResource::blockers, errors]]];
+                    $Failed,
                 ! StringQ[packed] || realPath[packed] =!= realPath[built["Archive"]],
                     Message[DeployPacletResource::packed, packed, built["Archive"]]; $Failed,
                 TrueQ[OptionValue["DryRun"]],
@@ -1212,7 +1306,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
             (* the deploy reads the notebook's data, so the notebook closes after it *)
             NotebookClose[notebook];
             done
-        ]],
+        ]]],
         {$Failed :> Throw[$Failed, "deploy"], failure_Failure :> Throw[failure, "deploy"]}
     ];
     If[ deployed =!= None && ! MatchQ[deployed, _CloudObject], Message[DeployPacletResource::deploy, deployed]; Throw[$Failed, "deploy"]];

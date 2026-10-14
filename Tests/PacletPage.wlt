@@ -844,6 +844,98 @@ VerificationTest[
     TestID -> "Publish: the hero patch and the repository's error messages install"
 ]
 
+(* the resource page's symbols, with the stock deploy's own definitions *)
+VerificationTest[
+    Needs["PacletResource`"];
+    Internal`InheritedBlock[{PacletResource`Private`fancyPacletSymbolBoxes},
+        installSymbolBoxes["Pub/Sym", installForm["Pub/Sym", "https://c.example/obj/u/Paclets/Pub__Sym.paclet", "https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]];
+        Cases[
+            {
+                PacletResource`Private`fancyPacletSymbolBoxes[HoldComplete["https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"], "Pub/Sym", "PubSym`f"],
+                PacletResource`Private`fancyPacletSymbolBoxes[HoldComplete["https://wolfr.am/Pub-Sym"], "Pub/Sym", "PubSym`g"],
+                PacletResource`Private`fancyPacletSymbolBoxes[HoldComplete["https://c.example/obj/u/DeployedResources/Paclet/Other/X"], "Other/X", "X`h"]
+            },
+            InterpretationBox[_, interpretation_, ___] :> HoldComplete[interpretation]
+        ]
+    ],
+    {
+        HoldComplete[PacletSymbol[If[PacletFind["Pub/Sym"] === {}, PacletInstall["https://c.example/obj/u/Paclets/Pub__Sym.paclet"], "Pub/Sym"], "PubSym`f"]],
+        HoldComplete[PacletSymbol[If[PacletFind["Pub/Sym"] === {}, PacletInstall["https://c.example/obj/u/Paclets/Pub__Sym.paclet"], "Pub/Sym"], "PubSym`g"]],
+        HoldComplete[PacletSymbol["https://c.example/obj/u/DeployedResources/Paclet/Other/X", "X`h"]]
+    },
+    TestID -> "Publish: a symbol on the resource page copies as code that installs the paclet once, from its archive"
+]
+
+VerificationTest[
+    {installForm["Pub/Sym", None, "https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"], installForm["Pub/Sym", None, None]},
+    {HoldComplete[If[PacletFind["Pub/Sym"] === {}, PacletInstall[ResourceObject["https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]], "Pub/Sym"]], None},
+    TestID -> "Publish: without a published archive, the copied code installs the paclet from its resource"
+]
+
+VerificationTest[
+    Needs["PacletResource`"];
+    Internal`InheritedBlock[{PacletResource`Private`pacletDeclaredSymbols},
+        {
+            pinDeclaredSymbols["Pub/Sym", {"PubSym`f", "PubSym`g"}],
+            PacletResource`Private`pacletDeclaredSymbols[<|"Name" -> "Pub/Sym", "Version" -> "0.1.0", "Extensions" -> {}|>],
+            PacletResource`Private`pacletDeclaredSymbols["Pub/Sym"],
+            pinDeclaredSymbols["Pub/Sym", {}]
+        }
+    ],
+    {True, {"PubSym`f", "PubSym`g"}, {"PubSym`f", "PubSym`g"}, False},
+    TestID -> "Publish: the resource page links the symbols the fresh build declares, whatever copy of the paclet the deploy finds"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], result},
+        Export[FileNameJoin[{root, "PacletInfo.wl"}],
+            "PacletObject[<|\"Name\" -> \"Pub/Sym\", \"Version\" -> \"1.0.0\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"PubSym`\", \"Symbols\" -> {\"PubSym`f\"}}, {\"Documentation\", \"Language\" -> \"English\"}}|>]", "Text"];
+        result = {archiveSymbols[root], archiveSymbols[FileNameJoin[{root, "none"}]]};
+        DeleteDirectory[root, DeleteContents -> True];
+        result
+    ],
+    {{"PubSym`f"}, {}},
+    TestID -> "Archive: the symbols a built paclet declares, none without its PacletInfo.wl"
+]
+
+VerificationTest[
+    Needs["DefinitionNotebookClient`"];
+    Internal`InheritedBlock[{DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ},
+        With[{file = FindFile["WolframInstitute`PacletPage`"]},
+            {
+                DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ[file],
+                codeLintOff[],
+                DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ[file]
+            }
+        ]
+    ],
+    {True, True, False},
+    TestID -> "Publish: the scrape leaves the paclet's code unlinted"
+]
+
+VerificationTest[
+    Needs["DefinitionNotebookClient`"];
+    Block[{DefinitionNotebookClient`CheckDefinitionNotebook = Function[notebook, Dataset[{
+            <|"Level" -> "Error", "Tag" -> "NoPacletInfoFileCell"|>,
+            <|"Level" -> "Error", "Tag" -> "InvalidExample"|>,
+            <|"Level" -> "Warning", "Tag" -> "PacletCreatorMismatch"|>
+        }]]},
+        scrapeErrors[NotebookObject["fe", "nb"]]
+    ],
+    {"InvalidExample"},
+    TestID -> "Publish: a failed scrape names the definition notebook's errors, not the PacletInfo cell a built one never has"
+]
+
+VerificationTest[
+    Block[{$deployMonitor = True},
+        Reap[Block[{Print = Function[Null, Sow[StringJoin[ToString /@ {##}]]]},
+            stopOnCloudWriteFailure[PacletResource`Private`setDNCProgress["Deploying documentation"]; 1]
+        ]]
+    ],
+    {1, {{"deploy: Deploying documentation"}}},
+    TestID -> "Publish: a monitored deploy prints each step as it starts it"
+]
+
 VerificationTest[
     {
         releaseAllowedQ[DeployPacletResource, "1.0.0 at r", None, "abc"],

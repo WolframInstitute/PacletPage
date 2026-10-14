@@ -18,6 +18,7 @@ account = Replace[Environment["PACLETPAGE_ACCOUNT"], Except[_String?(StringLengt
 result = PublishPacletPage[dir, "PacletPage",
     "Account" -> account,
     "DryRun" -> MemberQ[Rest[$ScriptCommandLine], "--dry-run"],
+    "ResourceOptions" -> {"Monitor" -> True},
     "SiteOptions" -> {"FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}}}
 ]
 If[ ! AssociationQ[result], Exit[1]]

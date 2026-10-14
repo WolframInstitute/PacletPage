@@ -27,7 +27,10 @@ RelatedTutorials: [PublishingADocumentationSite]
 - With `"Parallel" -> n`, the changed pages are built in `n` kernel processes before `PacletBuild` runs, each with `"TimeConstraint"` seconds a page; `PacletBuild` builds whatever they did not, makes the search indexes and packs the archive. `"Parallel" -> True` starts as many processes as the processors and the memory allow.
 - The resource page is complete from its first visit, on any cloud subscription: its Details, the definition's examples, the main guide, the hero image (or the image given as `"HeroImage"`) and the source link. Deploying again replaces the page, the main guide, the example notebooks and every documentation page in place, so they stay readable throughout; the pages the new documentation no longer has are deleted once the deploy is complete.
 - A failed cloud write stops the deploy at once, with a `DeployPacletResource::write` message, and the result is a `Failure` whose `"Step"` names where it stopped. Nothing has been deleted then, so the resource keeps serving its pages; deploy again.
-- The resource page links the paclet's symbols in its examples, so that copied code runs in a fresh kernel, for the symbols the paclet declares in its Kernel extension. A paclet that declares none gets the public symbols the fresh kernel found, in the archive's `PacletInfo.wl` only; `"Symbols"` gives the list instead, or `None` leaves the archive as built.
+- The resource page links the paclet's symbols in its examples, so that copied code runs in a fresh kernel, for the symbols the archive's `PacletInfo.wl` declares in its Kernel extension, whatever other copy of the paclet this computer has. A paclet that declares none gets the public symbols the fresh kernel found, in the archive's `PacletInfo.wl` only; `"Symbols"` gives the list instead, or `None` leaves the archive as built.
+- A linked symbol copies as code that installs the paclet once and finds it by name after: from the archive `"Archive"` publishes, or else from the resource. A fresh kernel installs it on the first symbol it evaluates, and no other.
+- The scrape leaves the paclet's code unlinted, since it says nothing about the documentation. When the scrape fails, `DeployPacletResource::blockers` names the errors the definition notebook's own check finds.
+- With `"Monitor" -> True`, the deploy prints each step as it starts it.
 - The deployed resource records, in its `MetaInformation`, the paclet's version and the git commit it was built from. A version already deployed from another commit, or with no commit recorded, is refused before anything is built, since what installs as that version would silently change; `"Republish" -> True` replaces it. Outside a git checkout the commit is unknown, so give it as `"Commit"`.
 - With `"Archive" -> dir`, the built archive is also published in the cloud directory `dir`, as `<Publisher>__<Name>.paclet`, the latest, and with its version in the name, so `PacletInstall` can install it from a URL alone. The versioned archive records the commit too, and is refused the same way.
 - The deployed resource has the paclet's version as its `"Version"`.
@@ -51,6 +54,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Incremental"` | `False` | whether to build only the pages whose notebooks changed |
 | `"Parallel"` | `False` | the number of processes that build the changed pages, or `True` |
 | `"TimeConstraint"` | `900` | the seconds each page may take in those processes |
+| `"Monitor"` | `False` | whether to print each step of the deploy |
 | `Permissions` | `"Public"` | the resource's permissions |
 
 ## Basic Examples
