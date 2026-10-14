@@ -10,13 +10,17 @@
    Cloud.wl      publishing: the account, the pages, the source notebooks, cleanup, permissions
    Feedback.wl   the feedback form, its Databin and the team's pages
    Check.wl      reachability and version checks
-   Publish.wl    the pipeline: markdown -> documentation notebooks -> paclet resource -> site *)
+   Publish.wl    the pipeline: markdown -> documentation notebooks -> paclet resource -> site
+   Local.wl      the site rendered on this computer, without the cloud *)
 
 BeginPackage["WolframInstitute`PacletPage`"]
 
 PacletPageCatalog::usage = "PacletPageCatalog[resource] gives the catalog of the documentation pages of a published paclet: \
 each page's title, its published page, the notebook behind it, and the guide tree. resource is \"Publisher/Name\" or a \
 Paclet Repository URL for a paclet on the repository, or the URL or CloudObject of a paclet resource deployed to a cloud account.";
+
+BuildPacletPageSite::usage = "BuildPacletPageSite[dir] renders the documentation notebooks of the paclet in dir to HTML \
+on this computer and writes the site around them, under dir/build/site, without the cloud.";
 
 PacletPageFiles::usage = "PacletPageFiles[catalog] gives the site's pages for catalog, an association of the file \
 names \"index.html\" and \"page.html\" with their HTML.";
@@ -77,7 +81,7 @@ $packageDirectory = DirectoryName[$InputFileName];
 
 $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web"}];
 
-Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl"}];
+Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl"}];
 
 End[]
 

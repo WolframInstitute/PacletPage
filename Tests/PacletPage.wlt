@@ -955,6 +955,75 @@ VerificationTest[
     TestID -> "Archive: the pages an archive may lack: none by default, Automatic three or a hundredth of them"
 ]
 
+(* the site rendered on this computer *)
+localFixture[] := Module[{dir = CreateDirectory[], put},
+    put[path_List, nb_] := With[{file = FileNameJoin[Join[{dir, "Documentation", "English"}, path]]},
+        If[! DirectoryQ[DirectoryName[file]], CreateDirectory[DirectoryName[file], CreateIntermediateDirectories -> True]];
+        Export[file, nb, "NB"]
+    ];
+    Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/Name\", \"Version\" -> \"1.0.0\"|>]", "Text"];
+    put[{"Guides", "Name.nb"}, Notebook[{Cell["Name Guide", "GuideTitle"], Cell[TextData[ButtonBox["Sub", BaseStyle -> "Link", ButtonData -> "paclet:Pub/Name/guide/Sub"]], "GuideFunctionsSection"]}]];
+    put[{"Guides", "Sub.nb"}, Notebook[{Cell["Sub Guide", "GuideTitle"]}]];
+    put[{"ReferencePages", "Symbols", "F.nb"}, Notebook[{Cell["F", "ObjectName"]}]];
+    put[{"Tutorials", "T.nb"}, Notebook[{Cell["A Tutorial", "Title"], Cell["More About", "TutorialMoreAboutSection"]}]];
+    dir
+];
+
+VerificationTest[
+    Module[{dir = localFixture[], catalog},
+        catalog = localCatalog["Pub/Name", localDocumentation[dir]];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {
+            KeyTake[catalog, {"Kind", "DocBase", "RootGuide", "Resource", "Title"}],
+            Sort[Keys[catalog["Pages"]]],
+            catalog["Pages"]["guide/Name"]["Guides"],
+            {catalog["Pages"]["ref/F"]["Title"], catalog["Pages"]["ref/F"]["HTML"], catalog["Pages"]["tutorial/T"]["Stub"]},
+            catalogQ[catalog]
+        }
+    ],
+    {
+        <|"Kind" -> "Local", "DocBase" -> "Documentation/", "RootGuide" -> "guide/Name", "Resource" -> "", "Title" -> "Name Guide"|>,
+        {"guide/Name", "guide/Sub", "ref/F", "tutorial/T"},
+        {"guide/Sub"},
+        {"F", "Documentation/ref/F.html", True},
+        True
+    },
+    TestID -> "Local: the catalog of a paclet's own notebooks, each page rendered under Documentation/"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], files, config},
+        files = PacletPageFiles[localCatalog["Pub/Name", localDocumentation[dir]], "PageURL" -> ""];
+        DeleteDirectory[dir, DeleteContents -> True];
+        config = configOf[files["index.html"]];
+        {config["kind"], config["page"], config["routes"], StringContainsQ[config["hide"], ".menu-container"], config["home"]["id"]}
+    ],
+    {"local", "", {"Documentation/", "./", "paclet:Pub/Name/"}, True, "guide/Name"},
+    TestID -> "Local: the shell frames the rendered pages themselves, their links resolved against the site"
+]
+
+VerificationTest[
+    Module[{stage = CreateDirectory[], script, result},
+        CreateDirectory[FileNameJoin[{stage, "html", "ref"}], CreateIntermediateDirectories -> True];
+        CreateDirectory[FileNameJoin[{stage, "language-assets", "css"}], CreateIntermediateDirectories -> True];
+        CreateDirectory[FileNameJoin[{stage, "common", "js"}], CreateIntermediateDirectories -> True];
+        script = FileNameJoin[{stage, "common", "js", "lib.min.js"}];
+        Export[script, "/*! lib */\n!function(){}();\n2025-04-29 15:21:33,133 org.owasp.dependencycheck.App:91\nDEBUG - Exit code: 0\nvar x=1;", "Text"];
+        siteLayout[stage];
+        result = {DirectoryQ[FileNameJoin[{stage, "Documentation", "ref"}]], DirectoryQ[FileNameJoin[{stage, "language-assets-v2", "css"}]], ReadString[script]};
+        DeleteDirectory[stage, DeleteContents -> True];
+        result
+    ],
+    {True, True, "/*! lib */\n!function(){}();\nvar x=1;"},
+    TestID -> "Local: the pages under Documentation/, the stylesheets under the name they ask for, a script without a build log's lines"
+]
+
+VerificationTest[
+    SyntaxQ[renderShareScript["/d/Documentation", "/w/share-1", <|"ref/F" -> "/d/Documentation/English/ReferencePages/Symbols/F.nb"|>, "Pub/Name", 300, "/w/r.wl", "/w/log.txt"]],
+    True,
+    TestID -> "Local: a rendering process's script is Wolfram Language"
+]
+
 VerificationTest[
     staleDocumentation[
         {"guide/A.nb", "guide/A.html", "ref/B.nb", "ref/B.html", "ref/Gone.nb", "ref/Gone.html", "images/x.png"},

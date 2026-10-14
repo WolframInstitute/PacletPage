@@ -58,6 +58,8 @@ paclet with a documentation site, without a front end and without scripts of the
   reads and triages it, each entry with a status, set one at a time or many in one write, on pages
   open to the account, named readers and whole email domains.
 - Every page's source a toggle away: the notebook the page was built from.
+- A preview without the cloud: `BuildPacletPageSite` renders the documentation on this computer
+  and writes the same site around it, keeping each render for the next build.
 - Any published paclet: a site frames pages from the Paclet Repository or from a paclet resource
   deployed to a cloud account.
 - Upkeep: `CheckPacletPage` checks, as an anonymous reader, that the site, its pages and its

@@ -21,6 +21,11 @@
     (KNOWN[lid] = KNOWN[lid] || []).push(links[i]);
   }
 
+  // routes given relative to the site, a local site's, resolve against it
+  C.routes = C.routes.map(function (r) {
+    return /^[a-z][a-z0-9+.-]*:/i.test(r) ? r : new URL(r, location.href).href;
+  });
+
   function safeDecode(s) {
     try { return decodeURIComponent(s); } catch (e) { return s; }
   }

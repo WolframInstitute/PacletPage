@@ -658,8 +658,9 @@ SetPacletPageFeedbackStatus[name_String, updates_List] := With[{list = statusUpd
         ! AllTrue[list, AssociationQ], Message[SetPacletPageFeedbackStatus::update, First[Pick[updates, AssociationQ /@ list, False]]]; $Failed,
         ! AllTrue[list, MemberQ[$statusValues, #["status"]] &],
             Message[SetPacletPageFeedbackStatus::status, SelectFirst[list, ! MemberQ[$statusValues, #["status"]] &]["status"], $statusValues]; $Failed,
+        (* a request made from the CloudObject carries the kernel's cloud session *)
         True, URLExecute[
-            HTTPRequest[First[CloudObject[feedbackDirectory[name] <> "/SetStatus"]], <|"Method" -> "POST", "Body" -> {"updates" -> ExportString[list, "RawJSON", "Compact" -> True]}|>],
+            HTTPRequest[CloudObject[feedbackDirectory[name] <> "/SetStatus"], <|"Method" -> "POST", "Body" -> {"updates" -> ExportString[list, "RawJSON", "Compact" -> True]}|>],
             "RawJSON"
         ]
     ]

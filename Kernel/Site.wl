@@ -189,6 +189,15 @@ $stockChromeCSS = StringJoin[
     "#Paclet-Source,#Paclet-Source+ul{display:none!important}"
 ];
 
+(* A page rendered on this computer comes with the documentation center's header and search, its
+   footer, and a side menu and title menus whose stylesheets the renderer does not ship; the site's
+   rails do their work *)
+$localChromeCSS = StringJoin[
+    "header,.stickyheader,#_footer,#_footer-offset,footer,.menu-container,.select-container2{display:none!important}",
+    "html{border-top:0!important}body{padding-top:0!important;margin-top:0!important}",
+    ".page-container .content-container{margin-left:0!important;max-width:none!important}"
+];
+
 $defaultFeedbackEmail = "To: `address`
 Subject: `site` documentation feedback: {title}
 
@@ -267,10 +276,14 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
     If[! MatchQ[home, "Definition" | "RootGuide" | "Resource"], Message[PacletPageFiles::home, home]; Return[$Failed, Module]];
     mail = feedbackTemplate[OptionValue["FeedbackEmail"], title];
     If[! StringQ[mail], Message[PacletPageFiles::email, OptionValue["FeedbackEmail"]]; Return[$Failed, Module]];
-    kind = If[catalog["Kind"] === "Cloud", "cloud", "repository"];
-    prefix = If[kind === "cloud", catalog["DocBase"], notebookPrefix[catalog]];
-    notebooks = notebookNames[catalog, prefix];
-    routes = {catalog["DocBase"], "https://reference.wolfram.com/language/" <> catalog["Name"] <> "/", "paclet:" <> catalog["Name"] <> "/"};
+    kind = Switch[catalog["Kind"], "Cloud", "cloud", "Local", "local", _, "repository"];
+    prefix = Switch[kind, "cloud", catalog["DocBase"], "local", "", _, notebookPrefix[catalog]];
+    notebooks = If[kind === "local", <||>, notebookNames[catalog, prefix]];
+    (* a local site's pages link each other relative to the site, which the shell resolves *)
+    routes = If[ kind === "local",
+        {catalog["DocBase"], "./", "paclet:" <> catalog["Name"] <> "/"},
+        {catalog["DocBase"], "https://reference.wolfram.com/language/" <> catalog["Name"] <> "/", "paclet:" <> catalog["Name"] <> "/"}
+    ];
     page = OptionValue["PageURL"];
     shellConfig = <|
         "name" -> catalog["Name"],
@@ -285,8 +298,8 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
             "url" -> catalog["Resource"]
         |>,
         "routes" -> routes,
-        "hide" -> $stockChromeCSS,
-        "prefetch" -> If[KeyExistsQ[catalog["Pages"], catalog["RootGuide"]], catalog["Pages"][catalog["RootGuide"]]["Notebook"], ""]
+        "hide" -> If[kind === "local", $localChromeCSS, $stockChromeCSS],
+        "prefetch" -> If[kind =!= "local" && KeyExistsQ[catalog["Pages"], catalog["RootGuide"]], catalog["Pages"][catalog["RootGuide"]]["Notebook"], ""]
     |>;
     pageConfig = <|
         "title" -> title,
@@ -313,7 +326,7 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
             "brand" -> esc[title],
             "subtitle" -> If[subtitle === "" || subtitle === None, "", "<span class=\"sub\">" <> esc[subtitle] <> "</span>"],
             "resource" -> esc[catalog["Resource"]],
-            "resourceLabel" -> If[kind === "cloud", "Resource page", "Paclet Repository"],
+            "resourceLabel" -> Switch[kind, "cloud", "Resource page", "local", "Open page", _, "Paclet Repository"],
             "css" -> css,
             "sidebar" -> sidebarHTML[catalog, notebooks],
             "symbols" -> symbolsHTML[catalog, notebooks],
