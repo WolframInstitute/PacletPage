@@ -44,7 +44,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"TimeConstraint"` | `1800` | the seconds each page may take |
 | `"CacheDirectory"` | `Automatic` | where the cache is, by default `build/cache` |
 | `"Dependencies"` | `Automatic` | the paclets whose code the examples run besides the paclet's own, as directories, which are loaded, or names; by default the ones its `PacletInfo.wl` declares |
-| `"Monitor"` | `False` | whether to print each page as it is converted |
+| `"Monitor"` | `False` | whether to print how many pages there are, cached and to convert, then each page as it is converted |
 
 - `"UseCache" -> False` converts every page and evaluates every example afresh, whatever has changed.
 

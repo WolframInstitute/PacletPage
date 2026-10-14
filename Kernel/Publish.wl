@@ -347,6 +347,8 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
         tasks
     ];
     misses = Select[tasks, ! #Cached &];
+    If[ TrueQ[OptionValue["Monitor"]],
+        Print[Length[tasks], " pages: ", Length[tasks] - Length[misses], " cached, ", Length[misses], " to convert"]];
     kernelsBefore = Kernels[];
     kernels = If[ Length[misses] > 1, buildKernels[OptionValue["Parallel"]], {}];
     setup = <|
@@ -1031,6 +1033,38 @@ publishArchive[archive_String, dir_String, name_String, permissions_, commit_] :
     ] // Replace[{{v_CloudObject, l_CloudObject} :> <|"Latest" -> First[l], "Version" -> First[v]|>, other_ :> other}]
 ];
 
+(* The paclet as it is authored, for editing elsewhere: its directory but build/, hidden files and
+   what "Exclude" leaves out, documentation notebooks unbuilt, packed in a temporary directory *)
+sourceArchive[dir_String, exclude_] := Module[{stageRoot = CreateDirectory[], stage, work, packed},
+    stage = CreateDirectory[FileNameJoin[{stageRoot, FileNameTake[dir]}]];
+    copyTree[dir, stage, "", Function[path,
+        path === "build" || StringStartsQ[FileNameTake[path], "."] || AnyTrue[Flatten[{exclude}], StringMatchQ[path, #] &]]];
+    work = CreateDirectory[];
+    packed = CreatePacletArchive[stage, work];
+    DeleteDirectory[stageRoot, DeleteContents -> True];
+    If[StringQ[packed] && FileExistsQ[packed], packed, $Failed]
+];
+
+(* where the source archive goes: <dir>/<Publisher>__<Name>-source.paclet, the latest, and
+   <dir>/<Publisher>__<Name>-source-<version>.paclet *)
+sourceArchiveNames[dir_String, name_String, version_String] := With[{base = StringTrim[dir, "/"] <> "/" <> StringReplace[name, "/" -> "__"] <> "-source"},
+    <|"Latest" -> base <> ".paclet", "Version" -> base <> "-" <> version <> ".paclet"|>
+];
+
+publishSourceArchive[dir_String, dirName_String, name_String, version_String, permissions_, commit_, exclude_] := Module[
+    {packed = sourceArchive[dir, exclude], names = sourceArchiveNames[dirName, name, version], meta = If[StringQ[commit], <|"Commit" -> commit|>, <||>], copied},
+    If[ ! StringQ[packed], Return[packed, Module]];
+    copied = Map[
+        With[{object = CopyFile[packed, CloudObject[#, Permissions -> permissions], OverwriteTarget -> True]},
+            If[MatchQ[object, _CloudObject] && meta =!= <||>, SetOptions[object, MetaInformation -> meta]];
+            object
+        ] &,
+        names
+    ];
+    DeleteDirectory[DirectoryName[packed], DeleteContents -> True];
+    If[AllTrue[copied, MatchQ[_CloudObject]], First /@ copied, copied]
+];
+
 (* A dry run writes nothing to the cloud, so without a cloud session it runs offline: no account
    check, no version gate (which reads the published archive) and no deploy location. With a
    session it checks everything a deploy would. *)
@@ -1635,6 +1669,7 @@ Options[DeployPacletResource] = {
     "Upload" -> Automatic,
     "Build" -> True,
     "MaxFailures" -> 0,
+    "SourceArchive" -> None,
     Permissions -> "Public"
 };
 
@@ -1660,7 +1695,8 @@ DeployPacletResource::unknowncommit = "`1` is already published from commit `2`,
 DeployPacletResource::nocommit = "`1` is already published and records no commit; nothing was deployed. Use \"Republish\" -> True to replace it.";
 
 DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Catch[Module[
-    {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed, symbolRules, pinned},
+    {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed, symbolRules, pinned,
+     sourceVersioned, source},
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];
     If[ ! readyToPublishQ[DeployPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "deploy"]];
     offline = offlineDryRunQ[OptionValue["DryRun"]];
@@ -1682,6 +1718,10 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
         dirName_String :> StringTrim[dirName, "/"] <> "/" <> StringReplace[name, "/" -> "__"] <> "-" <> paclet["Version"] <> ".paclet",
         _ -> None
     }];
+    sourceVersioned = Replace[OptionValue["SourceArchive"], {
+        dirName_String :> sourceArchiveNames[dirName, name, paclet["Version"]]["Version"],
+        _ -> None
+    }];
     target = If[ offline, None,
         ResourceSystemClient`Private`loadDeployResourceShingle[];
         Replace[DeployedResourceShingle`Private`defaultCloudObjectLocation["Paclet", name], Except[_CloudObject] :> None]
@@ -1690,6 +1730,8 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
        there is nothing to gate *)
     If[ ! offline && accountOK && ! TrueQ[OptionValue["Republish"]],
         If[ MatchQ[target, _CloudObject] && stopsQ[releaseAllowedQ[DeployPacletResource, paclet["Version"] <> " at " <> First[target], deployedCommit[target, paclet["Version"]], commit], OptionValue["DryRun"]],
+            Throw[$Failed, "deploy"]];
+        If[ StringQ[sourceVersioned] && stopsQ[releaseAllowedQ[DeployPacletResource, sourceVersioned, publishedCommit[sourceVersioned], commit], OptionValue["DryRun"]],
             Throw[$Failed, "deploy"]];
         If[ StringQ[versioned] && stopsQ[releaseAllowedQ[DeployPacletResource, versioned, publishedCommit[versioned], commit], OptionValue["DryRun"]],
             Throw[$Failed, "deploy"]]
@@ -1792,6 +1834,13 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
             If[AssociationQ[published], published, Message[DeployPacletResource::archive, dirName, published]; Throw[$Failed, "deploy"]]
         ]
     }];
+    source = Replace[OptionValue["SourceArchive"], {
+        None -> None,
+        dirName_String /; TrueQ[OptionValue["DryRun"]] :> None,
+        dirName_String :> With[{published = publishSourceArchive[dir, dirName, name, paclet["Version"], OptionValue[Permissions], commit, OptionValue["Exclude"]]},
+            If[AssociationQ[published], published, Message[DeployPacletResource::archive, dirName, published]; Throw[$Failed, "deploy"]]
+        ]
+    }];
     <|
         "Resource" -> If[location === None, None, First[location]],
         "Account" -> If[offline, None, connectedAccount[]],
@@ -1802,6 +1851,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
         "DeclaredSymbols" -> built["DeclaredSymbols"],
         "HeroImage" -> hero =!= None,
         "Install" -> archive,
+        "SourceArchive" -> source,
         "ArchiveSize" -> built["ArchiveSize"],
         "Version" -> paclet["Version"],
         "Commit" -> commit,

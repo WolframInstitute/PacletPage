@@ -1090,6 +1090,33 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = localFixture[], archive, files},
+        CreateDirectory[FileNameJoin[{dir, "build"}]];
+        Export[FileNameJoin[{dir, "build", "Built.nb"}], "Notebook[{}]", "Text"];
+        CreateDirectory[FileNameJoin[{dir, ".git"}]];
+        Export[FileNameJoin[{dir, ".git", "HEAD"}], "ref", "Text"];
+        Export[FileNameJoin[{dir, "big.bin"}], "x", "Text"];
+        archive = sourceArchive[dir, {"big.bin"}];
+        files = Import[archive, {"ZIP", "FileNames"}];
+        DeleteDirectory[DirectoryName[archive], DeleteContents -> True];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {
+            AnyTrue[files, StringContainsQ[#, "Documentation/English/Guides/Name.nb"] &],
+            AnyTrue[files, StringContainsQ[#, "PacletInfo.wl"] &],
+            AnyTrue[files, StringContainsQ[#, "/build/" | ".git" | "big.bin"] &]
+        }
+    ],
+    {True, True, False},
+    TestID -> "Archive: the source archive holds the paclet as authored, without build/, hidden files and what is left out"
+]
+
+VerificationTest[
+    sourceArchiveNames["Paclets/", "Pub/Name", "1.2.0"],
+    <|"Latest" -> "Paclets/Pub__Name-source.paclet", "Version" -> "Paclets/Pub__Name-source-1.2.0.paclet"|>,
+    TestID -> "Archive: the source archive's names, the latest and the versioned"
+]
+
+VerificationTest[
     staleDocumentation[
         {"guide/A.nb", "guide/A.html", "ref/B.nb", "ref/B.html", "ref/Gone.nb", "ref/Gone.html", "images/x.png"},
         {"guide/A.nb", "ref/B.nb"}
