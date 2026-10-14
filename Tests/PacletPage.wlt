@@ -1195,6 +1195,19 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], before = DownValues[CreatePacletArchive], handed},
+        handed = Internal`InheritedBlock[{CreatePacletArchive},
+            installArchiveRule[root, "/b/Pub__Name-1.0.0.paclet"];
+            {CreatePacletArchive[root <> $PathnameSeparator], CreatePacletArchive[root]}
+        ];
+        DeleteDirectory[root];
+        {handed, DownValues[CreatePacletArchive] === before}
+    ],
+    {{"/b/Pub__Name-1.0.0.paclet", "/b/Pub__Name-1.0.0.paclet"}, True},
+    TestID -> "Deploy: the scrape is handed the archive the build made and checked, and packs none over it"
+]
+
+VerificationTest[
     {
         processLayers[<|10 -> {1, "kernel", "S"}, 11 -> {10, "fe", "S"}, 12 -> {11, "helper", "S"}, 13 -> {10, "<defunct>", "Z"}, 20 -> {1, "other", "S"}|>, {10}],
         livingProcesses[<|11 -> {10, "fe", "S"}, 13 -> {10, "<defunct>", "Z+"}|>, {11, 13, 99}]

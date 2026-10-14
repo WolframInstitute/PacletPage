@@ -921,6 +921,18 @@ pinDeclaredSymbols[name_String, symbols_] := installRules[PacletResource`Private
 
 (* The scrape lints the paclet's code with CodeInspector, which says nothing about its documentation
    and, on some images, trips an assertion in the code parser that fails the scrape *)
+(* The scrape packs the built paclet again, with CreatePacletArchive, over the archive the build
+   made, checked and recorded in build/archive.wl, whose hash then no longer matches it: within a
+   block over CreatePacletArchive, the scrape is handed that archive instead, so that the archive
+   checked is the archive deployed, and a deploy with "Build" -> False after it, a dry run's or a
+   real one's, finds the archive as recorded. *)
+installArchiveRule[builtRoot_String, archive_String] := (
+    Unprotect[CreatePacletArchive];
+    CreatePacletArchive[root_String] /; sameDirectoryQ[root, builtRoot] := archive;
+);
+
+sameDirectoryQ[a_String, b_String] := realPath[FileNameJoin[FileNameSplit[a]]] === realPath[FileNameJoin[FileNameSplit[b]]];
+
 codeLintOff[] := If[ DownValues[DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ] =!= {},
     Unprotect[DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ];
     DownValues[DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ] = {
@@ -1848,7 +1860,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
         If[ offline, {None, None, None}, UsingFrontEnd @ Internal`InheritedBlock[
             {PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols, DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ,
              PacletResource`Private`createDocumentationEmbedPage, PacletResource`Notebooks`ProcessNotebookForEmbedding, PacletResource`Private`createSidebarLinkSection,
-             $rewrite},
+             CreatePacletArchive, $rewrite},
             $rewrite = rewriteKinds[OptionValue["Upload"]];
             installPageRule[];
             installRules[PacletResource`Private`fancyPacletSymbolBoxes, symbolRules];
@@ -1857,6 +1869,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
             installRules[PacletResource`Private`createSidebarLinkSection,
                 guideTreeRules[guideChildren[FileNameJoin[{dir, "build", StringReplace[name, "/" -> "__"], "Documentation", "English", "Guides"}], name], Last[StringSplit[name, "/"]]]];
             codeLintOff[];
+            installArchiveRule[FileNameJoin[{dir, "build", StringReplace[name, "/" -> "__"]}], built["Archive"]];
             Module[{notebook, scraped, versioned, where, packed, done},
             monitor["scraping " <> definition];
             notebook = NotebookOpen[definition, Visible -> False];
@@ -2030,7 +2043,8 @@ SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
     If[ built === $Failed, Throw[$Failed, "submit"]];
     (* Scrape and submit with the notebook open: the scraped record reads its notebook data while
        it is open, and a closed notebook puts $Failed into the request. *)
-    result = If[ offline, <|"Submitted" -> False, "Archive" -> built["Archive"]|>, UsingFrontEnd @ Module[{notebook, scraped, packed, submitted},
+    result = If[ offline, <|"Submitted" -> False, "Archive" -> built["Archive"]|>, UsingFrontEnd @ Internal`InheritedBlock[{CreatePacletArchive}, Module[{notebook, scraped, packed, submitted},
+        installArchiveRule[FileNameJoin[{dir, "build", StringReplace[paclet["Name"], "/" -> "__"]}], built["Archive"]];
         notebook = NotebookOpen[definition, Visible -> False];
         (* the scrape reads the notebook's hints from the front end's input notebook, which a
            headless front end does not have; it is the definition notebook *)
@@ -2048,7 +2062,7 @@ SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         ];
         NotebookClose[notebook];
         submitted
-    ]];
+    ]]];
     Which[
         AssociationQ[result], Join[<|"Name" -> paclet["Name"], "Version" -> version, "Account" -> If[offline, None, connectedAccount[]]|>, result, <|"Pages" -> built["Pages"], "Load" -> built["Load"]|>],
         (* a submission answers Success["ResourceSubmission", ...], or the ResourceObject *)
