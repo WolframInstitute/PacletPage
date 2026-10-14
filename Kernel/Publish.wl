@@ -1199,6 +1199,7 @@ pacletBuildScript[source_String, buildDir_String, dependencies_List : {}] := Str
     "PacletDirectoryLoad[", wlString[ParentDirectory[$packageDirectory]], "];\n",
     "Needs[\"WolframInstitute`PacletPage`\"];\n",
     "Needs[\"PacletTools`\"];\n",
+    $pageKernelCode,
     "handlers = PacletTools`$PacletExtensionHandlers;\n",
     "With[{stock = handlers[\"Documentation\", \"Build\"]},\n",
     "    handlers[\"Documentation\", \"Build\"] = Function[{extension, root, built, files},\n",
@@ -1206,7 +1207,7 @@ pacletBuildScript[source_String, buildDir_String, dependencies_List : {}] := Str
     "result = PacletTools`PacletBuild[", wlString[source], ", ", wlString[buildDir], ", PacletTools`PacletExtensionHandlers -> handlers];\n",
     "report = If[MatchQ[result, _Success], <|\"Archive\" -> result[\"PacletArchive\"]|>, <|\"Failure\" -> ToString[result, InputForm]|>];\n",
     "WriteString[\"stdout\", \"PACLETPAGE-BUILD \" <> ExportString[report, \"RawJSON\", \"Compact\" -> True] <> \"\\n\"];\n",
-    $quitFrontEndCode
+    $endScriptCode
 ];
 
 freshKernelBuild[source_String, buildDir_String, dependencies_List : {}] := Module[{kernel = kernelExecutable[], script, run, line},
@@ -1307,6 +1308,7 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "PacletDirectoryLoad[", wlString[source], "];\n",
     "Needs[\"PacletTools`\"];\n",
     "Needs[\"DocumentationBuild`\"];\n",
+    $pageKernelCode,
     "pages = {", StringRiffle[wlString /@ pages, ", "], "};\n",
     "paclet = PacletObject[File[", wlString[source], "]];\n",
     "inputDir = ExpandFileName[", wlString[docsDir], "];\n",
@@ -1322,7 +1324,7 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "        Replace[processed, Except[_Association] -> <||>]]]];\n",
     "    Put[record, ", wlString[recordOut], "],\n",
     "    {page, pages}];\n",
-    $quitFrontEndCode
+    $endScriptCode
 ];
 
 (* Scripts run as separate kernel processes, at most n at a time, each one killed past its
@@ -1636,26 +1638,30 @@ loadResourceTools[] := (
     Needs["PacletTools`"]
 );
 
-(* The end of a script that may have started a front end: the front end quit, and its process gone,
-   or fifteen seconds passed, before the kernel exits under it *)
-$quitFrontEndCode = StringJoin[
-    "Developer`UninstallFrontEnd[];\n",
-    "With[{deadline = AbsoluteTime[] + 15}, While[AbsoluteTime[] < deadline && AnyTrue[\n",
-    "    StringSplit[Replace[RunProcess[{\"ps\", \"-e\", \"-o\", \"ppid=,comm=\"}], {run_Association :> run[\"StandardOutput\"], _ -> \"\"}], \"\\n\"],\n",
-    "    StringMatchQ[StringTrim[#], ToString[$ProcessID] ~~ Whitespace ~~ ___ ~~ (\"WolframNB\" | \"MathematicaServer\" | \"Mathematica\" | \"WolframFrontEnd\")] &], Pause[0.1]]];\n"
+(* The start of a script that builds documentation pages: one parallel kernel, which the stock
+   build's notebook export finds; with none it launches as many as the processors, in every process.
+   And the end of such a script: the front ends it started, in it or in its kernel, ended at once
+   with KILL, since a front end that quits, or loses its kernel, can crash on its way out; then its
+   kernels closed. *)
+$pageKernelCode = "LaunchKernels[1];\n";
+
+$endScriptCode = StringJoin[
+    "Module[{table, found = {}, frontier = {$ProcessID}},\n",
+    "    table = Association[Cases[StringSplit[StringTrim /@ StringSplit[Replace[RunProcess[{\"ps\", \"-e\", \"-o\", \"pid=,ppid=,comm=\"}], {run_Association :> run[\"StandardOutput\"], _ -> \"\"}], \"\\n\"], Whitespace, 3],\n",
+    "        {pid_String, parent_String, command_String} /; StringMatchQ[pid <> parent, DigitCharacter ..] :> (FromDigits[pid] -> {FromDigits[parent], command})]];\n",
+    "    While[frontier =!= {}, frontier = Complement[Select[Keys[table], MemberQ[frontier, First[table[#]]] &], found]; found = Join[found, frontier]];\n",
+    "    found = Select[found, StringMatchQ[FileNameTake[Last[table[#]]], \"WolframNB\" | \"MathematicaServer\" | \"Mathematica\" | \"WolframFrontEnd\"] &];\n",
+    "    If[found =!= {}, RunProcess[Join[{\"kill\", \"-KILL\"}, ToString /@ found]]]\n",
+    "];\n",
+    "CloseKernels[];\n"
 ];
 
-(* Parallel kernels closed, each with the front end it started quit first and its process gone: a
-   front end whose kernel closes under it, even while it is on its way out, crashes. Quitting is
-   bounded: a front end still there after half a minute is ended with TERM before its kernel
-   closes. *)
+(* Parallel kernels closed, each with the front ends it started ended first, at once, with KILL: a
+   front end that quits, or loses its kernel, can crash on its way out, and KILL is no signal it
+   handles *)
 closeKernels[{}] := {};
-closeKernels[kernels_List] := Module[{frontEnds = kernelFrontEnds[kernels]},
-    TimeConstrained[ParallelEvaluate[Developer`UninstallFrontEnd[], kernels, DistributedContexts -> None], 30];
-    If[ ! waitForExit[frontEnds, 30],
-        Scan[RunProcess[{"kill", "-TERM", IntegerString[#]}] &, livingProcesses[frontEnds]];
-        waitForExit[frontEnds, 10]
-    ];
+closeKernels[kernels_List] := With[{frontEnds = kernelFrontEnds[kernels]},
+    If[frontEnds =!= {}, RunProcess[Join[{"kill", "-KILL"}, IntegerString /@ frontEnds]]];
     CloseKernels[kernels]
 ];
 

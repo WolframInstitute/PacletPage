@@ -1121,10 +1121,11 @@ VerificationTest[
         ParallelEvaluate[UsingFrontEnd[ToBoxes[Graphics[Disk[]]]]; 1, kernels];
         frontEnds = kernelFrontEnds[kernels];
         closeKernels[kernels];
+        waitForExit[frontEnds, 10];
         {Length[frontEnds], livingProcesses[frontEnds], closeKernels[{}], Intersection[Kernels[], kernels]}
     ],
     {2, {}, {}, {}},
-    TestID -> "Build: parallel kernels close after the front ends they started have quit and are gone"
+    TestID -> "Build: parallel kernels close after the front ends they started are ended"
 ]
 
 VerificationTest[
