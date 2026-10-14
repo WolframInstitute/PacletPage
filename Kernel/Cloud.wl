@@ -82,7 +82,7 @@ sourceNotebooks[dir_String] := Module[{root},
 (* serially, or over the parallel kernels when every one acts as the account this kernel does: a
    parallel kernel is connected as the machine's saved login, which another session may have
    changed, and a write as another account is refused *)
-mapBlocks[f_, list_List] := If[ Length[Kernels[]] > 0 && sameAccountQ[kernelAccounts[], cloudAccount[]],
+mapBlocks[f_, list_List] := If[ Length[Kernels[]] > 0 && parallelSameAccountQ[],
     ParallelMap[f, list, DistributedContexts -> Automatic],
     Map[f, list]
 ];
@@ -100,6 +100,20 @@ kernelAccounts[] := If[ Length[Kernels[]] > 0,
     {}
 ];
 sameAccountQ[accounts_List, account_String] := accounts =!= {} && AllTrue[accounts, # === account &];
+
+(* whether the parallel kernels act as this kernel's account; when they do not, a monitored run
+   says so, once for each set of accounts *)
+$accountsNoted = {};
+parallelSameAccountQ[] := With[{accounts = kernelAccounts[], account = cloudAccount[]},
+    sameAccountQ[accounts, account] || (
+        If[ ! MemberQ[$accountsNoted, {accounts, account}],
+            AppendTo[$accountsNoted, {accounts, account}];
+            monitor["cloud", "the parallel kernels act as " <> StringRiffle[ToString /@ DeleteDuplicates[accounts], ", "] <>
+                ", not " <> ToString[account] <> ": cloud writes go from this kernel"]
+        ];
+        False
+    )
+];
 sameAccountQ[_, _] := False;
 
 (* Uploads the notebooks whose content changed since the manifest recorded them, deletes the ones

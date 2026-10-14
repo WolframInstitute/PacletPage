@@ -1138,6 +1138,17 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{lines = {}},
+        Block[{Kernels = Function[{}, {"k1", "k2"}], kernelAccounts = Function[{}, {"b@x.example", "b@x.example"}], cloudAccount = Function[{}, "a@x.example"],
+                ParallelMap = Function[Null, "parallel"], $accountsNoted = {}, $deployMonitor = True, Print = Function[Null, AppendTo[lines, StringJoin[ToString /@ {##}]]]},
+            {mapBlocks[# + 1 &, {1, 2}], mapBlocks[# + 1 &, {3}], lines}
+        ]
+    ],
+    {{2, 3}, {4}, {"cloud: the parallel kernels act as b@x.example, not a@x.example: cloud writes go from this kernel"}},
+    TestID -> "Cloud: cloud writes go from this kernel when its parallel kernels act as another account, said once"
+]
+
+VerificationTest[
     staleDocumentation[
         {"guide/A.nb", "guide/A.html", "ref/B.nb", "ref/B.html", "ref/Gone.nb", "ref/Gone.html", "images/x.png"},
         {"guide/A.nb", "ref/B.nb"}
