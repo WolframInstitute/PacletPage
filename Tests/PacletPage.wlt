@@ -1171,6 +1171,30 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], put, flagged},
+        put[name_String, nb_Notebook] := With[{file = FileNameJoin[{dir, name}]},
+            If[! DirectoryQ[DirectoryName[file]], CreateDirectory[DirectoryName[file], CreateIntermediateDirectories -> True]];
+            Export[file, nb, "NB"]
+        ];
+        put["ReferencePages/Symbols/A.nb", Notebook[{Cell["A", "ObjectName"]}, ScreenStyleEnvironment -> "FutureObject"]];
+        put["ReferencePages/Symbols/B.nb", Notebook[{Cell["E  X  C  I  S  E  D", "ExcisedFlag"], Cell["B", "ObjectName"]}]];
+        put["ReferencePages/Symbols/C.nb", Notebook[{Cell["C", "ObjectName"]}]];
+        put["ReferencePages/Symbols/D.nb", Notebook[{Cell["O  B  S  O  L  E  T  E", "ObsoleteFlag"], Cell["D", "ObjectName"]}]];
+        flagged = flaggedPages[dir];
+        DeleteDirectory[dir, DeleteContents -> True];
+        flagged
+    ],
+    <|FileNameJoin[{"ReferencePages", "Symbols", "A.nb"}] -> "Future", FileNameJoin[{"ReferencePages", "Symbols", "B.nb"}] -> "Excised"|>,
+    TestID -> "Build: the pages the documentation build leaves out for their flag, from the palette's screen environment or a flag cell; an obsolete page builds"
+]
+
+VerificationTest[
+    {flaggedPages["/no/such/directory"], StringQ[DeployPacletResource::flagged], StringQ[BuildPacletDocumentation::flagged], SubmitPacletResource::flagged === DeployPacletResource::flagged},
+    {<||>, True, True, True},
+    TestID -> "Build: a directory with no pages has none flagged, and the builds say which they leave out"
+]
+
+VerificationTest[
     {
         processLayers[<|10 -> {1, "kernel", "S"}, 11 -> {10, "fe", "S"}, 12 -> {11, "helper", "S"}, 13 -> {10, "<defunct>", "Z"}, 20 -> {1, "other", "S"}|>, {10}],
         livingProcesses[<|11 -> {10, "fe", "S"}, 13 -> {10, "<defunct>", "Z+"}|>, {11, 13, 99}]

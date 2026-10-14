@@ -251,13 +251,14 @@ Options[BuildPacletDocumentation] = {
 BuildPacletDocumentation::dir = "`1` is not a paclet directory: it has no PacletInfo.wl.";
 BuildPacletDocumentation::source = "`1` has no markdown documentation.";
 BuildPacletDocumentation::page = "`1` did not become a notebook: `2`.";
+BuildPacletDocumentation::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, from a Flag frontmatter key, a flag cell or the palette's flag buttons: `2`.";
 BuildPacletDocumentation::nodefinition = "No markdown definition was found, as ResourceDefinition.md in `1` or a Template: Paclet page under `2`, so `3` was not rebuilt; a deploy would publish it as it is. Give \"Definition\", or \"Definition\" -> None to build without one.";
 
 BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     {
         paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, code, useCache, separator,
         all, files, metas, guides, definitionSource, tasks, misses, kernelsBefore, kernels, setup, results, outcomes,
-        ok, failed, pruned, pageFiles, skipped, unevaluated
+        ok, failed, pruned, pageFiles, skipped, unevaluated, flagged
     },
     If[ ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] && ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]],
         Message[BuildPacletDocumentation::dir, dir]; Return[$Failed, Module]];
@@ -401,10 +402,13 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
             Scan[DeleteFile, stale]; stale],
         {}
     ];
+    flagged = flaggedPages[target];
+    If[ flagged =!= <||>, Message[BuildPacletDocumentation::flagged, Length[flagged], Take[Normal[flagged], UpTo[10]]]];
     <|
         "Notebooks" -> Lookup[Select[ok, #Page =!= "ResourceDefinition" &], "Out", {}],
         "Definition" -> Replace[Lookup[Select[ok, #Page === "ResourceDefinition" &], "Out", {}], {{out_} :> out, _ -> None}],
         "Failed" -> failed,
+        "Flagged" -> flagged,
         "Converted" -> Lookup[Pick[tasks, outcomes, "Converted"], "File", {}],
         "Cached" -> Lookup[Pick[tasks, outcomes, "Cached"], "File", {}],
         "Evaluated" -> Lookup[Select[Pick[tasks, outcomes, "Converted"], ! #UseCache &], "File", {}],
@@ -518,6 +522,26 @@ replaceDocumentation[dir_String, root_CloudObject, permissions_] := Module[
         With[{record = If[rewriteQ["Pages"], <||>, readDeployRecord[root, "Pages"]]}, <|"Signatures" -> record, "Recorded" -> record|>]];
     documentationObject[target, #, permissions] & /@ relatives
 ];
+
+(* The documentation notebooks the stock build leaves out for their flag, by page, the flag: a flag
+   cell, or the screen environment the palette's flag buttons set (Future sets "FutureObject"),
+   read as the build reads them, with DocumentFlag, for a notebook whose text names either *)
+$skippedFlags = <|"ExcisedFlag" -> "Excised", "FutureFlag" -> "Future", "InternalFlag" -> "Internal", "TemporaryFlag" -> "Temporary"|>;
+
+flaggedPages[docsDir_String] := With[
+    {candidates = If[DirectoryQ[docsDir], Select[FileNames["*.nb", docsDir, Infinity], flagCandidateQ], {}]},
+    If[ candidates === {}, <||>,
+        Needs["DocumentationBuild`"];
+        Association @ Map[
+            With[{flag = DocumentationBuild`Utils`DocumentFlag[#]},
+                If[KeyExistsQ[$skippedFlags, flag], relativePath[docsDir, #] -> $skippedFlags[flag], Nothing]] &,
+            candidates
+        ]
+    ]
+];
+flaggedPages[_] := <||>;
+
+flagCandidateQ[file_String] := With[{text = ReadString[file]}, StringQ[text] && StringContainsQ[text, "Flag\"" | "ScreenStyleEnvironment"]];
 
 (* the files to write: those the cloud lacks, and those whose content changed since the record *)
 changedFiles[keys_Association, existing_Association, record_Association] :=
@@ -1480,7 +1504,7 @@ pageProcesses[_] := 0;
    built on parallel kernels first. *)
 freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True, pageOptions_Association : <||>] := Module[
     {buildDir, prefix, recordFile, builtDocsDir, authoring, stageRoot, source, built, pages, load, dependencies, processes, changed, parallel, pruned,
-     excludedQ, links, missing, declared, sources},
+     excludedQ, links, missing, declared, sources, flagged},
     (* the files the archive leaves out; a symbolic link that leads outside the paclet must be one *)
     excludedQ = Function[path, AnyTrue[Flatten[{Lookup[pageOptions, "Exclude", {}]}], StringMatchQ[path, #] &]];
     links = outsideLinks[dir];
@@ -1491,6 +1515,9 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
     sources = sourceHash[dir, docSource, pageOptions];
     builtDocsDir = FileNameJoin[{buildDir, prefix, "Documentation"}];
     authoring = FileNames["*.nb", Replace[docSource, Automatic -> FileNameJoin[{dir, "Documentation"}]], Infinity];
+    (* the pages the stock build leaves out for their flag, which the archive goes without *)
+    flagged = flaggedPages[Replace[docSource, Automatic -> FileNameJoin[{dir, "Documentation"}]]];
+    If[ flagged =!= <||>, Message[head::flagged, Length[flagged], Take[Normal[flagged], UpTo[10]]]];
     (* the archives of earlier builds, which the scrape would pack, and their record; without
        "Incremental", the pages built last time too *)
     Scan[DeleteFile, FileNames[prefix ~~ ("" | ("-" ~~ ___)) ~~ ".paclet", buildDir]];
@@ -1522,9 +1549,10 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
     pages = archivePages[built["Archive"]];
     missing = Complement[
         Map[relativePath[Replace[docSource, Automatic -> FileNameJoin[{dir, "Documentation"}]], #] &, authoring],
-        Map[Last[StringSplit[#, "/Documentation/", 2]] &, pages]
+        Map[Last[StringSplit[#, "/Documentation/", 2]] &, pages],
+        Keys[flagged]
     ];
-    If[ Length[missing] > failureBudget[Lookup[pageOptions, "MaxFailures", 0], Length[authoring]],
+    If[ Length[missing] > failureBudget[Lookup[pageOptions, "MaxFailures", 0], Length[authoring] - Length[flagged]],
         Message[head::pages, Length[authoring] - Length[missing], Length[authoring], Take[missing, UpTo[10]]]; Return[$Failed, Module]];
     If[ missing =!= {}, Message[head::missing, Length[missing], Take[missing, UpTo[10]]]];
     load = If[ TrueQ[loadCheck],
@@ -1549,7 +1577,7 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
         _ -> None
     }];
     With[{result = <|"Archive" -> built["Archive"], "Pages" -> Length[pages], "Load" -> load, "DeclaredSymbols" -> declared, "Symbols" -> archiveSymbols[FileNameJoin[{buildDir, prefix}]], "ArchiveSize" -> Quantity[FileByteCount[built["Archive"]], "Bytes"],
-          "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel, "Missing" -> missing|>|>},
+          "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel, "Missing" -> missing, "Flagged" -> flagged|>|>},
         Put[
             <|"Archive" -> FileNameTake[built["Archive"]], "ArchiveHash" -> FileHash[built["Archive"], "SHA256", "HexString"], "Source" -> sources, "Result" -> result|>,
             FileNameJoin[{buildDir, "archive.wl"}]
@@ -1736,6 +1764,7 @@ DeployPacletResource::nodef = "`1` has no ResourceDefinition.nb or no documentat
 DeployPacletResource::build = "PacletBuild failed: `1`.";
 DeployPacletResource::pages = "The built archive holds `1` of the `2` documentation pages; nothing was deployed. Missing: `3`.";
 DeployPacletResource::missing = "`1` documentation pages did not build, within \"MaxFailures\"; the archive goes without them: `2`.";
+DeployPacletResource::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, and the archive goes without them: `2`.";
 DeployPacletResource::library = "PacletInfo.wl declares LibraryLink libraries, and the archive holds none under `1`; nothing was deployed.";
 DeployPacletResource::archivecheck = "The archive check `1` did not give True; nothing was deployed.";
 DeployPacletResource::links = "These symbolic links lead outside the paclet, and the archive would hold what they lead to: `1`; nothing was deployed. Remove them, or leave them out with \"Exclude\".";
@@ -1937,6 +1966,7 @@ SubmitPacletResource::nodef = DeployPacletResource::nodef;
 SubmitPacletResource::build = DeployPacletResource::build;
 SubmitPacletResource::pages = DeployPacletResource::pages;
 SubmitPacletResource::missing = DeployPacletResource::missing;
+SubmitPacletResource::flagged = DeployPacletResource::flagged;
 SubmitPacletResource::links = DeployPacletResource::links;
 SubmitPacletResource::packed = "The scrape packed `1`, not the fresh build `2`; nothing was submitted.";
 SubmitPacletResource::library = DeployPacletResource::library;
