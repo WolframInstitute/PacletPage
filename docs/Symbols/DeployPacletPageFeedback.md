@@ -40,7 +40,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Title"` | `Automatic` | the name the pages give the documentation |
 | `"Domains"` | `{}` | email domains whose signed-in accounts are on the team |
 | `"Readers"` | `{}` | Wolfram IDs on the team |
-| `"Email"` | `None` | the address a failed submission is told to write to |
+| `"Email"` | `None` | the address a failed submission is told to write to; `DeployPacletPage` gives it the site's email fallback too |
 | `"Account"` | `Automatic` | the Wolfram ID that must be connected |
 | `Permissions` | `Automatic` | `Automatic` for the permissions above; any other value for every object, such as `"Private"` for a trial run |
 

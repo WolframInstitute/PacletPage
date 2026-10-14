@@ -104,11 +104,11 @@ sameAccountQ[_, _] := False;
 
 (* Uploads the notebooks whose content changed since the manifest recorded them, deletes the ones
    no longer there, and records only what landed, so a failed upload is retried next time. *)
-publishSource[dir_String, sourceURL_String, manifestURL_String, permissions_, short_String] := Module[
+publishSource[dir_String, sourceURL_String, manifestURL_String, permissions_, short_String, all_ : False] := Module[
     {tasks, manifest, hashes, changed, retired, results, failed, removed},
     tasks = sourceNotebooks[dir, short];
     If[ tasks === {}, Message[DeployPacletPage::source, dir]; Return[$Failed, Module]];
-    manifest = If[TrueQ[FileExistsQ[CloudObject[manifestURL]]], CloudGet[CloudObject[manifestURL]], <||>];
+    manifest = If[ ! TrueQ[all] && TrueQ[FileExistsQ[CloudObject[manifestURL]]], CloudGet[CloudObject[manifestURL]], <||>];
     If[! AssociationQ[manifest], manifest = <||>];
     hashes = Association @ Map[Last[#] -> FileHash[First[#], "SHA256", "HexString"] &, tasks];
     changed = Select[tasks, Lookup[manifest, Last[#]] =!= hashes[Last[#]] &];
@@ -151,6 +151,7 @@ Options[DeployPacletPage] = Join[
         "Feedback" -> True,
         "FeedbackOptions" -> {},
         "Source" -> None,
+        "Upload" -> Automatic,
         "Account" -> Automatic,
         Permissions -> "Public"
     },
@@ -177,7 +178,7 @@ DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[
     If[ feedback === $Failed, Return[$Failed, Module]];
     source = Replace[OptionValue["Source"], {
         None -> None,
-        dir_String :> publishSource[dir, site <> "Source", site <> "SourceManifest", OptionValue[Permissions], Last[StringSplit[catalog["Name"], "/"]]],
+        dir_String :> publishSource[dir, site <> "Source", site <> "SourceManifest", OptionValue[Permissions], Last[StringSplit[catalog["Name"], "/"]], OptionValue["Upload"] === All],
         other_ :> (Message[DeployPacletPage::source, other]; $Failed)
     }];
     If[ source === $Failed, Return[$Failed, Module]];

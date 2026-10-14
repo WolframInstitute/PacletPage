@@ -1564,7 +1564,7 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Block[{storeStatus = Function[{status, id, value, note}, CloudObject[status]]},
+    Block[{storeStatuses = Function[{status, updates}, CloudObject[status]]},
         {
             setStatusAnswer["owner@example.org", <||>, <|"id" -> "E1", "status" -> "fixed", "note" -> "done"|>, settings]["StatusCode"],
             setStatusAnswer["owner@example.org", <|"sec-fetch-site" -> "same-origin"|>, <|"id" -> "E1", "status" -> "fixed"|>, settings]["StatusCode"],
@@ -1574,6 +1574,40 @@ VerificationTest[
     ],
     {200, 403, 400, 403},
     TestID -> "Feedback: SetStatus: the team from a kernel, a known status"
+]
+
+VerificationTest[
+    Module[{stored = {}},
+        Block[{storeStatuses = Function[{status, updates}, AppendTo[stored, updates]; CloudObject[status]]},
+            {
+                setStatusAnswer["owner@example.org", <||>, <|"updates" -> "[{\"id\":\"E1\",\"status\":\"fixed\"},{\"id\":\"E2\",\"status\":\"decided\",\"note\":\"later\"}]"|>, settings]["StatusCode"],
+                setStatusAnswer["owner@example.org", <||>, <|"updates" -> "[{\"id\":\"E1\",\"status\":\"fixed\"},{\"id\":\"E2\",\"status\":\"closed\"}]"|>, settings]["StatusCode"],
+                setStatusAnswer["owner@example.org", <||>, <|"updates" -> "not json"|>, settings]["StatusCode"],
+                stored
+            }
+        ]
+    ],
+    {200, 400, 400, {{<|"id" -> "E1", "status" -> "fixed", "note" -> ""|>, <|"id" -> "E2", "status" -> "decided", "note" -> "later"|>}}},
+    {Import::jsontokenmismatch, Import::jsonhintposandchar},
+    TestID -> "Feedback: SetStatus takes several statuses in one write, and stores none when one is wrong"
+]
+
+VerificationTest[
+    Module[{sent = {}},
+        Block[{URLExecute = Function[{request, format}, AppendTo[sent, request["Method"]]; "sent"]},
+            {
+                SetPacletPageFeedbackStatus["https://c.example/obj/u/Site", {"E1" -> "fixed", {"E2", "decided"}, {"E3", "follow-up", "ask"}, <|"ID" -> "E4", "Status" -> "open"|>}],
+                SetPacletPageFeedbackStatus["https://c.example/obj/u/Site", {"E1" -> "fixed", "E2" -> "closed"}],
+                SetPacletPageFeedbackStatus["https://c.example/obj/u/Site", {"E1" -> "fixed", 7}],
+                sent,
+                statusUpdate /@ {"E1" -> "fixed", {"E3", "follow-up", "ask"}, <|"ID" -> "E4", "Status" -> "open"|>}
+            }
+        ]
+    ],
+    {"sent", $Failed, $Failed, {"POST"},
+        {<|"id" -> "E1", "status" -> "fixed", "note" -> ""|>, <|"id" -> "E3", "status" -> "follow-up", "note" -> "ask"|>, <|"id" -> "E4", "status" -> "open", "note" -> ""|>}},
+    {SetPacletPageFeedbackStatus::status, SetPacletPageFeedbackStatus::update},
+    TestID -> "Feedback: several statuses are checked first and sent in one request"
 ]
 
 VerificationTest[

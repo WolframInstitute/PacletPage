@@ -31,7 +31,9 @@ PacletPageFeedback::usage = "PacletPageFeedback[name] gives the feedback the sit
 with the status of each entry.";
 
 SetPacletPageFeedbackStatus::usage = "SetPacletPageFeedbackStatus[name, id, status, note] records that the feedback \
-entry id of the site name is \"open\", \"decided\", \"fixed\", \"follow-up\" or \"not a defect\", with note.";
+entry id of the site name is \"open\", \"decided\", \"fixed\", \"follow-up\" or \"not a defect\", with note.
+SetPacletPageFeedbackStatus[name, {update1, update2, ...}] records several statuses at once, each id -> status, \
+{id, status}, {id, status, note} or an entry with \"ID\", \"Status\" and \"Note\".";
 
 SetPacletPagePermissions::usage = "SetPacletPagePermissions[dir, permissions] sets permissions on the cloud directory \
 dir and on every directory beneath it.";
@@ -66,6 +68,7 @@ DeployPacletPage::source = "`1` is not a directory of documentation notebooks.";
 DeployPacletPageFeedback::databin = "The feedback Databin could not be created or found: `1`.";
 DeployPacletPageFeedback::deploy = "Publishing the feedback page `1` failed: `2`.";
 SetPacletPageFeedbackStatus::status = "`1` is not a feedback status; use one of `2`.";
+SetPacletPageFeedbackStatus::update = "`1` is not a status update: give id -> status, {id, status}, {id, status, note}, or an entry with \"ID\", \"Status\" and \"Note\".";
 SetPacletPagePermissions::dir = "`1` is not a cloud directory.";
 
 Begin["`Private`"]

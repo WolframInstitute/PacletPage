@@ -276,10 +276,27 @@ feedbackStatuses[status_String] := If[
     <||>
 ];
 
-storeStatus[status_String, entryID_String, value_String, note_String] := CloudPut[
-    Append[feedbackStatuses[status], entryID -> <|"Status" -> value, "Note" -> note, "Updated" -> DateString[TimeZoneConvert[Now, 0], "ISODateTime"]|>],
-    CloudObject[status],
-    Permissions -> "Private"
+(* statuses stored in one write, each with the time it was set *)
+storeStatuses[status_String, updates_List] := With[{now = DateString[TimeZoneConvert[Now, 0], "ISODateTime"]},
+    CloudPut[
+        Join[feedbackStatuses[status], Association @ Map[#["id"] -> <|"Status" -> #["status"], "Note" -> #["note"], "Updated" -> now|> &, updates]],
+        CloudObject[status],
+        Permissions -> "Private"
+    ]
+];
+
+(* the statuses a request sets: one, as id, status and note, or several, as "updates", a JSON list
+   of objects with id, status and note *)
+statusUpdates[arguments_Association] := Which[
+    StringQ[Lookup[arguments, "updates", None]],
+        Replace[ImportString[arguments["updates"], "RawJSON"], {
+            list : {__Association} /; AllTrue[list, StringQ[Lookup[#, "id", None]] && StringQ[Lookup[#, "status", None]] &] :>
+                Map[<|"id" -> #["id"], "status" -> #["status"], "note" -> clip[Replace[Lookup[#, "note", ""], Except[_String] -> ""], 500]|> &, list],
+            _ -> $Failed
+        }],
+    StringQ[Lookup[arguments, "id", None]] && StringQ[Lookup[arguments, "status", None]],
+        {<|"id" -> arguments["id"], "status" -> arguments["status"], "note" -> clip[Replace[Lookup[arguments, "note", ""], Except[_String] -> ""], 500]|>},
+    True, $Failed
 ];
 
 (* ==================== the team's page ==================== *)
@@ -511,22 +528,29 @@ mePage[settings_Association] := Delayed[
    reader's behalf. *)
 browserRequestQ[headers_Association] := AnyTrue[Keys[headers], StringStartsQ[#, "sec-fetch-"] &];
 
+(* every status is checked first: none is stored when one is wrong *)
 setStatusAnswer[who_, headers_Association, arguments_Association, settings_Association] := With[
-    {entryID = arguments["id"], value = arguments["status"], note = clip[arguments["note"], 500]},
+    {updates = statusUpdates[arguments]},
     Which[
         ! teamQ[who, settings], deniedPage[who, settings["Title"], settings["Domains"]],
         browserRequestQ[headers], plainResponse[403, "A status is changed from a Wolfram kernel, with the code a Status button copies."],
-        ! MemberQ[$statusValues, value], plainResponse[400, "The status is one of " <> StringRiffle[$statusValues, ", "] <> "."],
-        ! MatchQ[storeStatus[settings["Status"], entryID, value, note], _CloudObject], plainResponse[500, "The status could not be stored."],
+        ! MatchQ[updates, {__Association}], plainResponse[400, "Give an id and a status, or updates: a JSON list of objects with id, status and note."],
+        ! AllTrue[updates, MemberQ[$statusValues, #["status"]] &], plainResponse[400, "The status is one of " <> StringRiffle[$statusValues, ", "] <> "; nothing was stored."],
+        ! MatchQ[storeStatuses[settings["Status"], updates], _CloudObject], plainResponse[500, "The status could not be stored."],
         True, HTTPResponse[
-            ExportString[<|"id" -> entryID, "status" -> value, "note" -> note|>, "RawJSON"],
+            ExportString[If[StringQ[Lookup[arguments, "updates", None]], updates, First[updates]], "RawJSON"],
             <|"ContentType" -> "application/json", "Headers" -> {"Cache-Control" -> "no-store"}|>
         ]
     ]
 ];
 
 setStatusPage[settings_Association] := APIFunction[
-    {"id" -> "String", "status" -> "String", "note" -> <|"Interpreter" -> "String", "Required" -> False|>},
+    {
+        "id" -> <|"Interpreter" -> "String", "Required" -> False|>,
+        "status" -> <|"Interpreter" -> "String", "Required" -> False|>,
+        "note" -> <|"Interpreter" -> "String", "Required" -> False|>,
+        "updates" -> <|"Interpreter" -> "String", "Required" -> False|>
+    },
     setStatusAnswer[$RequesterWolframID, requestHeaders[], #, settings] &
 ];
 
@@ -626,3 +650,24 @@ SetPacletPageFeedbackStatus[name_String, entryID_String, status_String, note_Str
     Message[SetPacletPageFeedbackStatus::status, status, $statusValues]; $Failed,
     URLExecute[CloudObject[feedbackDirectory[name] <> "/SetStatus"], {"id" -> entryID, "status" -> status, "note" -> note}, "RawJSON"]
 ];
+
+(* several statuses, sent in one request and stored in one write; checked here first, so that
+   none is sent when one is wrong *)
+SetPacletPageFeedbackStatus[name_String, updates_List] := With[{list = statusUpdate /@ updates},
+    Which[
+        ! AllTrue[list, AssociationQ], Message[SetPacletPageFeedbackStatus::update, First[Pick[updates, AssociationQ /@ list, False]]]; $Failed,
+        ! AllTrue[list, MemberQ[$statusValues, #["status"]] &],
+            Message[SetPacletPageFeedbackStatus::status, SelectFirst[list, ! MemberQ[$statusValues, #["status"]] &]["status"], $statusValues]; $Failed,
+        True, URLExecute[
+            HTTPRequest[First[CloudObject[feedbackDirectory[name] <> "/SetStatus"]], <|"Method" -> "POST", "Body" -> {"updates" -> ExportString[list, "RawJSON", "Compact" -> True]}|>],
+            "RawJSON"
+        ]
+    ]
+];
+
+statusUpdate[id_String -> status_String] := <|"id" -> id, "status" -> status, "note" -> ""|>;
+statusUpdate[{id_String, status_String}] := <|"id" -> id, "status" -> status, "note" -> ""|>;
+statusUpdate[{id_String, status_String, note_String}] := <|"id" -> id, "status" -> status, "note" -> note|>;
+statusUpdate[update_Association] /; StringQ[Lookup[update, "ID", None]] && StringQ[Lookup[update, "Status", None]] :=
+    <|"id" -> update["ID"], "status" -> update["Status"], "note" -> Replace[Lookup[update, "Note", ""], Except[_String] -> ""]|>;
+statusUpdate[_] := $Failed;

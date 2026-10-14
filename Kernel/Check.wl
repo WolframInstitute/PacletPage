@@ -75,6 +75,33 @@ closedCheck[directory_String, endpoint_String] := With[{status = anonymousStatus
         If[status["Status"] === 200, "OPEN to anonymous readers", "closed to anonymous readers (HTTP " <> TextString[status["Status"]] <> ")"]]
 ];
 
+(* An example entry sent as the site's Feedback panel sends it, with an image attached: the form
+   answers with its thank-you page, and the entry and its attachment are stored. The entry is then
+   set "not a defect", so the team's list keeps it out of the open ones. *)
+sentCheck[name_String, directory_String, site_String] := Module[
+    {marker = "An example entry sent by CheckPacletPage, " <> CreateUUID[], image, response, entry},
+    image = FileNameJoin[{$TemporaryDirectory, CreateUUID["check-"] <> ".png"}];
+    Export[image, Image[ConstantArray[{0.85, 0.2, 0.1}, {8, 8}]], "PNG"];
+    response = URLRead[
+        HTTPRequest[directory <> "/Form", <|"Method" -> "POST", "Headers" -> {"Referer" -> site <> "Page"},
+            "Body" -> {"Feedback" -> marker, "Page" -> "check", "Title" -> "CheckPacletPage", "View" -> "check", "Attachment1" -> File[image]}|>],
+        {"StatusCode", "Body"}, Authentication -> None, TimeConstraint -> 120];
+    DeleteFile[image];
+    entry = If[ AssociationQ[response] && response["StatusCode"] === 200 && StringContainsQ[response["Body"], "pp-feedback-thanks"],
+        SelectFirst[Replace[Normal[PacletPageFeedback[name]], Except[_List] -> {}], Lookup[#, "Feedback", ""] === marker &, None],
+        None
+    ];
+    If[ AssociationQ[entry], SetPacletPageFeedbackStatus[name, TextString[entry["ID"]], "not a defect", "an example entry sent by CheckPacletPage"]];
+    check["Feedback sent", directory <> "/Form", AssociationQ[entry] && StringQ[entry["Attachments"]] && entry["Attachments"] =!= "",
+        Which[
+            ! AssociationQ[response], "no answer",
+            response["StatusCode"] =!= 200 || ! StringContainsQ[response["Body"], "pp-feedback-thanks"], "the form did not thank: HTTP " <> TextString[response["StatusCode"]],
+            ! AssociationQ[entry], "thanked, but the entry is not in the feedback",
+            ! StringQ[entry["Attachments"]] || entry["Attachments"] === "", "stored without its attachment",
+            True, "stored with its attachment, and set \"not a defect\""
+        ]]
+];
+
 runCheck[{f_, arguments___}] := f[arguments];
 
 waitSeconds[seconds_?NumericQ] := Max[0, seconds];
@@ -100,10 +127,11 @@ CheckPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[{site, direc
             {{catalogCheck, catalog["Pages"][root]["HTML"], catalog["Pages"][root]["Notebook"]}},
             {}
         ],
-        If[ TrueQ[OptionValue["Feedback"]],
+        If[ MatchQ[OptionValue["Feedback"], True | "Send"],
             Join[{{formCheck, directory}, {meCheck, directory}}, {closedCheck, directory, #} & /@ {"All", "File", "SetStatus"}],
             {}
-        ]
+        ],
+        If[ OptionValue["Feedback"] === "Send", {{sentCheck, name, directory, site}}, {}]
     ];
     results = runCheck /@ checks;
     (* the checks that failed run again, every 10 seconds, until they pass or the wait is over *)

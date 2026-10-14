@@ -27,10 +27,12 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Feedback"` | `True` | whether to publish the feedback form and the team's pages |
 | `"FeedbackOptions"` | `{}` | options for `DeployPacletPageFeedback` |
 | `"Source"` | `None` | a paclet directory, whose authoring notebooks become the pages' sources |
+| `"Upload"` | `Automatic` | `All` uploads every source notebook again, whatever changed |
 | `"Account"` | `Automatic` | the Wolfram ID that must be connected |
 | `Permissions` | `"Public"` | the permissions of the two pages and the source notebooks |
 
-- `DeployPacletPage` also takes the options of `PacletPageFiles` that shape the site: `"Title"`, `"Subtitle"`, `"Accent"`, `"Home"` and `"FeedbackEmail"`.
+- `DeployPacletPage` also takes the options of `PacletPageFiles` that shape the site: `"Title"`, `"Subtitle"`, `"Accent"`, `"Home"`, `"FeedbackEmail"`, `"FeedbackThanks"` and `"DefinitionPage"`.
+- One email setting serves the site and the feedback pages: the address of `"FeedbackEmail"` is the feedback pages' `"Email"` too, and an `"Email"` among `"FeedbackOptions"` gives the site its email fallback, unless each is given.
 - The site works on the same origin as the pages it shows, `https://www.wolframcloud.com`, where both the Paclet Repository's notebooks and deployed resources are served.
 
 ## Basic Examples

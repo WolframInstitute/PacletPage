@@ -33,8 +33,13 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Accent"` | `"#dd1100"` | the accent color, a hex string or a color |
 | `"Home"` | `Automatic` | `"Definition"`, `"RootGuide"` or `"Resource"`, the page the site opens on |
 | `"FeedbackEmail"` | `None` | an address, an email template with `To:` and `Subject:` lines, or a `File` of one |
+| `"FeedbackThanks"` | `Automatic` | what the Feedback panel shows once feedback is sent |
+| `"DefinitionPage"` | `True` | whether the definition notebook is a page of the site |
 
-- With `"Home" -> Automatic`, the site opens on the resource, with its Feedback button and its source, when the catalog has its definition notebook, else on the root guide.
+- With `"Home" -> Automatic`, the site opens on the resource, with its Feedback button and its source, when the catalog has its definition notebook, else on the root guide. `"DefinitionPage" -> False` leaves the definition notebook out of the site; the resource page itself stays its home on request, with `"Home" -> "Resource"`, which hides an empty Examples section and the author's Paclet Source link.
+- The tutorials are listed in the order of their titles, the ones with the keyword "application" apart as Applications. A tutorial whose authoring notebook has nothing between its title and the template's closing sections is a placeholder: it is shown greyed, and the filter's Enter opens a written page before it.
+- While the filter shows a match, the labels of the groups it shows stay, so a match keeps its heading.
+- An email template's body may use `{title}`, `{page}`, `{link}`, `{view}`, `{notebook}` and `{date}`, filled in for the page the reader is on; an address alone gets a template that asks what is wrong, where, what was expected, and anything else.
 
 ## Basic Examples
 

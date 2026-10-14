@@ -16,12 +16,15 @@ RelatedTutorials: [PublishingADocumentationSite]
 
 `SetPacletPageFeedbackStatus[name, id, status]` records the status with no note.
 
+`SetPacletPageFeedbackStatus[name, {update1, update2, ...}]` records several statuses at once.
+
 ## Details & Options
 
 - `SetPacletPageFeedbackStatus` goes through the site's `SetStatus` endpoint, so any member of the team can use it from a signed-in Wolfram kernel.
 - `name` is a site of the connected account, or the URL of a site in another account.
 - Each Status button on the site's `All` page copies the same call, filled in with the entry's current status and note.
 - The result is the status recorded, as an association.
+- An update is `id -> status`, `{id, status}`, `{id, status, note}` or an entry with `"ID"`, `"Status"` and `"Note"`, such as a row of `PacletPageFeedback`. All the updates are checked first, and sent in one request that stores them in one write; when one is not a status, none is stored. The result is the list of statuses recorded.
 
 ## Basic Examples
 
