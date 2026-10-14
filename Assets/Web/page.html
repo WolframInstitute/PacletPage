@@ -157,7 +157,7 @@
       <input id="fb-email" name="Email" type="email" maxlength="200" placeholder="you@example.org">
       <input class="hp" name="Website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
       <p id="fb-status" role="status"></p>
-      <div id="fb-thanks"><strong>Thank you</strong>Your feedback was sent.</div>
+      <div id="fb-thanks"><strong>Thank you</strong><span id="fb-thanks-text">Your feedback was sent.</span></div>
     </div>
     <div class="foot">
       <span class="links"><a id="fb-all" target="_blank" rel="noopener"
@@ -270,6 +270,7 @@
   // ---- feedback --------------------------------------------------------------------------------
   // The Feedback button opens the panel when the site has a feedback form, and an email prefilled
   // from the template when the template names a recipient; with neither it stays hidden.
+  if (C.thanks) document.getElementById('fb-thanks-text').textContent = C.thanks;
   var FORM = C.form,
       feedback = document.getElementById('feedback'),
       link = C.site ? C.site + '#' + id : location.href,

@@ -143,13 +143,24 @@ guideStructure[name_String, nb_] := Module[{headings, title},
     |>
 ];
 
-(* the title and the keywords a built documentation notebook records in its TaggingRules metadata *)
+(* the title and the keywords a built documentation notebook records in its TaggingRules metadata,
+   and whether it is a placeholder: nothing between its title and the template's closing sections *)
 notebookMetadata[nb_] := With[{rules = FirstCase[nb, (TaggingRules -> rules_) :> rules, {}, {1}]},
     <|
+        "Stub" -> placeholderQ[nb],
         "Title" -> Replace[ruleValue[rules, {"Metadata", "title"}, Missing[]], Except[_String?(StringTrim[#] =!= "" &)] -> Missing["NoTitle"]],
         "Keywords" -> Select[Flatten[{ruleValue[rules, {"Metadata", "keywords"}, {}], ruleValue[rules, {"Metadata", "synonyms"}, {}]}], StringQ]
     |>
 ];
+
+placeholderQ[nb_Notebook] := With[{styles = Cases[nb, Cell[_, style_String, ___] :> style, Infinity]},
+    With[{title = FirstPosition[styles, "Title" | "TechNoteTitle", None], close = FirstPosition[styles, $closingSections, None]},
+        title =!= None && close =!= None && First[close] === First[title] + 1
+    ]
+];
+placeholderQ[_] := False;
+
+$closingSections = "TutorialMoreAboutSection" | "RelatedTutorialsSection" | "TutorialsSection" | "MetadataSection";
 
 (* ==================== the built documentation, when it is at hand ==================== *)
 
@@ -178,7 +189,8 @@ localNotebook[file_String] := If[FileExistsQ[file], Import[file, "NB"], Missing[
    its name: the metadata of an authoring notebook names the page rather than titling it *)
 withMetadata[page_Association, meta_Association] := Join[page,
     If[StringQ[meta["Title"]] && page["Title"] === page["Name"], <|"Title" -> meta["Title"]|>, <||>],
-    <|"Keywords" -> meta["Keywords"]|>
+    <|"Keywords" -> meta["Keywords"]|>,
+    If[page["Kind"] === "tutorial", <|"Stub" -> TrueQ[meta["Stub"]]|>, <||>]
 ];
 
 newPage[spec_Association, kind_String, page_String, title_String] := <|

@@ -193,7 +193,7 @@ feedbackForm[bin_String, attachments_String, title_String, email_String] := Form
                 "Control" -> Function[InputField[##, FieldSize -> {48, 3}]]
             |>,
             "Email" -> <|"Interpreter" -> "EmailAddress", "Required" -> False, "Label" -> "Your email", "Hint" -> "only if you would like a reply"|>,
-            "Attachment1" -> <|"Interpreter" -> "CachedFile", "Required" -> False, "Label" -> "Screenshot or file"|>,
+            "Attachment1" -> <|"Interpreter" -> "CachedFile", "Required" -> False, "Label" -> "Screenshot or file", "Hint" -> "up to three files; the site's Feedback panel also takes a pasted screenshot"|>,
             "Attachment2" -> <|"Interpreter" -> "CachedFile", "Required" -> False, "Label" -> "Another file"|>,
             "Attachment3" -> <|"Interpreter" -> "CachedFile", "Required" -> False, "Label" -> "Another file"|>
         },

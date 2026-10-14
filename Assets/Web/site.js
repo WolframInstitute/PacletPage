@@ -82,12 +82,28 @@
   function injectHide() {
     try {
       var d = frame.contentDocument;
-      if (!d || !d.head || d.getElementById('pp-hide-chrome')) return;
-      var s = d.createElement('style');
-      s.id = 'pp-hide-chrome';
-      s.textContent = C.hide;
-      d.head.appendChild(s);
+      if (!d || !d.head) return;
+      if (!d.getElementById('pp-hide-chrome')) {
+        var s = d.createElement('style');
+        s.id = 'pp-hide-chrome';
+        s.textContent = C.hide;
+        d.head.appendChild(s);
+      }
+      hideEmptyExamples(d);
     } catch (e) {}
+  }
+
+  // The resource page always has an Examples section; one whose definition had no examples is
+  // empty, and then hidden with its heading. A page that embeds its example notebook fills the
+  // section as the notebook renders, so it is never hidden.
+  function hideEmptyExamples(d) {
+    var examples = d.getElementById('nbCollapseExampleNotebook');
+    if (!examples) return;
+    var embeds = d.documentElement.innerHTML.indexOf('ExampleNotebook_embed') >= 0;
+    var empty = !embeds && !examples.textContent.replace(/\s+/g, '') && !examples.querySelector('img, svg, canvas, iframe');
+    examples.style.display = empty ? 'none' : '';
+    var heading = d.querySelector('[data-target="#nbCollapseExampleNotebook"]');
+    if (heading) heading.style.display = empty ? 'none' : '';
   }
 
   // A link to a page of the site opens in the shell; a link elsewhere opens in a new tab, since
@@ -259,9 +275,23 @@
       if (!term) { ds[i].open = !!(openState && openState.get(ds[i])); }
       else { li = ds[i].closest('li'); if (li && li.__hit) ds[i].open = true; }
     }
-    var labels = root.querySelectorAll('.nav-label, .nav-sep');
-    for (i = 0; i < labels.length; i++) labels[i].style.display = term ? 'none' : '';
+    // a group's label stays while its list shows a match, a separator while anything after it does
+    var labels = root.querySelectorAll('.nav-label');
+    for (i = 0; i < labels.length; i++) labels[i].style.display = !term || hitIn(labels[i].nextElementSibling) ? '' : 'none';
+    var seps = root.querySelectorAll('.nav-sep');
+    for (i = 0; i < seps.length; i++) {
+      var shown = !term;
+      for (n = seps[i].nextElementSibling; n && !shown; n = n.nextElementSibling) shown = hitIn(n);
+      seps[i].style.display = shown ? '' : 'none';
+    }
     railEmptyNote(root, !!term && lis.length > 0 && root.querySelectorAll('li[style*="none"]').length === lis.length);
+  }
+
+  function hitIn(el) {
+    if (!el) return false;
+    var lis = el.querySelectorAll('li');
+    for (var i = 0; i < lis.length; i++) { if (lis[i].__hit) return true; }
+    return false;
   }
 
   function runFilter() {
@@ -279,7 +309,8 @@
   // Enter opens the best entry the filter shows: a title equal to the term, then one that starts
   // with it, then one with a word that starts with it (after a separator or at a CamelCase step),
   // then one that contains it, last one that matches only on its keywords. Within a rank a guide
-  // or tutorial comes before a symbol, then the shorter title.
+  // or tutorial comes before a symbol, a written tutorial before a placeholder, then the shorter
+  // title.
   function wordStartAt(title, i) {
     if (i === 0) return true;
     var p = title.charAt(i - 1), c = title.charAt(i);
@@ -304,7 +335,7 @@
     for (var i = 0; i < as.length; i++) {
       var a = as[i], r = titleRank(a, term);
       if (r < 0) continue;
-      var k = [r, KIND[a.getAttribute('data-id').split('/')[0]] || 0, (a.textContent || '').trim().length];
+      var k = [r, KIND[a.getAttribute('data-id').split('/')[0]] || 0, a.classList.contains('stub') ? 1 : 0, (a.textContent || '').trim().length];
       for (var j = 0; j < k.length && bk; j++) { if (k[j] !== bk[j]) break; }
       if (!bk || (j < k.length && k[j] < bk[j])) { best = a; bk = k; }
     }

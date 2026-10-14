@@ -82,6 +82,9 @@ a { text-decoration: none; color: inherit; }
 /* worked applications, kept apart from the tutorials */
 #side a.app { color: #7c4d9e; }
 #side a.app.active, #side a.tut.active { color: var(--pp-active-fg); }
+#side a.tut.stub, #side a.app.stub { color: #8a8f98; font-style: italic; }
+#side a.tut.stub:hover, #side a.app.stub:hover { color: #5c6168; }
+#side a.tut.stub.active, #side a.app.stub.active { color: var(--pp-active-fg); font-style: normal; }
 
 /* right: symbols */
 #side-right a.sym { color: #1a6ba5; }

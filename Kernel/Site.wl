@@ -98,11 +98,11 @@ sidebarHTML[catalog_Association, notebooks_Association] := Module[
     tree = If[KeyExistsQ[pages, root], guideTree[pages, root, {}], Nothing];
     reached = If[AssociationQ[tree], treeIDs[tree], {}];
     others = Select[Keys[pages], StringStartsQ[#, "guide/"] && ! MemberQ[reached, #] &];
-    tutorials = Select[Keys[pages], StringStartsQ[#, "tutorial/"] &];
+    tutorials = SortBy[Select[Keys[pages], StringStartsQ[#, "tutorial/"] &], {ToLowerCase[pages[#]["Title"]], pages[#]["Title"]} &];
     list[ids_List, label_String, class_String] := If[ ids === {},
         "",
         StringJoin["<div class=\"nav-label\">", label, "</div><ul class=\"nav-tutorials\">",
-            Map["<li>" <> navLink[#, pages[#], class, notebooks] <> "</li>" &, ids], "</ul>"]
+            Map["<li>" <> navLink[#, pages[#], class <> If[TrueQ[Lookup[pages[#], "Stub", False]], " stub", ""], notebooks] <> "</li>" &, ids], "</ul>"]
     ];
     StringJoin[
         "<ul class=\"nav-root\">",
@@ -206,6 +206,9 @@ Where on the page (section, example or output)?
 
 What did you expect to see instead?
 
+
+Anything else? (optional)
+
 ";
 
 (* the email template: None, an address, a template with To: and Subject: lines, or a file of one *)
@@ -216,6 +219,16 @@ feedbackTemplate[File[file_String], _] := ByteArrayToString[ReadByteArray[file],
 feedbackTemplate[template_String, _] := template;
 feedbackTemplate[_, _] := $Failed;
 
+(* the address an email setting names: an address, or the To: line of a template or of a file of one *)
+emailAddressQ[s_String] := StringMatchQ[s, RegularExpression["[^\\s@]+@[^\\s@]+"]];
+feedbackAddress[address_String] /; emailAddressQ[address] := address;
+feedbackAddress[template_String] := Replace[
+    StringCases[template, StartOfLine ~~ "To:" ~~ (" " | "\t") ... ~~ address : Except[WhitespaceCharacter] .. :> address, 1],
+    {{address_String} /; emailAddressQ[address] :> address, _ -> None}
+];
+feedbackAddress[File[file_String]] /; FileExistsQ[file] := feedbackAddress[ByteArrayToString[ReadByteArray[file], "UTF-8"]];
+feedbackAddress[_] := None;
+
 Options[PacletPageFiles] = {
     "SiteURL" -> "",
     "PageURL" -> "page.html",
@@ -225,7 +238,9 @@ Options[PacletPageFiles] = {
     "Subtitle" -> Automatic,
     "Accent" -> "#dd1100",
     "Home" -> Automatic,
-    "FeedbackEmail" -> None
+    "FeedbackEmail" -> None,
+    "FeedbackThanks" -> Automatic,
+    "DefinitionPage" -> True
 };
 
 PacletPageFiles::accent = "`1` is not a color; give a color or a hex string such as \"#dd1100\".";
@@ -234,8 +249,10 @@ PacletPageFiles::email = "The feedback email `1` is not an address, a template w
 
 PacletPageFiles[catalog_, opts : OptionsPattern[]] /; ! catalogQ[catalog] := (Message[PacletPageFiles::catalog, catalog]; $Failed);
 
-PacletPageFiles[catalog_?catalogQ, opts : OptionsPattern[]] := Module[
-    {title, subtitle, accent, home, mail, prefix, notebooks, routes, kind, page, shellConfig, pageConfig, css},
+PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
+    {catalog, title, subtitle, accent, home, mail, prefix, notebooks, routes, kind, page, shellConfig, pageConfig, css},
+    (* the definition notebook is a page of the site unless "DefinitionPage" -> False *)
+    catalog = If[ TrueQ[OptionValue["DefinitionPage"]], site, MapAt[KeySelect[! StringStartsQ[#, "resource/"] &], site, Key["Pages"]]];
     title = Replace[OptionValue["Title"], Automatic -> catalog["Title"]];
     subtitle = Replace[OptionValue["Subtitle"], Automatic :> publisherLabel[catalog["Name"]]];
     accent = cssColor[OptionValue["Accent"]];
@@ -283,7 +300,8 @@ PacletPageFiles[catalog_?catalogQ, opts : OptionsPattern[]] := Module[
         "site" -> OptionValue["SiteURL"],
         "routes" -> routes,
         "hide" -> $stockChromeCSS,
-        "mail" -> mail
+        "mail" -> mail,
+        "thanks" -> Replace[OptionValue["FeedbackThanks"], Except[_String] -> ""]
     |>;
     (* the stylesheet's first rule holds its colors *)
     css = StringReplace[readAsset["site.css"], RegularExpression["^:root \\{[^}]*\\}"] ->

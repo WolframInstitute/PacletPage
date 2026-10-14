@@ -141,7 +141,7 @@ VerificationTest[
 
 VerificationTest[
     notebookMetadata[Notebook[{}, TaggingRules -> {"Metadata" -> {"title" -> "A Title", "keywords" -> {"k1", "k2"}, "synonyms" -> {"s1"}}}]],
-    <|"Title" -> "A Title", "Keywords" -> {"k1", "k2", "s1"}|>,
+    <|"Stub" -> False, "Title" -> "A Title", "Keywords" -> {"k1", "k2", "s1"}|>,
     TestID -> "Catalog: a built notebook's title and keywords"
 ]
 
@@ -159,7 +159,7 @@ VerificationTest[
 
 VerificationTest[
     notebookMetadata[Notebook[{}]],
-    <|"Title" -> Missing["NoTitle"], "Keywords" -> {}|>,
+    <|"Stub" -> False, "Title" -> Missing["NoTitle"], "Keywords" -> {}|>,
     TestID -> "Catalog: a notebook without metadata gives none"
 ]
 
@@ -331,6 +331,81 @@ VerificationTest[
     configOf[PacletPageFiles[cloudCatalog, "Home" -> "Resource"]["index.html"]]["home"]["type"],
     "resource",
     TestID -> "Site: the resource page itself as home, on request"
+]
+
+VerificationTest[
+    With[{files = PacletPageFiles[cloudCatalog, "DefinitionPage" -> False]},
+        {
+            configOf[files["index.html"]]["home"]["id"],
+            configOf[files["page.html"]]["definition"],
+            StringCases[files["index.html"], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id]
+        }
+    ],
+    {"guide/Name", "", {"guide/Name", "ref/$Var"}},
+    TestID -> "Site: \"DefinitionPage\" -> False leaves the definition notebook out of the site"
+]
+
+VerificationTest[
+    {
+        configOf[PacletPageFiles[cloudCatalog, "FeedbackThanks" -> "The team will read it."]["page.html"]]["thanks"],
+        configOf[PacletPageFiles[cloudCatalog]["page.html"]]["thanks"]
+    },
+    {"The team will read it.", ""},
+    TestID -> "Site: the thanks a sent feedback shows, the page's own by default"
+]
+
+VerificationTest[
+    With[{catalog = MapAt[
+            Join[#, <|"tutorial/Zed" -> Join[fixturePage["tutorial", "Zed", "Aardvark Notes", "https://s.example/obj/store/N/jjj.nb"], <|"Stub" -> True|>]|>] &,
+            repositoryCatalog, Key["Pages"]]},
+        {
+            StringCases[sidebarHTML[catalog, <||>], "data-id=\"" ~~ id : ("tutorial/" ~~ Except["\""] ..) ~~ "\"" :> id],
+            StringContainsQ[sidebarHTML[catalog, <||>], "<a class=\"tut stub\" data-id=\"tutorial/Zed\""]
+        }
+    ],
+    {{"tutorial/Zed", "tutorial/Intro", "tutorial/Use"}, True},
+    TestID -> "Site: tutorials in the order of their titles; a placeholder is marked"
+]
+
+VerificationTest[
+    {
+        placeholderQ[Notebook[{Cell["A Title", "Title"], Cell["More About", "TutorialMoreAboutSection"], Cell["Metadata", "MetadataSection"]}]],
+        placeholderQ[Notebook[{Cell["A Title", "Title"], Cell["Some words.", "Text"], Cell["More About", "TutorialMoreAboutSection"]}]],
+        placeholderQ[Notebook[{Cell["Some words.", "Text"]}]],
+        withMetadata[<|"Kind" -> "tutorial", "Name" -> "T", "Title" -> "T", "Keywords" -> {}|>, <|"Stub" -> True, "Title" -> "T", "Keywords" -> {}|>]["Stub"]
+    },
+    {True, False, False, True},
+    TestID -> "Catalog: a tutorial with nothing between its title and the template's closing sections is a placeholder"
+]
+
+VerificationTest[
+    Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["mail-"] <> ".txt"}], result},
+        Export[file, "To: team@site.example\nSubject: S\n\nbody", "Text"];
+        result = {
+            feedbackAddress["a@b.example"], feedbackAddress["To: team@site.example\nSubject: S\n\nbody"],
+            feedbackAddress[File[file]], feedbackAddress["no address here"], feedbackAddress[None]
+        };
+        DeleteFile[file];
+        result
+    ],
+    {"a@b.example", "team@site.example", "team@site.example", None, None},
+    TestID -> "Site: the address an email setting names: itself, or its template's To: line"
+]
+
+VerificationTest[
+    {
+        sharedFeedbackEmail[None, {"Email" -> "a@b.example", "Domains" -> {"b.example"}}],
+        sharedFeedbackEmail["To: t@x.example\nSubject: S\n\nbody", {"Domains" -> {}}],
+        sharedFeedbackEmail["a@b.example", {"Email" -> "c@d.example"}],
+        sharedFeedbackEmail[None, {}]
+    },
+    {
+        {"a@b.example", {"Email" -> "a@b.example", "Domains" -> {"b.example"}}},
+        {"To: t@x.example\nSubject: S\n\nbody", {"Domains" -> {}, "Email" -> "t@x.example"}},
+        {"a@b.example", {"Email" -> "c@d.example"}},
+        {None, {}}
+    },
+    TestID -> "Cloud: one email setting serves the site's fallback and the feedback pages"
 ]
 
 VerificationTest[

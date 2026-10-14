@@ -160,7 +160,7 @@ Options[DeployPacletPage] = Join[
 DeployPacletPage::name = "`1` is not a site name: use letters, digits, \"_\" and \"-\", with \"/\" between directories.";
 
 DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[
-    {site, page, feedback, source, files, result, title},
+    {site, page, feedback, source, files, result, title, mail, feedbackOptions},
     Which[
         ! catalogQ[catalog], Message[PacletPageFiles::catalog, catalog]; Return[$Failed, Module],
         ! siteNameQ[name], Message[DeployPacletPage::name, name]; Return[$Failed, Module],
@@ -169,8 +169,9 @@ DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[
     site = siteURL[name];
     page = site <> "Page";
     title = Replace[OptionValue["Title"], Automatic -> catalog["Title"]];
+    {mail, feedbackOptions} = sharedFeedbackEmail[OptionValue["FeedbackEmail"], OptionValue["FeedbackOptions"]];
     feedback = If[ TrueQ[OptionValue["Feedback"]],
-        DeployPacletPageFeedback[name, Sequence @@ OptionValue["FeedbackOptions"], "Title" -> title, "Account" -> OptionValue["Account"]],
+        DeployPacletPageFeedback[name, Sequence @@ feedbackOptions, "Title" -> title, "Account" -> OptionValue["Account"]],
         None
     ];
     If[ feedback === $Failed, Return[$Failed, Module]];
@@ -185,6 +186,7 @@ DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[
         "PageURL" -> page,
         "FeedbackURL" -> If[AssociationQ[feedback], feedback["Form"], ""],
         "SourceURL" -> If[AssociationQ[source], source["URL"], ""],
+        "FeedbackEmail" -> mail,
         Sequence @@ FilterRules[{opts}, Options[PacletPageFiles]]
     ];
     If[ ! AssociationQ[files], Return[$Failed, Module]];
@@ -201,6 +203,16 @@ DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Module[
         "Source" -> source,
         "Pages" -> Length[catalog["Pages"]]
     |>
+];
+
+(* One email setting: an address given to the site's email fallback ("FeedbackEmail") or to the
+   feedback pages ("Email" of "FeedbackOptions") is the other's too *)
+sharedFeedbackEmail[siteMail_, feedbackOptions_List] := With[
+    {given = Lookup[Association[Cases[Flatten[feedbackOptions], _Rule | _RuleDelayed]], "Email", None]},
+    {
+        If[ MatchQ[siteMail, None | ""] && StringQ[feedbackAddress[given]], given, siteMail],
+        If[ MatchQ[given, None | ""] && StringQ[feedbackAddress[siteMail]], Append[feedbackOptions, "Email" -> feedbackAddress[siteMail]], feedbackOptions]
+    }
 ];
 
 (* ==================== permissions ==================== *)
