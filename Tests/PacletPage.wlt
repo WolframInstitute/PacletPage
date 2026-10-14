@@ -875,6 +875,12 @@ VerificationTest[
 ]
 
 VerificationTest[
+    {failureBudget[0, 500], failureBudget[Automatic, 120], failureBudget[Automatic, 1200], failureBudget[5, 10], failureBudget[Infinity, 10]},
+    {0, 3, 12, 5, Infinity},
+    TestID -> "Archive: the pages an archive may lack: none by default, Automatic three or a hundredth of them"
+]
+
+VerificationTest[
     staleDocumentation[
         {"guide/A.nb", "guide/A.html", "ref/B.nb", "ref/B.html", "ref/Gone.nb", "ref/Gone.html", "images/x.png"},
         {"guide/A.nb", "ref/B.nb"}

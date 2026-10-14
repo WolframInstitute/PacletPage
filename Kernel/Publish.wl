@@ -471,7 +471,7 @@ messageText[symbol_, tag_String] := With[{text = MessageName[symbol, tag]},
 $deployedDocumentation = None;
 
 (* what every build or deploy of a page makes afresh, which says nothing of its content *)
-$buildNoise = {((ExpressionUUID | CellID) -> _) -> Sequence[], ("built" -> _) -> Sequence[]};
+$buildNoise = {((ExpressionUUID | CellID | CellChangeTimes) -> _) -> Sequence[], ("built" -> _) -> Sequence[]};
 
 (* what a deploy writes and makes again whatever the record says: "Documentation", "Pages" *)
 $rewrite = {};
@@ -505,7 +505,7 @@ changedFiles[keys_Association, existing_Association, record_Association] :=
 
 (* A file's content, for telling whether it changed. A notebook's is its expression, parsed but not
    evaluated, without what every build or deploy makes afresh: the random ids of its cells, and of
-   the cells the build adds, and the time the page was built. *)
+   the cells the build adds, the times its cells changed, and the time the page was built. *)
 contentKey[file_String] := If[ ToLowerCase[FileExtension[file]] === "nb",
     With[{held = ToExpression[ReadString[file], InputForm, HoldComplete]},
         If[ MatchQ[held, _HoldComplete],
@@ -1399,7 +1399,9 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
         Map[relativePath[Replace[docSource, Automatic -> FileNameJoin[{dir, "Documentation"}]], #] &, authoring],
         Map[Last[StringSplit[#, "/Documentation/", 2]] &, pages]
     ];
-    If[ missing =!= {}, Message[head::pages, Length[authoring] - Length[missing], Length[authoring], Take[missing, UpTo[10]]]; Return[$Failed, Module]];
+    If[ Length[missing] > failureBudget[Lookup[pageOptions, "MaxFailures", 0], Length[authoring]],
+        Message[head::pages, Length[authoring] - Length[missing], Length[authoring], Take[missing, UpTo[10]]]; Return[$Failed, Module]];
+    If[ missing =!= {}, Message[head::missing, Length[missing], Take[missing, UpTo[10]]]];
     load = If[ TrueQ[loadCheck],
         With[{paclet = PacletObject[File[dir]]}, archiveLoadCheck[built["Archive"], paclet["Version"], paclet["PrimaryContext"], dependencies]],
         None
@@ -1422,7 +1424,7 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
         _ -> None
     }];
     With[{result = <|"Archive" -> built["Archive"], "Pages" -> Length[pages], "Load" -> load, "DeclaredSymbols" -> declared, "Symbols" -> archiveSymbols[FileNameJoin[{buildDir, prefix}]], "ArchiveSize" -> Quantity[FileByteCount[built["Archive"]], "Bytes"],
-          "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel|>|>},
+          "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel, "Missing" -> missing|>|>},
         Put[
             <|"Archive" -> FileNameTake[built["Archive"]], "ArchiveHash" -> FileHash[built["Archive"], "SHA256", "HexString"], "Source" -> sources, "Result" -> result|>,
             FileNameJoin[{buildDir, "archive.wl"}]
@@ -1457,6 +1459,13 @@ sourceHash[dir_String, docSource_, pageOptions_Association] := With[
         KeyTake[pageOptions, {"Exclude", "Symbols"}]
     }, "SHA256", "HexString"]
 ];
+
+(* the documentation pages an archive may lack: Automatic, three or a hundredth of them, whichever
+   is more *)
+failureBudget[Automatic, pages_Integer] := Max[3, Ceiling[pages / 100]];
+failureBudget[n_Integer?NonNegative, _] := n;
+failureBudget[Infinity, _] := Infinity;
+failureBudget[_, _] := 0;
 
 (* The archive repacked with the given symbols as its Kernel extension's "Symbols", which the
    resource page's examples are linked by (PacletSymbol), unless it declares some and replace is
@@ -1566,6 +1575,7 @@ Options[DeployPacletResource] = {
     "Monitor" -> False,
     "Upload" -> Automatic,
     "Build" -> True,
+    "MaxFailures" -> 0,
     Permissions -> "Public"
 };
 
@@ -1575,6 +1585,7 @@ DeployPacletResource::write = "`1` Nothing was deleted, so the resource keeps it
 DeployPacletResource::nodef = "`1` has no ResourceDefinition.nb or no documentation: build it first with BuildPacletDocumentation.";
 DeployPacletResource::build = "PacletBuild failed: `1`.";
 DeployPacletResource::pages = "The built archive holds `1` of the `2` documentation pages; nothing was deployed. Missing: `3`.";
+DeployPacletResource::missing = "`1` documentation pages did not build, within \"MaxFailures\"; the archive goes without them: `2`.";
 DeployPacletResource::library = "PacletInfo.wl declares LibraryLink libraries, and the archive holds none under `1`; nothing was deployed.";
 DeployPacletResource::archivecheck = "The archive check `1` did not give True; nothing was deployed.";
 DeployPacletResource::links = "These symbolic links lead outside the paclet, and the archive would hold what they lead to: `1`; nothing was deployed. Remove them, or leave them out with \"Exclude\".";
@@ -1625,7 +1636,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
             Throw[$Failed, "deploy"]]
     ];
     built = With[
-        {pageOptions = <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"]|>},
+        {pageOptions = <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"], "MaxFailures" -> OptionValue["MaxFailures"]|>},
         If[ TrueQ[OptionValue["Build"]],
             freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], OptionValue["LoadCheck"], pageOptions],
             builtArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], pageOptions]
@@ -1761,6 +1772,7 @@ Options[SubmitPacletResource] = {
 SubmitPacletResource::nodef = DeployPacletResource::nodef;
 SubmitPacletResource::build = DeployPacletResource::build;
 SubmitPacletResource::pages = DeployPacletResource::pages;
+SubmitPacletResource::missing = DeployPacletResource::missing;
 SubmitPacletResource::links = DeployPacletResource::links;
 SubmitPacletResource::packed = "The scrape packed `1`, not the fresh build `2`; nothing was submitted.";
 SubmitPacletResource::library = DeployPacletResource::library;
