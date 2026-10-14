@@ -624,6 +624,135 @@ VerificationTest[
     TestID -> "Publish: a deployed page is matched to the documentation file it came from"
 ]
 
+(* the documentation a deploy writes, with the cloud stubbed *)
+VerificationTest[
+    Module[{dir = CreateDirectory[], write, keys},
+        write[name_, uuid_, built_, text_] := Export[FileNameJoin[{dir, name}],
+            "(* Content-type: application/vnd.wolfram.mathematica *)\n(*CacheID: " <> ToString[RandomInteger[10^6]] <> "*)\nNotebook[{Cell[\"" <> text <> "\", \"Text\", ExpressionUUID -> \"" <> uuid <> "\"]}, TaggingRules -> {\"Metadata\" -> {\"built\" -> \"" <> built <> "\", \"title\" -> \"T\"}}]\n", "Text"];
+        write["a.nb", "6018d88b-58bd-4b3a-9a41-e01b06eb14aa", "{2026, 5, 27, 1, 26, 16.08}", "Some text"];
+        write["b.nb", "16f8fa60-c06d-4452-990a-eee8e93b8841", "{2026, 10, 14, 9, 1, 2.5}", "Some text"];
+        write["c.nb", "16f8fa60-c06d-4452-990a-eee8e93b8841", "{2026, 10, 14, 9, 1, 2.5}", "Other text"];
+        Export[FileNameJoin[{dir, "d.png"}], "not an image", "Text"];
+        keys = contentKey[FileNameJoin[{dir, #}]] & /@ {"a.nb", "b.nb", "c.nb", "d.png"};
+        DeleteDirectory[dir, DeleteContents -> True];
+        {keys[[1]] === keys[[2]], keys[[2]] === keys[[3]], StringQ[keys[[4]]]}
+    ],
+    {True, False, True},
+    TestID -> "Publish: a notebook's content is the same whatever its cells' ids and the time it was built"
+]
+
+VerificationTest[
+    changedFiles[
+        <|"ref/A.nb" -> "ka", "ref/B.nb" -> "kb", "ref/C.nb" -> "kc", "guide/G.nb" -> "kg"|>,
+        <|"ref/A.nb" -> True, "ref/B.nb" -> True, "guide/G.nb" -> True, "ref/Old.nb" -> True|>,
+        <|"ref/A.nb" -> "ka", "ref/B.nb" -> "old", "ref/C.nb" -> "kc"|>
+    ],
+    {"ref/B.nb", "ref/C.nb", "guide/G.nb"},
+    TestID -> "Publish: a documentation file is written when its content changed, the cloud lacks it, or the record does not have it"
+]
+
+VerificationTest[
+    documentationDirectories[{FileNameJoin[{"ref", "A.nb"}], FileNameJoin[{"ref", "B.nb"}], FileNameJoin[{"English", "Guides", "G.nb"}], "top.nb"}],
+    {"ref", "English", FileNameJoin[{"English", "Guides"}]},
+    TestID -> "Publish: the documentation's directories, each once"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], root = CloudObject["https://c.example/obj/u/R"], copied = {}, records = <||>, permissions = {}, run, result},
+        CreateDirectory[FileNameJoin[{dir, "ref"}]];
+        Export[FileNameJoin[{dir, "ref", #}], "Notebook[{Cell[\"" <> # <> "\", \"Text\"]}]", "Text"] & /@ {"A.nb", "B.nb", "C.nb"};
+        run[existing_, failing_] := Block[{
+                $pages = newPages[], $deployedDocumentation = None, $uploadAll = False,
+                cloudFiles = Function[target, existing],
+                readRecord = Function[{r, kind}, Lookup[records, kind, <||>]],
+                writeRecord = Function[{r, kind, record}, records[kind] = record],
+                CopyFile = Function[{from, to, opt}, If[StringEndsQ[from, failing], $Failed, AppendTo[copied, FileNameTake[from]]; to]],
+                SetPermissions = Function[{object, p}, AppendTo[permissions, First[object]]; object],
+                PacletResource`Private`addEmbeddedOptions = Identity
+            },
+            Catch[Length[replaceDocumentation[dir, root, "Public"]], "cloudwrite"]
+        ];
+        result = {
+            run[<||>, "none"], copied, Sort[Keys[records["Documentation"]]],
+            (copied = {}; run[<|FileNameJoin[{"ref", "A.nb"}] -> True, FileNameJoin[{"ref", "B.nb"}] -> True, FileNameJoin[{"ref", "C.nb"}] -> True|>, "none"]), copied,
+            (Export[FileNameJoin[{dir, "ref", "B.nb"}], "Notebook[{Cell[\"changed\", \"Text\"]}]", "Text"]; copied = {};
+             FailureQ[run[<|FileNameJoin[{"ref", "A.nb"}] -> True, FileNameJoin[{"ref", "B.nb"}] -> True|>, "C.nb"]]), copied,
+            Sort[Keys[records["Documentation"]]],
+            DeleteDuplicates[permissions]
+        };
+        DeleteDirectory[dir, DeleteContents -> True];
+        result
+    ],
+    {
+        3, {"A.nb", "B.nb", "C.nb"}, Sort[{FileNameJoin[{"ref", "A.nb"}], FileNameJoin[{"ref", "B.nb"}], FileNameJoin[{"ref", "C.nb"}]}],
+        3, {},
+        True, {"B.nb"},
+        Sort[{FileNameJoin[{"ref", "A.nb"}], FileNameJoin[{"ref", "B.nb"}]}],
+        {"https://c.example/obj/u/R/Documentation", "https://c.example/obj/u/R/Documentation/ref"}
+    },
+    TestID -> "Publish: a deploy writes only the documentation that changed or the cloud lacks, and records only what it wrote"
+]
+
+VerificationTest[
+    Module[{made = {}, run, signatures},
+        run[existing_, keys_, sidebar_, recorded_] := Block[{
+                $pages = Join[newPages[], <|"Root" -> CloudObject["https://c.example/obj/u/R"], "Existing" -> existing, "Keys" -> keys, "Signatures" -> recorded, "Recorded" -> recorded|>],
+                PacletResource`Private`createDocumentationEmbedPage = Function[{as, side, url}, AppendTo[made, FileBaseName[url]]; CloudObject[url]],
+                PacletResource`Private`shingleTemplate = Function[name, TemplateObject[{"<title>", TemplateSlot["Name"], "</title>", TemplateSlot["NavSidebar"]}]],
+                PacletResource`Private`$cloudObjectOpts = {}
+            },
+            made = {};
+            Scan[makePage[<|"Name" -> "R", "UUID" -> CreateUUID[]|>, sidebar, "https://c.example/obj/u/R/Documentation/ref/" <> # <> ".html"] &, {"A", "B"}];
+            {made, $pages["Signatures"]}
+        ];
+        With[{
+            all = <|FileNameJoin[{"ref", "A.nb"}] -> True, FileNameJoin[{"ref", "A.html"}] -> True, FileNameJoin[{"ref", "B.nb"}] -> True, FileNameJoin[{"ref", "B.html"}] -> True|>,
+            keys = <|FileNameJoin[{"ref", "A.nb"}] -> "ka", FileNameJoin[{"ref", "B.nb"}] -> "kb"|>},
+            signatures = Last[run[all, keys, "<nav/>", <||>]];
+            {
+                First[run[all, keys, "<nav/>", <||>]],
+                First[run[all, keys, "<nav/>", signatures]],
+                First[run[all, Append[keys, FileNameJoin[{"ref", "B.nb"}] -> "kb2"], "<nav/>", signatures]],
+                First[run[KeyDrop[all, FileNameJoin[{"ref", "A.html"}]], keys, "<nav/>", signatures]],
+                First[run[all, keys, "<nav>new page</nav>", signatures]]
+            }
+        ]
+    ],
+    {{"A", "B"}, {}, {"B"}, {"A"}, {"A", "B"}},
+    TestID -> "Publish: a page is made again when its notebook, the sidebar or its template's values changed, or the cloud lacks it"
+]
+
+VerificationTest[
+    Module[{writes = {}},
+        Block[{writeRecord = Function[{r, kind, record}, AppendTo[writes, record]]},
+            Block[{$pages = Join[newPages[], <|"Root" -> CloudObject["https://c.example/obj/u/R"], "Signatures" -> <|"a" -> 1, "gone" -> 2|>, "Recorded" -> <|"a" -> 1, "gone" -> 2|>, "Seen" -> {"a"}|>]},
+                savePages[False]; savePages[True]
+            ];
+            Block[{$pages = Join[newPages[], <|"Root" -> CloudObject["https://c.example/obj/u/R"], "Signatures" -> <|"a" -> 1|>, "Recorded" -> <|"a" -> 1|>, "Seen" -> {"a"}|>]},
+                savePages[True]
+            ]
+        ];
+        writes
+    ],
+    {<|"a" -> 1|>},
+    TestID -> "Publish: the pages' record drops a page no longer shown once the deploy is complete, and is written only when it changed"
+]
+
+VerificationTest[
+    Module[{deleted = {}},
+        Block[{
+                DeleteObject = Function[object, AppendTo[deleted, First[object]]; Null],
+                $deployedDocumentation = <|"Target" -> CloudObject["https://c.example/obj/u/R/Documentation"],
+                    "Files" -> {FileNameJoin[{"ref", "A.nb"}]},
+                    "Existing" -> {FileNameJoin[{"ref", "A.nb"}], FileNameJoin[{"ref", "A.html"}], FileNameJoin[{"ref", "Gone.nb"}], FileNameJoin[{"ref", "Gone.html"}]}|>
+            },
+            {pruneDocumentation[], deleted}
+        ]
+    ],
+    {2, {"https://c.example/obj/u/R/Documentation/ref/Gone.nb", "https://c.example/obj/u/R/Documentation/ref/Gone.html"}},
+    TestID -> "Publish: the notebooks the new documentation lacks, and their pages, are deleted once the deploy is complete"
+]
+
 VerificationTest[
     staleDocumentation[
         {"guide/A.nb", "guide/A.html", "ref/B.nb", "ref/B.html", "ref/Gone.nb", "ref/Gone.html", "images/x.png"},

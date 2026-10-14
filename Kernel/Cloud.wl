@@ -82,7 +82,7 @@ sourceNotebooks[dir_String] := Module[{root},
 (* serially, or over the parallel kernels when every one acts as the account this kernel does: a
    parallel kernel is connected as the machine's saved login, which another session may have
    changed, and a write as another account is refused *)
-mapBlocks[f_, list_List] := If[ sameAccountQ[kernelAccounts[], cloudAccount[]],
+mapBlocks[f_, list_List] := If[ Length[Kernels[]] > 0 && sameAccountQ[kernelAccounts[], cloudAccount[]],
     ParallelMap[f, list, DistributedContexts -> Automatic],
     Map[f, list]
 ];

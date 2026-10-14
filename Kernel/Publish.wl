@@ -463,22 +463,70 @@ messageText[symbol_, tag_String] := With[{text = MessageName[symbol, tag]},
 ];
 
 (* The documentation, replaced in place, file by file, rather than deleted and copied whole: a
-   deploy that stops leaves every page served. A file not written stops the deploy; the pages the
-   new documentation no longer has are deleted once the deploy is complete (pruneDocumentation). *)
+   deploy that stops leaves every page served. A file is written only when the cloud lacks it or
+   its content changed since the resource's record of what it holds was written; with
+   "Upload" -> All, every file is. A file not written stops the deploy, and the record keeps only
+   what was written; the pages the new documentation no longer has are deleted once the deploy is
+   complete (pruneDocumentation). *)
 $deployedDocumentation = None;
+$uploadAll = False;
 
-replaceDocumentation[dir_String, target_CloudObject, permissions_] := Module[{files, written},
-    files = Select[FileNames["*", dir, Infinity], FileType[#] === File &];
-    written = Map[
-        Function[file, With[{to = documentationObject[target, relativePath[dir, file], permissions]},
-            Replace[CopyFile[file, to, OverwriteTarget -> True],
-                Except[_CloudObject] :> Throw[cloudWriteFailureObject[First[to] <> " was not written.", "CopyFile"], "cloudwrite"]]
-        ]],
-        files
+replaceDocumentation[dir_String, root_CloudObject, permissions_] := Module[
+    {target = FileNameJoin[{root, "Documentation"}], relatives, existing, record, keys, changed, written, failure},
+    relatives = relativePath[dir, #] & /@ Select[FileNames["*", dir, Infinity], FileType[#] === File &];
+    existing = cloudFiles[target];
+    record = If[TrueQ[$uploadAll], <||>, readRecord[root, "Documentation"]];
+    keys = AssociationMap[contentKey[FileNameJoin[{dir, #}]] &, relatives];
+    changed = changedFiles[keys, existing, record];
+    monitor["documentation: " <> ToString[Length[changed]] <> " of " <> ToString[Length[relatives]] <> " files to write"];
+    {written, failure} = writeDocumentation[dir, target, permissions, changed];
+    writeRecord[root, "Documentation", Join[KeyTake[record, Complement[relatives, changed]], KeyTake[keys, written]]];
+    If[ failure =!= None, Throw[failure, "cloudwrite"]];
+    setDocumentationPermissions[target, relatives, permissions];
+    $deployedDocumentation = <|"Root" -> root, "Target" -> target, "Files" -> relatives, "Existing" -> Keys[existing], "Written" -> Length[written]|>;
+    $pages = Join[$pages, <|"Root" -> root, "Existing" -> existing, "Keys" -> keys|>,
+        With[{record = If[TrueQ[$uploadAll], <||>, readRecord[root, "Pages"]]}, <|"Signatures" -> record, "Recorded" -> record|>]];
+    documentationObject[target, #, permissions] & /@ relatives
+];
+
+(* the files to write: those the cloud lacks, and those whose content changed since the record *)
+changedFiles[keys_Association, existing_Association, record_Association] :=
+    Select[Keys[keys], ! KeyExistsQ[existing, #] || Lookup[record, #] =!= keys[#] &];
+
+(* A file's content, for telling whether it changed. A notebook's is its expression, parsed but not
+   evaluated, without what every build or deploy makes afresh: the cells' random ids and the time
+   the page was built. *)
+contentKey[file_String] := If[ ToLowerCase[FileExtension[file]] === "nb",
+    With[{held = ToExpression[ReadString[file], InputForm, HoldComplete]},
+        If[ MatchQ[held, _HoldComplete],
+            Hash[held /. {(ExpressionUUID -> _) -> Sequence[], ("built" -> _) -> Sequence[]}, "SHA256", "HexString"],
+            FileHash[file, "SHA256", "HexString"]
+        ]
+    ],
+    FileHash[file, "SHA256", "HexString"]
+];
+
+(* The files, written in blocks: over the parallel kernels when they act as this kernel's account,
+   and none after a block with a file not written. The files written, and the failure or None. *)
+writeDocumentation[dir_String, target_CloudObject, permissions_, relatives_List] := Module[{written = {}, failure},
+    failure = Catch[
+        Scan[
+            Function[block, With[
+                {results = mapBlocks[
+                    Function[task, MatchQ[CopyFile[First[task], Last[task], OverwriteTarget -> True], _CloudObject]],
+                    {FileNameJoin[{dir, #}], documentationObject[target, #, permissions]} & /@ block
+                ]},
+                written = Join[written, Pick[block, results, True]];
+                If[ Length[relatives] > Length[block], monitor["documentation: " <> ToString[Length[written]] <> " of " <> ToString[Length[relatives]] <> " written"]];
+                If[ ! AllTrue[results, TrueQ],
+                    Throw[cloudWriteFailureObject[First[documentationObject[target, First[Pick[block, results, False]], Automatic]] <> " was not written.", "CopyFile"], "cloudwrite"]]
+            ]],
+            Partition[relatives, UpTo[50]]
+        ];
+        None,
+        "cloudwrite"
     ];
-    PacletResource`Private`setCODirectoryPermissions[target, permissions];
-    $deployedDocumentation = <|"Target" -> target, "Files" -> (relativePath[dir, #] & /@ files)|>;
-    written
+    {written, failure}
 ];
 
 documentationObject[target_CloudObject, relative_String, permissions_] := PacletResource`Private`addEmbeddedOptions @ If[ permissions === Automatic,
@@ -486,18 +534,103 @@ documentationObject[target_CloudObject, relative_String, permissions_] := Paclet
     CloudObject[First[FileNameJoin[Prepend[FileNameSplit[relative], target]]], Permissions -> permissions]
 ];
 
+(* The documentation's directories get the resource's permissions, as the stock deploy gives
+   them: the documentation directory and each directory a file is in *)
+setDocumentationPermissions[_, _, Automatic] := Null;
+setDocumentationPermissions[target_CloudObject, relatives_List, permissions_] := With[
+    {directories = Prepend[FileNameJoin[Prepend[FileNameSplit[#], target]] & /@ documentationDirectories[relatives], target]},
+    With[{results = mapBlocks[MatchQ[SetPermissions[#, permissions], _CloudObject | {___}] &, directories]},
+        If[ ! AllTrue[results, TrueQ],
+            Throw[cloudWriteFailureObject["The permissions of " <> First[First[Pick[directories, results, False]]] <> " were not set.", "SetPermissions"], "cloudwrite"]]
+    ]
+];
+
+(* the directories of the files, by their paths, each directory once *)
+documentationDirectories[relatives_List] := DeleteDuplicates @ Catenate @ Map[
+    Function[parts, FileNameJoin[Take[parts, #]] & /@ Range[Length[parts] - 1]],
+    FileNameSplit /@ relatives
+];
+
+(* the files beneath a cloud directory, by their paths within it, none when it is not there: two
+   listings for each directory *)
+cloudFiles[dir_CloudObject] := If[ ! TrueQ[DirectoryQ[dir]], <||>,
+    AssociationMap[True &,
+        cloudRelativePath[dir, #] & /@ Catenate[Complement[CloudObjects[#], CloudObjects[#, "Directory"]] & /@ cloudDirectories[dir]]]
+];
+
 (* the path of a cloud object within a cloud directory *)
 cloudRelativePath[target_CloudObject, object_CloudObject] :=
     FileNameJoin[URLDecode /@ StringSplit[StringDrop[First[object], StringLength[First[target]]], "/"]];
 
+(* The resource's record of what it holds, private, beside it: each documentation file's content,
+   and each page's signature *)
+recordObject[root_CloudObject, kind_String] := FileNameJoin[{root, "DeployRecord", kind <> ".wl"}];
+
+readRecord[root_CloudObject, kind_String] := With[{object = recordObject[root, kind]},
+    If[ TrueQ[FileExistsQ[object]], Replace[CloudGet[object], Except[_Association] -> <||>], <||>]
+];
+
+writeRecord[root_CloudObject, kind_String, record_Association] := CloudPut[record, recordObject[root, kind], Permissions -> "Private"];
+
 pruneDocumentation[] := If[ ! AssociationQ[$deployedDocumentation], 0,
-    Module[{target = $deployedDocumentation["Target"], files, stale},
-        files = Replace[ResourceSystemClient`Private`recursiveCloudObjects[target, "Association"], {listing_Association :> Lookup[listing, "Files", {}], _ -> {}}];
-        stale = With[{relatives = cloudRelativePath[target, #] & /@ files},
-            Pick[files, MemberQ[staleDocumentation[relatives, $deployedDocumentation["Files"]], #] & /@ relatives]];
-        Scan[DeleteObject, stale];
+    With[{target = $deployedDocumentation["Target"], stale = staleDocumentation[$deployedDocumentation["Existing"], $deployedDocumentation["Files"]]},
+        Scan[DeleteObject[FileNameJoin[Prepend[FileNameSplit[#], target]]] &, stale];
         Length[stale]
     ]
+];
+
+(* The page each documentation notebook is shown in is made again only when what it is made from
+   changed: its template, the resource's values the template shows, the sidebar, which lists every
+   page, the notebook's URL and the notebook itself, since the page keeps the notebook's render
+   from the first time it is read. The resource's record keeps each page's signature, saved every
+   hundred pages and once the deploy is done. *)
+$pages = <||>;
+
+newPages[] := <|"Root" -> None, "Existing" -> <||>, "Keys" -> <||>, "Signatures" -> <||>, "Recorded" -> <||>, "Made" -> 0, "Unchanged" -> 0, "Seen" -> {}, "Context" -> None|>;
+
+pageRule[] := HoldPattern[PacletResource`Private`createDocumentationEmbedPage[as_Association, sidebar_String, url_String] /; ! TrueQ[$makingPage]] :>
+    makePage[as, sidebar, url];
+
+installPageRule[] := If[ DownValues[PacletResource`Private`createDocumentationEmbedPage] =!= {},
+    Unprotect[PacletResource`Private`createDocumentationEmbedPage];
+    DownValues[PacletResource`Private`createDocumentationEmbedPage] = Prepend[DownValues[PacletResource`Private`createDocumentationEmbedPage], pageRule[]];
+    True,
+    False
+];
+
+makePage[as_Association, sidebar_String, url_String] := Module[{signature},
+    If[ $pages["Context"] === None, $pages["Context"] = pageContext[as]];
+    signature = Hash[{$pages["Context"], sidebar, url, Lookup[$pages["Keys"], pageRelative[StringReplace[url, ".html" ~~ EndOfString -> ".nb"]], None]}, "SHA256", "HexString"];
+    $pages["Seen"] = Append[$pages["Seen"], url];
+    If[ Lookup[$pages["Signatures"], url] === signature && pageExistsQ[url],
+        $pages["Unchanged"]++;
+        CloudObject[url],
+        With[{made = Block[{$makingPage = True}, PacletResource`Private`createDocumentationEmbedPage[as, sidebar, url]]},
+            If[ MatchQ[made, _CloudObject],
+                $pages["Signatures", url] = signature;
+                $pages["Made"]++;
+                If[ Mod[$pages["Made"], 100] === 0 && MatchQ[$pages["Root"], _CloudObject], writeRecord[$pages["Root"], "Pages", $pages["Signatures"]]]
+            ];
+            made
+        ]
+    ]
+];
+
+(* what the page template makes of the resource, besides the sidebar and the notebook: the template
+   and the values it shows, and the options the pages are deployed with *)
+pageContext[as_Association] := With[{template = PacletResource`Private`shingleTemplate["DocumentationPage"]},
+    Hash[{template, KeyTake[as, DeleteDuplicates[Cases[template, TemplateSlot[slot_String, ___] :> slot, Infinity]]], PacletResource`Private`$cloudObjectOpts}, "SHA256", "HexString"]
+];
+
+pageExistsQ[url_String] := KeyExistsQ[$pages["Existing"], pageRelative[url]];
+
+(* a URL's path within the documentation *)
+pageRelative[url_String] := If[ MatchQ[$pages["Root"], _CloudObject], cloudRelativePath[FileNameJoin[{$pages["Root"], "Documentation"}], CloudObject[url]], None];
+
+(* The record of the pages once the deploy is done: a page no longer shown is dropped when every
+   page was made or seen unchanged *)
+savePages[complete_] := With[{record = If[TrueQ[complete], KeyTake[$pages["Signatures"], $pages["Seen"]], $pages["Signatures"]]},
+    If[ MatchQ[$pages["Root"], _CloudObject] && record =!= $pages["Recorded"], writeRecord[$pages["Root"], "Pages", record]]
 ];
 
 (* The stale pages among a documentation tree's files: a notebook the new documentation does not
@@ -635,7 +768,7 @@ installDeployFixes[] := If[ ! TrueQ[$deployFixesInstalled], Module[{probe = Clou
         rule_ /; MemberQ[rule[[1]], "DocumentationNotebooks", Infinity]
     ];
     PacletResource`Private`cloudDeployPacletWebFile[_, root_CloudObject, "DocumentationNotebooks", dir_?DirectoryQ, opts : OptionsPattern[CloudObject]] :=
-        replaceDocumentation[dir, FileNameJoin[{root, "Documentation"}], OptionValue[CloudObject, {opts}, Permissions]];
+        replaceDocumentation[dir, root, OptionValue[CloudObject, {opts}, Permissions]];
     $deployFixesInstalled = True
 ]];
 
@@ -1187,6 +1320,7 @@ Options[DeployPacletResource] = {
     "ArchiveCheck" -> None,
     "Symbols" -> Automatic,
     "Monitor" -> False,
+    "Upload" -> Automatic,
     Permissions -> "Public"
 };
 
@@ -1215,6 +1349,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
     If[ ! readyToPublishQ[DeployPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "deploy"]];
     offline = offlineDryRunQ[OptionValue["DryRun"]];
     $deployedDocumentation = None;
+    $pages = newPages[];
     accountOK = offline || publishingAccountQ[DeployPacletResource, OptionValue["Account"]];
     If[ stopsQ[accountOK, OptionValue["DryRun"]], Throw[$Failed, "deploy"]];
     PacletDirectoryLoad[dir];
@@ -1259,8 +1394,11 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
     hero = heroImage[OptionValue["HeroImage"], definition];
     {resource, location, deployed} = Replace[
         If[ offline, {None, None, None}, UsingFrontEnd @ Internal`InheritedBlock[
-            {PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols, DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ, $deployMonitor},
+            {PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols, DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ,
+             PacletResource`Private`createDocumentationEmbedPage, $deployMonitor, $uploadAll},
             $deployMonitor = TrueQ[OptionValue["Monitor"]];
+            $uploadAll = OptionValue["Upload"] === All;
+            installPageRule[];
             With[{form = installForm[name, archiveURL[OptionValue["Archive"], name], If[MatchQ[target, _CloudObject], First[target], None]]},
                 If[ MatchQ[form, _HoldComplete], installSymbolBoxes[name, form]]
             ];
@@ -1300,6 +1438,8 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
                     {versioned, where, None},
                 True,
                     With[{deploy = Block[{$heroImage = hero}, stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]]},
+                        savePages[MatchQ[deploy, _CloudObject]];
+                        monitor["pages: " <> ToString[$pages["Made"]] <> " made, " <> ToString[$pages["Unchanged"]] <> " unchanged"];
                         If[ FailureQ[deploy], Message[DeployPacletResource::write, deploy["Message"]]; deploy, {versioned, where, deploy}]
                     ]
             ];
@@ -1334,7 +1474,12 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         "Commit" -> commit,
         "Load" -> built["Load"],
         "AppearanceElements" -> $appearanceElements,
-        "Removed" -> removed
+        "Removed" -> removed,
+        "Written" -> <|
+            "Files" -> If[AssociationQ[$deployedDocumentation], $deployedDocumentation["Written"], 0],
+            "Pages" -> $pages["Made"],
+            "UnchangedPages" -> $pages["Unchanged"]
+        |>
     |>
 ], "deploy"];
 
