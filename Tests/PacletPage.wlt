@@ -1117,13 +1117,23 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{kernels = LaunchKernels[1]},
+    Module[{kernels = LaunchKernels[2], frontEnds},
         ParallelEvaluate[UsingFrontEnd[ToBoxes[Graphics[Disk[]]]]; 1, kernels];
+        frontEnds = kernelFrontEnds[kernels];
         closeKernels[kernels];
-        {closeKernels[{}], Intersection[Kernels[], kernels]}
+        {Length[frontEnds], livingProcesses[frontEnds], closeKernels[{}], Intersection[Kernels[], kernels]}
     ],
-    {{}, {}},
-    TestID -> "Build: parallel kernels close after the front ends they started quit"
+    {2, {}, {}, {}},
+    TestID -> "Build: parallel kernels close after the front ends they started have quit and are gone"
+]
+
+VerificationTest[
+    {
+        descendantProcesses[<|10 -> {1, "kernel"}, 11 -> {10, "fe"}, 12 -> {11, "helper"}, 20 -> {1, "other"}|>, {10}],
+        frontEndProcessQ /@ {"/Applications/Wolfram.app/Contents/MacOS/MathematicaServer", "WolframNB", "WolframKernel"}
+    },
+    {{11, 12}, {True, True, False}},
+    TestID -> "Build: a kernel's front ends are found among the processes it started"
 ]
 
 VerificationTest[

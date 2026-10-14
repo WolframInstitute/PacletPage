@@ -205,7 +205,7 @@ renderShareScript[docsDir_String, out_String, pages_Association, linkBase_, limi
     "        \"SingleFile\" -> #2, \"CompleteHTMLQ\" -> True, \"LinkBase\" -> ", If[StringQ[linkBase], wlString[linkBase], "None"], "], ", ToString[limit], ", $TimedOut], _Success];\n",
     "     Put[record, ", wlString[recordOut], "]) &,\n",
     "    pages];\n",
-    "Developer`UninstallFrontEnd[];\n"
+    $quitFrontEndCode
 ];
 
 (* The pages under Documentation/, as the shell asks for them. The renders name a stylesheet

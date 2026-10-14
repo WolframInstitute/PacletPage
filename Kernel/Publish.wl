@@ -1206,7 +1206,7 @@ pacletBuildScript[source_String, buildDir_String, dependencies_List : {}] := Str
     "result = PacletTools`PacletBuild[", wlString[source], ", ", wlString[buildDir], ", PacletTools`PacletExtensionHandlers -> handlers];\n",
     "report = If[MatchQ[result, _Success], <|\"Archive\" -> result[\"PacletArchive\"]|>, <|\"Failure\" -> ToString[result, InputForm]|>];\n",
     "WriteString[\"stdout\", \"PACLETPAGE-BUILD \" <> ExportString[report, \"RawJSON\", \"Compact\" -> True] <> \"\\n\"];\n",
-    "Developer`UninstallFrontEnd[];\n"
+    $quitFrontEndCode
 ];
 
 freshKernelBuild[source_String, buildDir_String, dependencies_List : {}] := Module[{kernel = kernelExecutable[], script, run, line},
@@ -1322,7 +1322,7 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "        Replace[processed, Except[_Association] -> <||>]]]];\n",
     "    Put[record, ", wlString[recordOut], "],\n",
     "    {page, pages}];\n",
-    "Developer`UninstallFrontEnd[];\n"
+    $quitFrontEndCode
 ];
 
 (* Scripts run as separate kernel processes, at most n at a time, each one killed past its
@@ -1636,13 +1636,66 @@ loadResourceTools[] := (
     Needs["PacletTools`"]
 );
 
-(* Parallel kernels closed, each with the front end it started quit first: a front end whose
-   kernel closes under it crashes on its way out *)
+(* The end of a script that may have started a front end: the front end quit, and its process gone,
+   or fifteen seconds passed, before the kernel exits under it *)
+$quitFrontEndCode = StringJoin[
+    "Developer`UninstallFrontEnd[];\n",
+    "With[{deadline = AbsoluteTime[] + 15}, While[AbsoluteTime[] < deadline && AnyTrue[\n",
+    "    StringSplit[Replace[RunProcess[{\"ps\", \"-e\", \"-o\", \"ppid=,comm=\"}], {run_Association :> run[\"StandardOutput\"], _ -> \"\"}], \"\\n\"],\n",
+    "    StringMatchQ[StringTrim[#], ToString[$ProcessID] ~~ Whitespace ~~ ___ ~~ (\"WolframNB\" | \"MathematicaServer\" | \"Mathematica\" | \"WolframFrontEnd\")] &], Pause[0.1]]];\n"
+];
+
+(* Parallel kernels closed, each with the front end it started quit first and its process gone: a
+   front end whose kernel closes under it, even while it is on its way out, crashes. Quitting is
+   bounded: a front end still there after half a minute is ended with TERM before its kernel
+   closes. *)
 closeKernels[{}] := {};
-closeKernels[kernels_List] := (
-    ParallelEvaluate[Developer`UninstallFrontEnd[], kernels, DistributedContexts -> None];
+closeKernels[kernels_List] := Module[{frontEnds = kernelFrontEnds[kernels]},
+    TimeConstrained[ParallelEvaluate[Developer`UninstallFrontEnd[], kernels, DistributedContexts -> None], 30];
+    If[ ! waitForExit[frontEnds, 30],
+        Scan[RunProcess[{"kill", "-TERM", IntegerString[#]}] &, livingProcesses[frontEnds]];
+        waitForExit[frontEnds, 10]
+    ];
     CloseKernels[kernels]
-);
+];
+
+(* the front end processes the kernels started, among the processes descended from them *)
+kernelFrontEnds[kernels_List] := With[
+    {table = processTable[], pids = Select[Flatten[{TimeConstrained[ParallelEvaluate[$ProcessID, kernels, DistributedContexts -> None], 30, {}]}], IntegerQ]},
+    Select[descendantProcesses[table, pids], frontEndProcessQ[Last[table[#]]] &]
+];
+
+frontEndProcessQ[command_String] := StringMatchQ[FileNameTake[command], "WolframNB" | "MathematicaServer" | "Mathematica" | "WolframFrontEnd"];
+
+(* the processes, by id: the id of each one's parent and its command; none where there is no ps *)
+processTable[] := If[ $OperatingSystem === "Windows", <||>,
+    With[{run = RunProcess[{"ps", "-e", "-o", "pid=,ppid=,comm="}]},
+        If[ ! AssociationQ[run] || run["ExitCode"] =!= 0, <||>,
+            Association @ Map[
+                Function[line, With[{fields = StringSplit[StringTrim[line], Whitespace, 3]},
+                    If[Length[fields] === 3 && StringMatchQ[fields[[1]] <> fields[[2]], DigitCharacter ..],
+                        FromDigits[fields[[1]]] -> {FromDigits[fields[[2]]], fields[[3]]}, Nothing]]],
+                StringSplit[run["StandardOutput"], "\n"]
+            ]
+        ]
+    ]
+];
+
+descendantProcesses[table_Association, roots_List] := Module[{found = {}, frontier = roots},
+    While[ frontier =!= {},
+        frontier = Complement[Select[Keys[table], MemberQ[frontier, First[table[#]]] &], found];
+        found = Join[found, frontier]
+    ];
+    found
+];
+
+livingProcesses[pids_List] := Intersection[pids, Keys[processTable[]]];
+
+(* whether the processes have all exited within the seconds given *)
+waitForExit[pids_List, seconds_] := Module[{deadline = AbsoluteTime[] + seconds},
+    While[ livingProcesses[pids] =!= {} && AbsoluteTime[] < deadline, Pause[0.1]];
+    livingProcesses[pids] === {}
+];
 
 (* The parallel kernels of a deploy, launched for it and closed after it: those "Parallel" asks for,
    as buildKernels counts them; f gets the kernels *)
