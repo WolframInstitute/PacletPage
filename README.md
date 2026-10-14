@@ -41,7 +41,11 @@ paclet with a documentation site, without a front end and without scripts of the
   outside the paclet, and LibraryLink libraries declared but not shipped are refused.
 - A complete resource page from its first visit, on any cloud subscription: Details, examples, the
   main guide, the hero image and the source link, with the paclet's version and commit recorded.
-  The examples link the paclet's symbols, so code copied from them runs in a fresh kernel.
+  The examples link the paclet's symbols, and code copied from them installs the paclet once, then
+  finds it by name. A paclet with several guides lists them as a tree beside every page.
+- Deploys that scale: only the documentation notebooks and pages that changed are written again,
+  and the pages are made over parallel kernels, each kept for the next deploy. A release can build
+  in one process and deploy from that build in another.
 - Paclet Repository submission without a front end, after the definition notebook's own checks and
   the release's.
 - A documentation site around the published pages: a filter over every title and keyword, the
@@ -50,13 +54,14 @@ paclet with a documentation site, without a front end and without scripts of the
   address, Back and Forward step through the pages read, links to the paclet's own pages stay in
   the site, and any other link opens in a new tab.
 - Feedback on every page: text in any language and attachments, kept in a Databin of the
-  publishing account and confirmed to the reader once stored. The team reads and triages it, each
-  entry with a status, on pages open to the account, named readers and whole email domains.
+  publishing account and confirmed to the reader once stored, with an email fallback. The team
+  reads and triages it, each entry with a status, set one at a time or many in one write, on pages
+  open to the account, named readers and whole email domains.
 - Every page's source a toggle away: the notebook the page was built from.
 - Any published paclet: a site frames pages from the Paclet Repository or from a paclet resource
   deployed to a cloud account.
 - Upkeep: `CheckPacletPage` checks, as an anonymous reader, that the site, its pages and its
-  feedback form are reachable, and `SetPacletPagePermissions` sets permissions over a whole cloud
+  feedback form are reachable, and can send an example entry through the form, and `SetPacletPagePermissions` sets permissions over a whole cloud
   tree. Cleaning up removes only the site's own objects.
 
 ## Use
