@@ -1297,11 +1297,10 @@ documentationLinkBase[paclet_PacletObject] := Replace[
 ];
 
 (* The script a page-building process runs: the stock documentation build over its share of the
-   changed pages, without the search indexes, a page at a time, each within limit seconds, writing
-   the record entries PacletBuild keeps for them to a file after each page, so that what a process
-   built is known even when it is stopped. Its output goes to a log, so that nothing waits on a
-   full pipe. *)
-pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List, limit_ : 900] := StringJoin[
+   changed pages, in one call, since each call reads the whole documentation tree first, without
+   the search indexes, writing the record entries PacletBuild keeps for them to a file. Its output
+   goes to a log, so that nothing waits on a full pipe. *)
+pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List] := StringJoin[
     "$ProgressReporting = False;\n",
     "$Output = $Messages = {OpenWrite[", wlString[log], "]};\n",
     dependencyLoadCode[dependencies],
@@ -1312,28 +1311,26 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "pages = {", StringRiffle[wlString /@ pages, ", "], "};\n",
     "paclet = PacletObject[File[", wlString[source], "]];\n",
     "inputDir = ExpandFileName[", wlString[docsDir], "];\n",
-    "record = <||>;\n",
-    "Do[\n",
-    "    result = TimeConstrained[UsingFrontEnd @ DocumentationBuild`DocumentationBuildNotebooks[inputDir, ", wlString[builtDocsDir], ", # === page &,\n",
-    "        \"BuildSearchIndex\" -> False, \"SuccessThreshold\" -> -1, \"LinkBase\" -> ", wlString[documentationLinkBase[PacletObject[File[source]]]], ",\n",
-    "        \"CitationFunction\" -> PacletTools`PacletDocumentationBuild`Private`makePacletCitationFunction[paclet],\n",
-    "        \"TargetWolframVersionNumber\" -> PacletTools`PacletDocumentationBuild`Private`determinePacletDocumentationTargetVersionNumber[paclet]], ", ToString[limit], ", $TimedOut];\n",
-    "    processed = Replace[result, {built : (_Success | _Association) :> built[\"ProcessedFiles\"], _ -> <||>}];\n",
-    "    record = Join[record, Association[KeyValueMap[\n",
-    "        With[{built = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[built === page, built -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
-    "        Replace[processed, Except[_Association] -> <||>]]]];\n",
-    "    Put[record, ", wlString[recordOut], "],\n",
-    "    {page, pages}];\n",
+    "result = UsingFrontEnd @ DocumentationBuild`DocumentationBuildNotebooks[inputDir, ", wlString[builtDocsDir], ", MemberQ[pages, #] &,\n",
+    "    \"BuildSearchIndex\" -> False, \"SuccessThreshold\" -> -1, \"LinkBase\" -> ", wlString[documentationLinkBase[PacletObject[File[source]]]], ",\n",
+    "    \"CitationFunction\" -> PacletTools`PacletDocumentationBuild`Private`makePacletCitationFunction[paclet],\n",
+    "    \"TargetWolframVersionNumber\" -> PacletTools`PacletDocumentationBuild`Private`determinePacletDocumentationTargetVersionNumber[paclet]];\n",
+    "processed = Replace[result, {built : (_Success | _Association) :> built[\"ProcessedFiles\"], _ -> <||>}];\n",
+    "Put[Association[KeyValueMap[\n",
+    "    With[{page = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[MemberQ[pages, page], page -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
+    "    Replace[processed, Except[_Association] -> <||>]]], ", wlString[recordOut], "];\n",
     $endScriptCode
 ];
 
 (* Scripts run as separate kernel processes, at most n at a time, each one killed past its
-   deadline, or when its "Record" has not changed for "Stall" seconds: "Finished", "TimedOut" or
-   "Stalled" by script. A process may start parallel kernels of its own, which a parallel kernel may
-   not, and the stock documentation build does when it installs a format's paclet. When the deploy
-   is monitored, a line says when each run with a "Label" ends, and every minute how many have. *)
+   deadline, or when none of its "Record" and "Progress" files has changed for "Stall" seconds:
+   "Finished", "TimedOut" or "Stalled" by script. A process killed takes the processes it started,
+   its parallel kernels and front ends, with it. A process may start parallel kernels of its own,
+   which a parallel kernel may not, and the stock documentation build does when it installs a
+   format's paclet. When the deploy is monitored, a line says when each run with a "Label" ends,
+   and every minute how many have. *)
 runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
-    {kernel = kernelExecutable[], queue = runs, running = {}, finished = <||>, next = AbsoluteTime[] + 60},
+    {kernel = kernelExecutable[], queue = runs, running = {}, finished = <||>, next = AbsoluteTime[] + 60, stallCheck = AbsoluteTime[] + 10},
     If[ kernel === None, Return[AssociationMap["NoKernel" &, Lookup[runs, "Script", {}]], Module]];
     While[ queue =!= {} || running =!= {},
         While[ Length[running] < n && queue =!= {},
@@ -1346,11 +1343,12 @@ runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
             ! MatchQ[run["Process"], _ProcessObject] || ProcessStatus[run["Process"]] =!= "Running",
                 finished[run["Script"]] = "Finished"; runEnded[run, "finished"]; False,
             AbsoluteTime[] - run["Start"] > run["Deadline"],
-                KillProcess[run["Process"]]; finished[run["Script"]] = "TimedOut"; runEnded[run, "stopped past its time"]; False,
-            stalledQ[run],
-                KillProcess[run["Process"]]; finished[run["Script"]] = "Stalled"; runEnded[run, "stopped: nothing new for " <> ToString[run["Stall"]] <> " s"]; False,
+                killProcessTree[run["Process"]]; finished[run["Script"]] = "TimedOut"; runEnded[run, "stopped past its time"]; False,
+            AbsoluteTime[] > stallCheck && stalledQ[run],
+                killProcessTree[run["Process"]]; finished[run["Script"]] = "Stalled"; runEnded[run, "stopped: nothing new for " <> ToString[run["Stall"]] <> " s"]; False,
             True, True
         ]]];
+        If[ AbsoluteTime[] > stallCheck, stallCheck = AbsoluteTime[] + 10];
         If[ AbsoluteTime[] > next,
             monitor[what <> ": " <> ToString[Length[finished]] <> " of " <> ToString[Length[runs]] <> " done, " <> ToString[Length[running]] <> " running"];
             next += 60
@@ -1382,10 +1380,19 @@ runWatched[command_List, what_String] := Module[{process, out = {}, err = {}, st
 
 runEnded[run_Association, how_String] := If[StringQ[Lookup[run, "Label", None]], monitor[run["Label"] <> " " <> how]];
 
-(* a run that has recorded nothing new for its "Stall" seconds, since it started or since its record
-   last changed *)
+(* a run that has written nothing new for its "Stall" seconds, since it started or since its record,
+   or a file it makes, last changed *)
 stalledQ[run_Association] := NumericQ[Lookup[run, "Stall", None]] && AbsoluteTime[] - Max[run["Start"],
-    If[StringQ[Lookup[run, "Record", None]] && FileExistsQ[run["Record"]], AbsoluteTime[FileDate[run["Record"]]], 0]] > run["Stall"];
+    Map[If[FileExistsQ[#], AbsoluteTime[FileDate[#]], 0] &, Select[Flatten[{Lookup[run, "Record", {}], Lookup[run, "Progress", {}]}], StringQ]]] > run["Stall"];
+
+(* a process killed with the processes it started; a process object gives its "PID" itself, where
+   ProcessInformation does not *)
+killProcessTree[process_ProcessObject] := With[{pid = process["PID"]},
+    With[{descendants = If[IntegerQ[pid], descendantProcesses[processTable[], {pid}], {}]},
+        KillProcess[process];
+        If[descendants =!= {}, RunProcess[Join[{"kill", "-KILL"}, IntegerString /@ descendants]]]
+    ]
+];
 
 drainProcess[process_ProcessObject] := (
     ReadString[ProcessConnection[process, "StandardOutput"], EndOfBuffer];
@@ -1404,7 +1411,7 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
     monitor["archive: " <> ToString[Length[changed]] <> " changed pages built in " <> ToString[n] <> " processes"];
     runs = pageShareRuns[source, docsDir, builtDocsDir, changed, n, limit, dependencies, work, "share"];
     runKernelScripts[runs, n, "archive: page shares"];
-    (* a share stopped before its end leaves its unbuilt pages to one more process each *)
+    (* a share stopped before its end has recorded none of its pages, which get one more process *)
     again = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ runs];
     retries = If[ again === {}, {},
         monitor["archive: " <> ToString[Length[again]] <> " pages again, in new processes"];
@@ -1419,13 +1426,15 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
 ];
 
 (* the shares of pages and their processes' scripts, small enough to keep every process busy to the
-   end; a share whose record has not changed for a page's time and two minutes has stalled *)
+   end; a share that has built none of its pages for a page's time and ten minutes, the time the
+   stock build takes to read the whole documentation tree first, has stalled *)
 pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_Integer, limit_, dependencies_List, work_String, kind_String] := With[
     {shares = Partition[pages, UpTo[Max[1, Min[25, Ceiling[Length[pages] / (4 n)]]]]]},
     MapIndexed[
         Function[{share, index}, With[{base = FileNameJoin[{work, kind <> "-" <> IntegerString[First[index]]}]},
-            Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies, limit], "Text"];
-            <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Pages" -> share, "Deadline" -> limit * Length[share] + 120, "Stall" -> limit + 120,
+            Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies], "Text"];
+            <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Pages" -> share, "Progress" -> (FileNameJoin[{builtDocsDir, #}] & /@ share),
+              "Deadline" -> limit * Length[share] + 600, "Stall" -> limit + 600,
               "Label" -> "archive: " <> kind <> " " <> IntegerString[First[index]] <> " of " <> IntegerString[Length[shares]] <> " (" <> IntegerString[Length[share]] <> " pages)"|>
         ]],
         shares

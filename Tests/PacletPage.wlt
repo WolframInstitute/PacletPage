@@ -1056,12 +1056,12 @@ VerificationTest[
 
 VerificationTest[
     Module[{dir = localFixture[], script},
-        script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}, 300];
+        script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}];
         DeleteDirectory[dir, DeleteContents -> True];
         SyntaxQ[script]
     ],
     True,
-    TestID -> "Archive: a page share's script, a page at a time, is Wolfram Language"
+    TestID -> "Archive: a page share's script is Wolfram Language"
 ]
 
 VerificationTest[
@@ -1146,6 +1146,23 @@ VerificationTest[
     ],
     {{2, 3}, {4}, {"cloud: the parallel kernels act as b@x.example, not a@x.example: cloud writes go from this kernel"}},
     TestID -> "Cloud: cloud writes go from this kernel when its parallel kernels act as another account, said once"
+]
+
+VerificationTest[
+    Module[{script = FileNameJoin[{$TemporaryDirectory, CreateUUID["tree-"] <> ".wl"}], process, pid, children, start},
+        Export[script, "LaunchKernels[1]; Pause[120];", "Text"];
+        process = StartProcess[{kernelExecutable[], "-noprompt", "-script", script}];
+        pid = process["PID"];
+        start = AbsoluteTime[];
+        While[ descendantProcesses[processTable[], {pid}] === {} && AbsoluteTime[] - start < 60, Pause[0.5]];
+        children = descendantProcesses[processTable[], {pid}];
+        killProcessTree[process];
+        waitForExit[children, 10];
+        DeleteFile[script];
+        {children =!= {}, livingProcesses[children]}
+    ],
+    {True, {}},
+    TestID -> "Archive: a process killed takes the processes it started with it"
 ]
 
 VerificationTest[
