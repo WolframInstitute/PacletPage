@@ -13,7 +13,7 @@
 
 (* ==================== the converter ==================== *)
 
-$converterURL = "https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook";
+$converterURL = "https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Function/MarkdownToNotebook";
 
 (* the AISkills checkout this paclet sits in, when it does: its converter and WolframParser *)
 $checkoutDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "..", "..", ".."}];
