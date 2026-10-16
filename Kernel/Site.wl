@@ -89,6 +89,20 @@ applicationQ[page_Association] := AnyTrue[page["Keywords"], StringContainsQ[#, "
 (* symbol order: alphabetical, ignoring case, with $-named symbols last *)
 symbolKey[page_Association] := {StringStartsQ[page["Name"], "$"], ToLowerCase[page["Name"]], page["Name"]};
 
+(* an Overview page: its notebook's metadata says so, or, with no notebook at hand, its name, which
+   the Overview template gives it *)
+overviewQ[page_Association] := TrueQ[Lookup[page, "Overview", False]] || (page["Kind"] === "tutorial" && page["Name"] === "Overview");
+
+(* the tutorials in the order of their titles, an Overview page first *)
+tutorialKey[page_Association] := {If[overviewQ[page], 0, 1], ToLowerCase[page["Title"]], page["Title"]};
+
+(* a page as the rail lists it: an Overview is labelled Overview, since the Overview template titles
+   it after the paclet, as its root guide is, unless its title says Overview already *)
+railPage[page_Association] := If[ overviewQ[page] && ! StringContainsQ[page["Title"], "Overview", IgnoreCase -> True],
+    Append[page, "Title" -> "Overview"],
+    page
+];
+
 (* the left rail: the resource's definition notebook, the root guide, its tree, the guides it
    does not reach, then the tutorials and the applications (tutorials with the keyword
    "application") *)
@@ -98,11 +112,11 @@ sidebarHTML[catalog_Association, notebooks_Association] := Module[
     tree = If[KeyExistsQ[pages, root], guideTree[pages, root, {}], Nothing];
     reached = If[AssociationQ[tree], treeIDs[tree], {}];
     others = Select[Keys[pages], StringStartsQ[#, "guide/"] && ! MemberQ[reached, #] &];
-    tutorials = SortBy[Select[Keys[pages], StringStartsQ[#, "tutorial/"] &], {ToLowerCase[pages[#]["Title"]], pages[#]["Title"]} &];
+    tutorials = SortBy[Select[Keys[pages], StringStartsQ[#, "tutorial/"] &], tutorialKey[pages[#]] &];
     list[ids_List, label_String, class_String] := If[ ids === {},
         "",
         StringJoin["<div class=\"nav-label\">", label, "</div><ul class=\"nav-tutorials\">",
-            Map["<li>" <> navLink[#, pages[#], class <> If[TrueQ[Lookup[pages[#], "Stub", False]], " stub", ""], notebooks] <> "</li>" &, ids], "</ul>"]
+            Map["<li>" <> navLink[#, railPage[pages[#]], class <> If[TrueQ[Lookup[pages[#], "Stub", False]], " stub", ""], notebooks] <> "</li>" &, ids], "</ul>"]
     ];
     StringJoin[
         "<ul class=\"nav-root\">",

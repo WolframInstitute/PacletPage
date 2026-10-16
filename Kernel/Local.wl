@@ -86,7 +86,7 @@ localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit
                 <|"Kind" -> pageKind[id], "Name" -> pageName[id], "Title" -> localTitle[nb, pageName[id]], "Keywords" -> {}, "Guides" -> {},
                   "HTML" -> "Documentation/" <> id <> ".html", "Notebook" -> ""|>,
                 If[MatchQ[nb, _Notebook], <|"Keywords" -> notebookMetadata[nb]["Keywords"]|>, <||>],
-                If[pageKind[id] === "tutorial", <|"Stub" -> placeholderQ[nb]|>, <||>],
+                If[pageKind[id] === "tutorial", <|"Stub" -> placeholderQ[nb], "Overview" -> overviewNotebookQ[nb]|>, <||>],
                 If[pageKind[id] === "guide" && MatchQ[nb, _Notebook], <|"Guides" -> DeleteCases[guideStructure[name, nb]["Children"], id]|>, <||>]
             ]
         ]],

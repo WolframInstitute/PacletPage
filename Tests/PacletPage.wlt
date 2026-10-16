@@ -141,7 +141,7 @@ VerificationTest[
 
 VerificationTest[
     notebookMetadata[Notebook[{}, TaggingRules -> {"Metadata" -> {"title" -> "A Title", "keywords" -> {"k1", "k2"}, "synonyms" -> {"s1"}}}]],
-    <|"Stub" -> False, "Title" -> "A Title", "Keywords" -> {"k1", "k2", "s1"}|>,
+    <|"Stub" -> False, "Overview" -> False, "Title" -> "A Title", "Keywords" -> {"k1", "k2", "s1"}|>,
     TestID -> "Catalog: a built notebook's title and keywords"
 ]
 
@@ -159,7 +159,7 @@ VerificationTest[
 
 VerificationTest[
     notebookMetadata[Notebook[{}]],
-    <|"Stub" -> False, "Title" -> Missing["NoTitle"], "Keywords" -> {}|>,
+    <|"Stub" -> False, "Overview" -> False, "Title" -> Missing["NoTitle"], "Keywords" -> {}|>,
     TestID -> "Catalog: a notebook without metadata gives none"
 ]
 
@@ -365,6 +365,32 @@ VerificationTest[
     ],
     {{"tutorial/Zed", "tutorial/Intro", "tutorial/Use"}, True},
     TestID -> "Site: tutorials in the order of their titles; a placeholder is marked"
+]
+
+VerificationTest[
+    With[{catalog = MapAt[
+            Join[#, <|
+                "tutorial/Overview" -> Join[fixturePage["tutorial", "Overview", "Fixture Caf\[EAcute]", "https://s.example/obj/store/N/ov.nb"], <|"Overview" -> True|>],
+                "tutorial/Aaa" -> fixturePage["tutorial", "Aaa", "Aaa Notes", "https://s.example/obj/store/N/aaa.nb"]|>] &,
+            repositoryCatalog, Key["Pages"]]},
+        {
+            StringCases[sidebarHTML[catalog, <||>], "data-id=\"" ~~ id : ("tutorial/" ~~ Except["\""] ..) ~~ "\"" :> id],
+            StringContainsQ[sidebarHTML[catalog, <||>], "data-id=\"tutorial/Overview\" href=\"#tutorial/Overview\">Overview</a>"]
+        }
+    ],
+    {{"tutorial/Overview", "tutorial/Aaa", "tutorial/Intro", "tutorial/Use"}, True},
+    TestID -> "Site: an Overview page comes first among the tutorials, labelled Overview"
+]
+
+VerificationTest[
+    {
+        tutorialKey[fixturePage["tutorial", "Overview", "Zebra", ""]][[1]],
+        railPage[Join[fixturePage["tutorial", "Tour", "A Name Overview", ""], <|"Overview" -> True|>]]["Title"],
+        railPage[fixturePage["tutorial", "Intro", "Intro", ""]]["Title"],
+        overviewNotebookQ /@ {Notebook[{}, TaggingRules -> {"Metadata" -> {"type" -> "Overview"}}], Notebook[{}, TaggingRules -> {"Metadata" -> {"type" -> "Tutorial"}}], Notebook[{}]}
+    },
+    {0, "A Name Overview", "Intro", {True, False, False}},
+    TestID -> "Site: an Overview page, by its metadata or its name, keeps a title that says Overview"
 ]
 
 VerificationTest[
