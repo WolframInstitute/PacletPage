@@ -168,9 +168,14 @@ sectionReports[messages_List] := Cases[messages,
     Hold[Message[MessageName[_, "section"], _, heading_String, names_List]] :> <|"Heading" -> heading, "Symbols" -> names|>];
 sectionReports[_] := {};
 
-convertHere[spec_Association, setup_Association][task_Association] := With[{done = convertPage[spec["Function"], task, setup["TimeConstraint"]]},
-    If[ setup["Monitor"], Print[If[done["OK"], "converted ", "failed "], task["Page"]]];
-    done
+(* a page converted in this kernel: the parallel kernels its examples launched are closed after it,
+   so that none of them is left to the examples of the pages after it *)
+convertHere[spec_Association, setup_Association][task_Association] := With[{before = Kernels[]},
+    With[{done = convertPage[spec["Function"], task, setup["TimeConstraint"]]},
+        closeKernels[Complement[Kernels[], before]];
+        If[ setup["Monitor"], Print[If[done["OK"], "converted ", "failed "], task["Page"]]];
+        done
+    ]
 ];
 
 (* the conversion a parallel kernel runs, preparing the kernel the first time: a kernel the pool

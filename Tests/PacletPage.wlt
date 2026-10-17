@@ -1234,6 +1234,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{before = Kernels[], work = FileNameJoin[{$TemporaryDirectory, CreateUUID["page-"] <> ".nb"}], done, left},
+        done = convertHere[<|"Function" -> ((LaunchKernels[1]; Export[#2, Notebook[{}], "NB"]) &)|>, <|"TimeConstraint" -> 120, "Monitor" -> False|>][
+            <|"File" -> "page.md", "Work" -> work, "UseCache" -> True, "Options" -> {}, "Page" -> "page"|>];
+        left = Complement[Kernels[], before];
+        If[FileExistsQ[work], DeleteFile[work]];
+        {done["OK"], left}
+    ],
+    {True, {}},
+    TestID -> "Build: the parallel kernels a page's examples launch are closed after the page"
+]
+
+VerificationTest[
     {
         processLayers[<|10 -> {1, "kernel", "S"}, 11 -> {10, "fe", "S"}, 12 -> {11, "helper", "S"}, 13 -> {10, "<defunct>", "Z"}, 20 -> {1, "other", "S"}|>, {10}],
         livingProcesses[<|11 -> {10, "fe", "S"}, 13 -> {10, "<defunct>", "Z+"}|>, {11, 13, 99}]
