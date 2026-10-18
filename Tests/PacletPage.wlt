@@ -664,6 +664,27 @@ VerificationTest[
 ]
 
 VerificationTest[
+    withFixtureDocs[Function[dir, Module[{options},
+        BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None,
+            "ConverterOptions" -> <|"foo-*.md" -> {"Evaluate" -> False}, "Main.md" -> {"MathFont" -> "X"}|>];
+        options = Last[notebookText[FileNameJoin[{dir, "Documentation", "English", #}]]] &;
+        options /@ {FileNameJoin[{"ReferencePages", "Symbols", "Foo.nb"}], FileNameJoin[{"Guides", "Main.nb"}], FileNameJoin[{"Tutorials", "Steps.nb"}]}
+    ]]],
+    {
+        "{\"UseCache\" -> False, \"EvaluateSeparator\" -> Automatic, \"Evaluate\" -> False}",
+        "{\"UseCache\" -> False, \"EvaluateSeparator\" -> Automatic, \"MathFont\" -> \"X\"}",
+        "{\"UseCache\" -> False, \"EvaluateSeparator\" -> None}"
+    },
+    TestID -> "Build: converter options by page, a file name or a pattern for one, reach only the pages they name"
+]
+
+VerificationTest[
+    dependencyName /@ {"A", "B" -> "1.0+", {"C", "1.1+"}, 3},
+    {"A", "B", "C"},
+    TestID -> "Build: a dependency is named by itself, by a rule to its version, or by a list with its version"
+]
+
+VerificationTest[
     withFixtureDocs[Function[dir, Module[{built},
         Export[FileNameJoin[{dir, "docs", "Symbols", "foo-page.md"}], "---\nTemplate: Symbol\nURI: Pub/Fixture/ref/Foo\n---\n\nFoo text. STALE\n", "Text"];
         built = BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None];

@@ -118,6 +118,7 @@ pacletDirectories[] := Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}
    or paclet names, by default the ones its PacletInfo declares, wherever they are found *)
 dependencyName[name_String] := name;
 dependencyName[name_String -> _] := name;
+dependencyName[{name_String, ___}] := name;
 dependencyName[_] := Nothing;
 
 dependencyDirectory[location_String] /; DirectoryQ[location] := location;
@@ -243,11 +244,18 @@ pageKey[task_Association, converterID_, code_String, guides_List] := Hash[
    by default None for tutorials and Overview pages, whose later sections use what earlier ones
    define, and for every other page the converter's own default: each section, and each example
    between ---, in a clean context;
-   "ConverterOptions": options for every MarkdownToNotebook call, such as "MathFont";
+   "ConverterOptions": options for every MarkdownToNotebook call, such as "MathFont", or an
+   association of a page's file name, or a string pattern for it, to that page's options;
    "Files": All, or the markdown files (or a string pattern for their names) to build *)
 (* a tutorial or an Overview page is one narrative: its later sections use what its earlier ones
    define, so it runs in one context *)
 $separatorByTemplate = <|"TechNote" -> None, "Overview" -> None|>;
+
+(* a page's converter options: one list for every page, or an association whose entries a page's
+   file name matches, a name or a string pattern for it, each matching entry's options in turn *)
+converterOptions[options_List, _String] := options;
+converterOptions[byPage_Association, file_String] := Join @@ KeyValueMap[If[StringMatchQ[FileNameTake[file], #1], #2, {}] &, byPage];
+converterOptions[_, _] := {};
 
 Options[BuildPacletDocumentation] = {
     "Source" -> Automatic,
@@ -326,7 +334,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
             <|
                 "File" -> file, "Page" -> relativePath[source, file],
                 "Out" -> pageNotebook[target, template, metas[file], file],
-                "Options" -> Join[{"EvaluateSeparator" -> separator[template]}, OptionValue["ConverterOptions"]]
+                "Options" -> Join[{"EvaluateSeparator" -> separator[template]}, converterOptions[OptionValue["ConverterOptions"], file]]
             |>
         ]],
         pageFiles
@@ -351,7 +359,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     If[ StringQ[definitionSource] && FileExistsQ[definitionSource],
         AppendTo[tasks, <|
             "File" -> definitionSource, "Page" -> "ResourceDefinition", "Out" -> FileNameJoin[{dir, "ResourceDefinition.nb"}],
-            "Options" -> Join[{"EvaluateSeparator" -> separator["Paclet"]}, OptionValue["ConverterOptions"]]
+            "Options" -> Join[{"EvaluateSeparator" -> separator["Paclet"]}, converterOptions[OptionValue["ConverterOptions"], definitionSource]]
         |>]
     ];
     tasks = Map[

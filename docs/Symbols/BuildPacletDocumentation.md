@@ -37,7 +37,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Target"` | `Automatic` | the notebook directory, by default `Documentation/English` |
 | `"Files"` | `All` | the files to build, as a list or a pattern for their names |
 | `"EvaluateSeparator"` | `Automatic` | the converter's evaluation separator, one value for every page or an association by template: by default a tutorial or an Overview page runs in one context, since its later sections use what earlier ones define, and every other page runs each section, and each example between `---`, in a clean context |
-| `"ConverterOptions"` | `{}` | options for every conversion, such as `"MathFont"` |
+| `"ConverterOptions"` | `{}` | options for every conversion, such as `"MathFont"`, or an association of a page's file name, or a string pattern for it, to that page's options |
 | `"UseCache"` | `Automatic` | whether to reuse cached pages and example results |
 | `"Definition"` | `Automatic` | the definition's markdown, or `None` |
 | `"Converter"` | `Automatic` | the converter: a function, a file or the URL of a published function |
@@ -102,6 +102,24 @@ Build one page:
 
 ```wl
 BuildPacletDocumentation[dir, "Files" -> "Greet.md", "Definition" -> None]
+```
+
+```wl
+DeleteDirectory[dir, DeleteContents -> True]
+```
+
+### ConverterOptions
+
+A copy of the example paclet:
+
+```wl
+dir = CopyDirectory[PacletObject["WolframInstitute/PacletPage"]["AssetLocation", "Example"], FileNameJoin[{$TemporaryDirectory, CreateUUID["Greetings-"]}]];
+```
+
+Build one page with its examples left unevaluated, the converter's `"Evaluate" -> False` given to that page alone:
+
+```wl
+BuildPacletDocumentation[dir, "Files" -> "Greet.md", "ConverterOptions" -> <|"Greet.md" -> {"Evaluate" -> False}|>, "Definition" -> None]
 ```
 
 ```wl
