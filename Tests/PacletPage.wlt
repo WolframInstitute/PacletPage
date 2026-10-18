@@ -1246,6 +1246,19 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{kernels = LaunchKernels[1], off = offGeneralMessages[], before, matched, reversed},
+        DistributeDefinitions[matchGeneralMessages];
+        before = First @ ParallelEvaluate[MemberQ[offGeneralMessages[], "shdw"], kernels];
+        matched = First @ With[{o = off}, ParallelEvaluate[matchGeneralMessages[o]; offGeneralMessages[], kernels]];
+        reversed = First @ With[{o = DeleteCases[off, "shdw"]}, ParallelEvaluate[matchGeneralMessages[o]; MemberQ[offGeneralMessages[], "shdw"], kernels]];
+        CloseKernels[kernels];
+        {MemberQ[off, "shdw"], before, matched === off, reversed}
+    ],
+    {True, False, True, False},
+    TestID -> "Build: a parallel kernel takes the General message switches of the kernel that builds, a script kernel's General::shdw off"
+]
+
+VerificationTest[
     {
         processLayers[<|10 -> {1, "kernel", "S"}, 11 -> {10, "fe", "S"}, 12 -> {11, "helper", "S"}, 13 -> {10, "<defunct>", "Z"}, 20 -> {1, "other", "S"}|>, {10}],
         livingProcesses[<|11 -> {10, "fe", "S"}, 13 -> {10, "<defunct>", "Z+"}|>, {11, 13, 99}]

@@ -178,12 +178,25 @@ convertHere[spec_Association, setup_Association][task_Association] := With[{befo
     ]
 ];
 
+(* The General messages switched off in this kernel. A script kernel switches General::shdw off and
+   a parallel kernel leaves it on, so a parallel kernel takes the switches of the kernel that builds:
+   a page's messages are the same whichever kernel converts it. *)
+offGeneralMessages[] := Sort @ Cases[Messages[General],
+    RuleDelayed[Verbatim[HoldPattern][HoldPattern[MessageName][General, tag_String]], _$Off] :> tag];
+matchGeneralMessages[off_List] := (
+    Scan[With[{tag = #}, Off[MessageName[General, tag]]] &, off];
+    Scan[With[{tag = #}, On[MessageName[General, tag]]] &, Complement[offGeneralMessages[], off]]
+);
+matchGeneralMessages[_] := Null;
+
 (* the conversion a parallel kernel runs, preparing the kernel the first time: a kernel the pool
    restarts after a crash keeps the distributed definitions, and nothing else *)
 workerFunction[setup_Association] := With[
-    {dirs = setup["Directories"], context = setup["Context"], load = setup["Load"], limit = setup["TimeConstraint"], monitor = setup["Monitor"]},
+    {dirs = setup["Directories"], context = setup["Context"], load = setup["Load"], limit = setup["TimeConstraint"], monitor = setup["Monitor"],
+     off = Lookup[setup, "Off", None]},
     Function[task,
         If[ ! TrueQ[$workerReady],
+            matchGeneralMessages[off];
             Scan[PacletDirectoryLoad, dirs];
             If[ StringQ[context], Needs[context]];
             $workerConverter = ReleaseHold[load];
@@ -204,10 +217,10 @@ convertTasks[tasks_List, spec_, setup_, {}] := Map[convertHere[spec, setup], tas
 convertTasks[{task_}, spec_, setup_, _] := {convertHere[spec, setup][task]};
 convertTasks[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest},
     first = convertHere[spec, setup][First[tasks]];
-    DistributeDefinitions[convertPage];
+    DistributeDefinitions[convertPage, matchGeneralMessages];
     If[ MatchQ[spec["Distribute"], _Hold], DistributeDefinitions @@ spec["Distribute"]];
     rest = ParallelMap[
-        workerFunction[Append[setup, "Directories" -> DeleteDuplicates[Join[setup["Directories"], parserDirectories[]]]]],
+        workerFunction[Join[setup, <|"Directories" -> DeleteDuplicates[Join[setup["Directories"], parserDirectories[]]], "Off" -> offGeneralMessages[]|>]],
         Rest[tasks],
         Method -> "FinestGrained"
     ];
