@@ -1085,6 +1085,50 @@ installHeroPatch[] := If[ ! TrueQ[$heroPatchInstalled],
     $heroPatchInstalled = True
 ];
 
+(* The resource page's Examples section, which the stock template draws whatever the resource
+   holds: drawn by a copy of the template only where there is an example notebook, and an example
+   notebook that holds no example left out of the deploy. "Examples" -> True keeps the stock page,
+   False leaves the example notebook out whatever it holds. *)
+$examples = Automatic;
+$examplesPatchInstalled = False;
+
+(* one definition of the page's template, with the stock one inside: a rule beside the stock
+   literal rule of the same argument would never be tried *)
+installExamplesPatch[] := If[ ! TrueQ[$examplesPatchInstalled],
+    Unprotect[PacletResource`Private`deployExtraPacletWebFiles];
+    PrependTo[
+        DownValues[PacletResource`Private`deployExtraPacletWebFiles],
+        HoldPattern[PacletResource`Private`deployExtraPacletWebFiles[
+            id_, as_?(AssociationQ[#] && KeyExistsQ[#, "PacletFile"] && KeyExistsQ[#, "ExampleNotebook"] && ! examplesShownQ[#["ExampleNotebook"]] &), root_, opts___]] :>
+            PacletResource`Private`deployExtraPacletWebFiles[id, KeyDrop[as, "ExampleNotebook"], root, opts]
+    ];
+    Unprotect[DeployedResourceShingle`Private`templateFile];
+    DeployedResourceShingle`Private`templateFile["Paclet"] := With[{file = examplesTemplate[]},
+        If[$examples =!= True && StringQ[file], file, PacletResource`Private`shingleTemplateFile["PacletShingle"]]];
+    $examplesPatchInstalled = True
+];
+
+(* whether the page shows an example notebook: as "Examples" says, and for Automatic, one that
+   holds an example, an input cell *)
+examplesShownQ[nb_] := Switch[$examples, True, True, False, False, _, exampleNotebookQ[nb]];
+exampleNotebookQ[nbo_NotebookObject] := exampleNotebookQ[NotebookGet[nbo]];
+exampleNotebookQ[nb_] := ! FreeQ[nb, Cell[_, "Input" | "Code", ___]];
+
+(* the stock template with its Examples section, from the heading to the frame of the notebook it
+   embeds, drawn only where there is an example notebook: written once, to a file of its own; None
+   where the stock template has no section of that shape, which then stays in use *)
+$examplesSection = Shortest["<div" ~~ Whitespace ~~ "class=\"nb-collapse label example-heading\"" ~~ ___ ~~
+    "<!-- RS_SHINGLE_EXAMPLE_SECTION_END -->" ~~ Whitespace ~~ "</div>"];
+examplesTemplate[] := examplesTemplate[] = Module[{stock = PacletResource`Private`shingleTemplateFile["PacletShingle"], text, file},
+    text = If[StringQ[stock] && FileExistsQ[stock], ByteArrayToString[ReadByteArray[stock], "UTF-8"], None];
+    If[ ! StringQ[text] || Length[StringCases[text, $examplesSection]] =!= 1, Return[None, Module]];
+    file = FileNameJoin[{$TemporaryDirectory, "PacletPage-PacletShingle-" <> Hash[text, "SHA256", "HexString"] <> ".xml"}];
+    Export[file, StringReplace[text, section : $examplesSection :> StringJoin[
+        "<wolfram:if test=\"StringQ@#ExampleNotebookURL || StringQ@#CloudOpenExampleNotebook || StringQ@#ExampleNotebookDownload\">\n",
+        section, "\n</wolfram:if>"]], "Text", CharacterEncoding -> "UTF-8"];
+    file
+];
+
 heroImageQ[expr_] := ImageQ[expr] || MatchQ[expr, _Graphics | _Graphics3D];
 
 definitionHero[definition_String] := Module[{group, boxes},
@@ -1781,6 +1825,7 @@ Options[DeployPacletResource] = {
     "DryRun" -> False,
     "DocumentationSource" -> Automatic,
     "HeroImage" -> Automatic,
+    "Examples" -> Automatic,
     "Archive" -> None,
     "Commit" -> Automatic,
     "Republish" -> False,
@@ -1837,7 +1882,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
     name = paclet["Name"];
     loadResourceTools[];
     (* the fixes probe the cloud; a dry run writes nothing there *)
-    If[ ! TrueQ[OptionValue["DryRun"]], installDeployFixes[]; installHeroPatch[]];
+    If[ ! TrueQ[OptionValue["DryRun"]], installDeployFixes[]; installHeroPatch[]; installExamplesPatch[]];
     (* the version gate, before anything is built: on the deployed resource, which records the
        version and commit of its release, and on the versioned archive *)
     commit = Replace[OptionValue["Commit"], Automatic :> gitCommit[dir]];
@@ -1933,7 +1978,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
                 TrueQ[OptionValue["DryRun"]],
                     {versioned, where, None},
                 True,
-                    With[{deploy = Block[{$heroImage = hero}, withDeployKernels[
+                    With[{deploy = Block[{$heroImage = hero, $examples = OptionValue["Examples"]}, withDeployKernels[
                             If[built["Pages"] >= 24, OptionValue["Parallel"], False],
                             Function[kernels,
                                 $transform = newTransform[FileNameJoin[{dir, "build", "transform"}], transformContext[symbolRules, pinned], symbolRules, pinned, kernels];

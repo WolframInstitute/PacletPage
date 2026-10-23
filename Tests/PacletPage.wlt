@@ -1588,6 +1588,35 @@ VerificationTest[
     TestID -> "Publish: the hero patch and the repository's error messages install"
 ]
 
+(* the resource page's Examples section: drawn only with an example notebook, and an example
+   notebook that holds no example left out of the deploy *)
+VerificationTest[
+    With[{file = examplesTemplate[], data = <|"Name" -> "P", "PublisherID" -> "Pub"|>},
+        {StringQ[file],
+         StringContainsQ[TemplateApply[XMLTemplate[File[file]], Append[data, "ExampleNotebookURL" -> "https://example.com/e.nb"]], "id=\"Examples\""],
+         StringContainsQ[TemplateApply[XMLTemplate[File[file]], data], "id=\"Examples\""]}],
+    {True, True, False},
+    TestID -> "Publish: the resource page template draws its Examples section only with an example notebook"
+]
+
+VerificationTest[
+    With[{none = Notebook[{Cell["Basic Examples", "Subsection"]}], some = Notebook[{Cell[BoxData["1"], "Input"]}]},
+        Table[Block[{$examples = setting}, {examplesShownQ[none], examplesShownQ[some]}], {setting, {Automatic, True, False}}]],
+    {{False, True}, {True, True}, {False, False}},
+    TestID -> "Publish: an example notebook is shown when it holds an example, or as \"Examples\" says"
+]
+
+VerificationTest[
+    Block[{$examplesPatchInstalled = False},
+        installExamplesPatch[];
+        {$examplesPatchInstalled,
+         Block[{$examples = Automatic}, DeployedResourceShingle`Private`templateFile["Paclet"]] === examplesTemplate[],
+         Block[{$examples = True}, DeployedResourceShingle`Private`templateFile["Paclet"]] === PacletResource`Private`shingleTemplateFile["PacletShingle"]}
+    ],
+    {True, True, True},
+    TestID -> "Publish: the examples patch installs; the page template is the stock one for \"Examples\" -> True"
+]
+
 (* the resource page's symbols, with the stock deploy's own definitions *)
 VerificationTest[
     Needs["PacletResource`"];
