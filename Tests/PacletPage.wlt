@@ -708,6 +708,27 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], converter, package, before = Names["Global`*"], off = offGeneralMessages[], result},
+        converter = FileNameJoin[{dir, "MarkdownToNotebook.wl"}];
+        package = FileNameJoin[{dir, "Namesake.wl"}];
+        Export[converter, "converterHelper[x_] := x\nMarkdownToNotebook[file_, out_, ___] := converterHelper[out]\n", "Text"];
+        Export[package, "BeginPackage[\"PacletPageNamesake`\"]\nconverterHelper::usage = \"a namesake of the converter's helper\"\nEndPackage[]\n", "Text"];
+        On[General::shdw];
+        result = Block[{$converterContext = "PacletPageTest`Converter`"},
+            With[{f = ReleaseHold[converterLoad[converter]]},
+                {Context[f], f["page.md", "page.nb"], Complement[Names["Global`*"], before], Check[Get[package]; "not shadowed", "shadowed", General::shdw]}
+            ]
+        ];
+        matchGeneralMessages[off];
+        $ContextPath = DeleteCases[$ContextPath, "PacletPageNamesake`"];
+        DeleteDirectory[dir, DeleteContents -> True];
+        result
+    ],
+    {"PacletPageTest`Converter`", "page.nb", {}, "not shadowed"},
+    TestID -> "Build: a converter file is read into a context of its own, whose helpers no package's namesakes shadow"
+]
+
+VerificationTest[
     {sameAccountQ[{"me@x.org", "me@x.org"}, "me@x.org"], sameAccountQ[{"me@x.org", "you@x.org"}, "me@x.org"],
         sameAccountQ[{"me@x.org", None}, "me@x.org"], sameAccountQ[{}, "me@x.org"], sameAccountQ[{"me@x.org"}, None]},
     {True, False, False, False, False},

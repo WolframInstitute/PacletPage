@@ -23,10 +23,14 @@ $checkoutDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "..", "..
    distributed definitions, or None; "ID", what tells its versions apart in the page cache.
    Automatic is MarkdownToNotebook: the one loaded already, else the checkout's file (with the
    checkout's WolframParser registered first, for TeX), else the published function. The file
-   defines its symbols in the current context, so it is read in Global`; the code that loads it
-   names the function by its string, which keeps a parallel map from distributing it. *)
-converterLoad[file_String] := With[{path = file},
-    Hold[Block[{$Context = "Global`", $ContextPath = {"System`", "Global`"}}, Get[path]]; Symbol["Global`MarkdownToNotebook"]]
+   defines its symbols in the current context, so it is read in a context of its own, on no
+   context path: its helpers (tr, urlQ, ...) are then never the namesakes of the symbols of a
+   package a page's examples load, whose shadowing messages would be captured into the page. The
+   code that loads it names the function by its string, which keeps a parallel map from
+   distributing it. *)
+$converterContext = "WolframInstitute`PacletPage`Converter`";
+converterLoad[file_String] := With[{path = file, context = $converterContext},
+    Hold[Block[{$Context = context, $ContextPath = {"System`"}}, Get[path]]; Symbol[context <> "MarkdownToNotebook"]]
 ];
 
 converterSpec[Automatic] := converterSpec[Automatic] = Which[
@@ -46,7 +50,7 @@ converterSpec[Automatic] := converterSpec[Automatic] = Which[
 ];
 converterSpec[file_String] /; FileExistsQ[file] := converterSpec[file] = <|
     "Function" -> ReleaseHold[converterLoad[file]], "Load" -> converterLoad[file], "Distribute" -> None,
-    "ID" -> FileHash[file, "SHA256", "HexString"]
+    "ID" -> Hash[{FileHash[file, "SHA256", "HexString"], $converterContext}, "SHA256", "HexString"]
 |>;
 (* a published function is used through its ResourceObject: a bare ResourceFunction[url] fails
    on parallel kernels *)
