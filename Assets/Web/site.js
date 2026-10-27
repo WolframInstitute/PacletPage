@@ -236,7 +236,7 @@
   // ---- filter --------------------------------------------------------------------------------
   // Hide what does not match in place: a guide stays visible when it or anything below it
   // matches, and clearing the box restores the tree as it was.
-  var qBox = document.getElementById('q'), openState = null;
+  var qBox = C.filter === false ? null : document.getElementById('q'), openState = null;
 
   function railEmptyNote(root, on) {
     var note = root.querySelector('.nav-empty');

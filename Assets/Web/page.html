@@ -161,8 +161,8 @@
     </div>
     <div class="foot">
       <span class="links"><a id="fb-all" target="_blank" rel="noopener"
-          title="The feedback this site has collected, for its team">All feedback</a><span id="fb-mailline" hidden> &middot;
-        or email <a id="feedback-mail" target="_top"></a></span></span>
+          title="The feedback this site has collected, for its team">All feedback</a><span id="fb-mailline" hidden><span id="fb-mailsep"> &middot;
+        or email </span><a id="feedback-mail" target="_top"></a></span></span>
       <button id="fb-send" type="submit">Send feedback</button>
     </div>
   </form>
@@ -362,8 +362,13 @@
   // The panel posts to the feedback form on this origin: the answers, up to three files, and the
   // page's identity in five context fields. The form answers a stored submission with a page
   // carrying #pp-feedback-thanks; anything else keeps the panel open with the reason.
-  // the team's list of everything the form has collected, beside the form
-  if (FORM) document.getElementById('fb-all').href = FORM.replace(/\/Form$/, '/All');
+  // the team's list of everything the form has collected, beside the form, unless the site was
+  // published with "AllFeedbackLink" -> False
+  if (FORM && C.allFeedback !== false) document.getElementById('fb-all').href = FORM.replace(/\/Form$/, '/All');
+  else {
+    document.getElementById('fb-all').hidden = true;
+    document.getElementById('fb-mailsep').textContent = 'Or email ';
+  }
   var MAX_FILES = 3, MAX_BYTES = 20 * 1000 * 1000,
       overlay = document.getElementById('feedback-overlay'),
       form = document.getElementById('feedback-form'),

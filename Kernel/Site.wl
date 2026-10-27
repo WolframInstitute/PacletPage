@@ -264,7 +264,11 @@ Options[PacletPageFiles] = {
     "FeedbackEmail" -> None,
     "FeedbackThanks" -> Automatic,
     "DefinitionPage" -> True,
-    "ViewSource" -> True
+    "ViewSource" -> True,
+    "Filter" -> True,
+    "SymbolsRail" -> True,
+    "ResourceLink" -> True,
+    "AllFeedbackLink" -> True
 };
 
 PacletPageFiles::accent = "`1` is not a color; give a color or a hex string such as \"#dd1100\".";
@@ -317,7 +321,8 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
         |>,
         "routes" -> routes,
         "hide" -> If[kind === "local", $localChromeCSS, $stockChromeCSS],
-        "prefetch" -> If[kind =!= "local" && KeyExistsQ[catalog["Pages"], catalog["RootGuide"]], catalog["Pages"][catalog["RootGuide"]]["Notebook"], ""]
+        "prefetch" -> If[kind =!= "local" && KeyExistsQ[catalog["Pages"], catalog["RootGuide"]], catalog["Pages"][catalog["RootGuide"]]["Notebook"], ""],
+        "filter" -> TrueQ[OptionValue["Filter"]]
     |>;
     pageConfig = <|
         "title" -> title,
@@ -328,6 +333,7 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
         "resource" -> catalog["Resource"],
         "source" -> If[TrueQ[OptionValue["ViewSource"]], OptionValue["SourceURL"], ""],
         "viewSource" -> TrueQ[OptionValue["ViewSource"]],
+        "allFeedback" -> TrueQ[OptionValue["AllFeedbackLink"]],
         "form" -> OptionValue["FeedbackURL"],
         "site" -> OptionValue["SiteURL"],
         "routes" -> routes,
@@ -342,6 +348,9 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
     <|
         "index.html" -> fillTemplate[readAsset["site.html"], <|
             "title" -> esc[title],
+            (* the parts of the shell a switch leaves out, hidden by the stylesheet *)
+            "bodyClass" -> StringRiffle[Pick[{"no-filter", "no-symbols", "no-resource-link"},
+                ! TrueQ[OptionValue[#]] & /@ {"Filter", "SymbolsRail", "ResourceLink"}], " "],
             "brand" -> esc[title],
             "subtitle" -> If[subtitle === "" || subtitle === None, "", "<span class=\"sub\">" <> esc[subtitle] <> "</span>"],
             "resource" -> esc[catalog["Resource"]],

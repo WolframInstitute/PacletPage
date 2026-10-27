@@ -16,6 +16,9 @@ Options[BuildPacletPageSite] = {
     "Title" -> Automatic,
     "Subtitle" -> Automatic,
     "Accent" -> "#dd1100",
+    "Filter" -> True,
+    "SymbolsRail" -> True,
+    "ResourceLink" -> True,
     "Monitor" -> False
 };
 
@@ -62,7 +65,7 @@ BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Block[{$deployMonito
     Scan[DeleteDirectory[#, DeleteContents -> True] &,
         Select[FileNames["*", cache], DirectoryQ[#] && FileNameTake[#] =!= "assets" && ! MemberQ[Values[keys], FileNameTake[#]] &]];
     siteLayout[stage];
-    files = PacletPageFiles[catalog, "PageURL" -> "", "Title" -> OptionValue["Title"], "Subtitle" -> OptionValue["Subtitle"], "Accent" -> OptionValue["Accent"]];
+    files = PacletPageFiles[catalog, "PageURL" -> "", Sequence @@ (# -> OptionValue[#] & /@ {"Title", "Subtitle", "Accent", "Filter", "SymbolsRail", "ResourceLink"})];
     If[ ! AssociationQ[files], Return[$Failed, Module]];
     Export[FileNameJoin[{stage, "index.html"}], files["index.html"], "Text", CharacterEncoding -> "UTF-8"];
     (* the site is replaced whole, so a server showing it never shows half a site *)

@@ -36,8 +36,13 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"FeedbackThanks"` | `Automatic` | what the Feedback panel shows once feedback is sent |
 | `"DefinitionPage"` | `True` | whether the definition notebook is a page of the site |
 | `"ViewSource"` | `True` | whether pages have the toggle to their source, the definition notebook's included |
+| `"Filter"` | `True` | whether the header has the filter box |
+| `"SymbolsRail"` | `True` | whether the symbols have a rail of their own |
+| `"ResourceLink"` | `True` | whether the header links to the published page of the page shown |
+| `"AllFeedbackLink"` | `True` | whether the Feedback panel links to the team's list of all the feedback |
 
 - With `"Home" -> Automatic`, the site opens on the resource, with its Feedback button and its source, when the catalog has its definition notebook, else on the root guide. `"DefinitionPage" -> False` leaves the definition notebook out of the site; the resource page itself stays its home on request, with `"Home" -> "Resource"`, which hides an empty Examples section and the author's Paclet Source link.
+- Without the symbols rail, the symbols stay pages of the site, reached from the guides and by the filter's Enter.
 - The tutorials are listed in the order of their titles, an Overview page first, labelled Overview unless its title says so already, and the ones with the keyword "application" apart as Applications. A page is an Overview when its notebook's metadata types it as one, or, with no notebook at hand, when its name is Overview. A tutorial whose authoring notebook has nothing between its title and the template's closing sections is a placeholder: it is shown greyed, and the filter's Enter opens a written page before it.
 - While the filter shows a match, the labels of the groups it shows stay, so a match keeps its heading.
 - An email template's body may use `{title}`, `{page}`, `{link}`, `{view}`, `{notebook}` and `{date}`, filled in for the page the reader is on; an address alone gets a template that asks what is wrong, where, what was expected, and anything else.

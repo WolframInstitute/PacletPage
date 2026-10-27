@@ -31,6 +31,11 @@ a { text-decoration: none; color: inherit; }
 }
 #hdr .home:hover { background: #2e3236; color: #fff; }
 #hdr .home svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+/* the parts a site's switches leave out: the filter, the symbols rail, the resource link; the
+   symbols stay pages of the site, reached from the guides and by the filter's Enter */
+.no-filter #q, .no-symbols #symToggle, .no-symbols #splitR, .no-symbols #side-right, .no-resource-link #resourcelink { display: none !important; }
+.no-filter #hdr .brand { margin-right: auto; }
+.no-filter #hdr .home { margin-left: 0; }
 /* a rail whose every entry is filtered out says so, instead of going blank */
 .nav-empty { padding: 10px 14px; color: #9aa3ab; font-size: 12px; font-style: italic; }
 

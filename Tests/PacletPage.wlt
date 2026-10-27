@@ -364,6 +364,20 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{bodyClass = Function[html, StringCases[html, "<body class=\"" ~~ c : Except["\""] ... ~~ "\"" :> c]]},
+        {
+            With[{files = PacletPageFiles[cloudCatalog, "Filter" -> False, "SymbolsRail" -> False, "ResourceLink" -> False, "AllFeedbackLink" -> False]},
+                {bodyClass[files["index.html"]], configOf[files["index.html"]]["filter"], configOf[files["page.html"]]["allFeedback"],
+                    StringContainsQ[files["index.html"], "data-id=\"ref/$Var\""]}],
+            With[{files = PacletPageFiles[cloudCatalog]},
+                {bodyClass[files["index.html"]], configOf[files["index.html"]]["filter"], configOf[files["page.html"]]["allFeedback"]}]
+        }
+    ],
+    {{{"no-filter no-symbols no-resource-link"}, False, False, True}, {{""}, True, True}},
+    TestID -> "Site: switches leave out the filter, the symbols rail, the resource link and the All feedback link; the symbols stay pages"
+]
+
+VerificationTest[
     {
         configOf[PacletPageFiles[cloudCatalog, "FeedbackThanks" -> "The team will read it."]["page.html"]]["thanks"],
         configOf[PacletPageFiles[cloudCatalog]["page.html"]]["thanks"]

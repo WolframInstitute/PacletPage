@@ -36,6 +36,9 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Title"` | `Automatic` | the site's title |
 | `"Subtitle"` | `Automatic` | the line beside the title |
 | `"Accent"` | `"#dd1100"` | the accent color |
+| `"Filter"` | `True` | whether the header has the filter box |
+| `"SymbolsRail"` | `True` | whether the symbols have a rail of their own |
+| `"ResourceLink"` | `True` | whether the header links to the page shown, opened on its own |
 | `"Monitor"` | `False` | whether to print how many pages render and how many come from the cache |
 
 ## Basic Examples
