@@ -293,10 +293,13 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
     kind = Switch[catalog["Kind"], "Cloud", "cloud", "Local", "local", _, "repository"];
     prefix = Switch[kind, "cloud", catalog["DocBase"], "local", "", _, notebookPrefix[catalog]];
     notebooks = If[kind === "local", <||>, notebookNames[catalog, prefix]];
-    (* a local site's pages link each other relative to the site, which the shell resolves *)
+    (* a local site's pages link each other relative to the site, which the shell resolves; a
+       published site routes its own documentation, the paclet's pages on reference.wolfram.com,
+       the reference.wolframcloud.com URLs the cloud shows a paclet: link as, and paclet: URIs *)
     routes = If[ kind === "local",
         {catalog["DocBase"], "./", "paclet:" <> catalog["Name"] <> "/"},
-        {catalog["DocBase"], "https://reference.wolfram.com/language/" <> catalog["Name"] <> "/", "paclet:" <> catalog["Name"] <> "/"}
+        {catalog["DocBase"], "https://reference.wolfram.com/language/" <> catalog["Name"] <> "/",
+            "https://reference.wolframcloud.com/cloudplatform/" <> catalog["Name"] <> "/", "paclet:" <> catalog["Name"] <> "/"}
     ];
     page = OptionValue["PageURL"];
     shellConfig = <|

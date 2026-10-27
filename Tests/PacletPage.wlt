@@ -333,6 +333,15 @@ VerificationTest[
     TestID -> "Site: the resource page itself as home, on request"
 ]
 
+(* the cloud shows a paclet: link (a guide's sub-guide heading keeps one) as a reference.wolframcloud.com
+   URL, which routes in the site as the paclet's other links do *)
+VerificationTest[
+    configOf[PacletPageFiles[cloudCatalog]["index.html"]]["routes"],
+    {"https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/", "https://reference.wolfram.com/language/Pub/Name/",
+     "https://reference.wolframcloud.com/cloudplatform/Pub/Name/", "paclet:Pub/Name/"},
+    TestID -> "Site: links route in the site from its documentation, reference.wolfram.com's, the cloud's and paclet: URIs"
+]
+
 VerificationTest[
     With[{files = PacletPageFiles[cloudCatalog, "DefinitionPage" -> False]},
         {
