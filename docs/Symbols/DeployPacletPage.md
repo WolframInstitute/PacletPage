@@ -32,7 +32,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Account"` | `Automatic` | the Wolfram ID that must be connected |
 | `Permissions` | `"Public"` | the permissions of the two pages and the source notebooks |
 
-- `DeployPacletPage` also takes the options of `PacletPageFiles` that shape the site: `"Title"`, `"Subtitle"`, `"Accent"`, `"Home"`, `"FeedbackEmail"`, `"FeedbackThanks"` and `"DefinitionPage"`.
+- `DeployPacletPage` also takes the options of `PacletPageFiles` that shape the site: `"Title"`, `"Subtitle"`, `"Accent"`, `"Home"`, `"FeedbackEmail"`, `"FeedbackThanks"`, `"DefinitionPage"` and `"ViewSource"`. With `"ViewSource" -> False` no page has a toggle to its source, the definition notebook's included, and no authoring notebooks are published, whatever `"Source"` says.
 - One email setting serves the site and the feedback pages: the address of `"FeedbackEmail"` is the feedback pages' `"Email"` too, and an `"Email"` among `"FeedbackOptions"` gives the site its email fallback, unless each is given.
 - The site works on the same origin as the pages it shows, `https://www.wolframcloud.com`, where both the Paclet Repository's notebooks and deployed resources are served.
 

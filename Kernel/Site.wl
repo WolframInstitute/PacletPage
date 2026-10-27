@@ -263,7 +263,8 @@ Options[PacletPageFiles] = {
     "Home" -> Automatic,
     "FeedbackEmail" -> None,
     "FeedbackThanks" -> Automatic,
-    "DefinitionPage" -> True
+    "DefinitionPage" -> True,
+    "ViewSource" -> True
 };
 
 PacletPageFiles::accent = "`1` is not a color; give a color or a hex string such as \"#dd1100\".";
@@ -325,7 +326,8 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
         "notebooks" -> prefix,
         "definition" -> If[definitionID[catalog] === None, "", catalog["Pages"][definitionID[catalog]]["Notebook"]],
         "resource" -> catalog["Resource"],
-        "source" -> OptionValue["SourceURL"],
+        "source" -> If[TrueQ[OptionValue["ViewSource"]], OptionValue["SourceURL"], ""],
+        "viewSource" -> TrueQ[OptionValue["ViewSource"]],
         "form" -> OptionValue["FeedbackURL"],
         "site" -> OptionValue["SiteURL"],
         "routes" -> routes,

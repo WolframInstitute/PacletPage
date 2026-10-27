@@ -35,6 +35,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"FeedbackEmail"` | `None` | an address, an email template with `To:` and `Subject:` lines, or a `File` of one |
 | `"FeedbackThanks"` | `Automatic` | what the Feedback panel shows once feedback is sent |
 | `"DefinitionPage"` | `True` | whether the definition notebook is a page of the site |
+| `"ViewSource"` | `True` | whether pages have the toggle to their source, the definition notebook's included |
 
 - With `"Home" -> Automatic`, the site opens on the resource, with its Feedback button and its source, when the catalog has its definition notebook, else on the root guide. `"DefinitionPage" -> False` leaves the definition notebook out of the site; the resource page itself stays its home on request, with `"Home" -> "Resource"`, which hides an empty Examples section and the author's Paclet Source link.
 - The tutorials are listed in the order of their titles, an Overview page first, labelled Overview unless its title says so already, and the ones with the keyword "application" apart as Applications. A page is an Overview when its notebook's metadata types it as one, or, with no notebook at hand, when its name is Overview. A tutorial whose authoring notebook has nothing between its title and the template's closing sections is a placeholder: it is shown greyed, and the filter's Enter opens a written page before it.

@@ -203,11 +203,12 @@ DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Block[{$deployMoni
         None
     ];
     If[ feedback === $Failed, Return[$Failed, Module]];
-    source = Replace[OptionValue["Source"], {
+    (* with "ViewSource" -> False no page shows a source, so none is published *)
+    source = If[ ! TrueQ[OptionValue["ViewSource"]], None, Replace[OptionValue["Source"], {
         None -> None,
         dir_String :> publishSource[dir, site <> "Source", site <> "SourceManifest", OptionValue[Permissions], Last[StringSplit[catalog["Name"], "/"]], OptionValue["Upload"] === All],
         other_ :> (Message[DeployPacletPage::source, other]; $Failed)
-    }];
+    }]];
     If[ source === $Failed, Return[$Failed, Module]];
     files = PacletPageFiles[catalog,
         "SiteURL" -> site,

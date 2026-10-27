@@ -240,11 +240,12 @@
 
   // The definition page's built view is the resource page as published; its source is the
   // definition notebook: the paclet's own when the site publishes its sources, else the one the
-  // resource was deployed with. Every other page's notebook is under C.notebooks.
+  // resource was deployed with. Every other page's notebook is under C.notebooks. A site published
+  // with "ViewSource" -> False shows no page's source.
   var definitionPage = id.indexOf('resource/') === 0,
       sourceURL = definitionPage && !C.source ? C.definition : C.source + '/' + pagePath(id) + '.nb';
   if (definitionPage && !C.definition) { fail('This page could not be loaded.'); return; }
-  var hasSource = !!(C.source || definitionPage);
+  var hasSource = C.viewSource !== false && !!(C.source || definitionPage);
   if (!hasSource) view = 'built';
   var nbURL = view === 'source' ? sourceURL : (definitionPage ? C.resource : C.notebooks + nb),
       staticURL = nbURL.replace('/obj/', '/statichtml/') + '?maxwaitmillis=8000&width=' + w,

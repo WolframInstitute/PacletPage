@@ -356,6 +356,15 @@ VerificationTest[
 
 VerificationTest[
     {
+        KeyTake[configOf[PacletPageFiles[cloudCatalog, "SourceURL" -> "https://c.example/obj/u/SiteSource", "ViewSource" -> False]["page.html"]], {"source", "viewSource"}],
+        KeyTake[configOf[PacletPageFiles[cloudCatalog, "SourceURL" -> "https://c.example/obj/u/SiteSource"]["page.html"]], {"source", "viewSource"}]
+    },
+    {<|"source" -> "", "viewSource" -> False|>, <|"source" -> "https://c.example/obj/u/SiteSource", "viewSource" -> True|>},
+    TestID -> "Site: \"ViewSource\" -> False gives no page a toggle to its source"
+]
+
+VerificationTest[
+    {
         configOf[PacletPageFiles[cloudCatalog, "FeedbackThanks" -> "The team will read it."]["page.html"]]["thanks"],
         configOf[PacletPageFiles[cloudCatalog]["page.html"]]["thanks"]
     },
@@ -1164,6 +1173,22 @@ VerificationTest[
     ],
     {60, 3},
     TestID -> "Cloud: source notebooks upload in blocks, the manifest written after each"
+]
+
+VerificationTest[
+    Module[{published = 0, exported = <||>, result},
+        Block[{
+                accountBase = ("https://c.example/obj/u" &),
+                publishingAccountQ = Function[{head, account}, True],
+                publishSource = Function[{dir, url, manifest, permissions, short, all}, published++; <|"URL" -> url|>],
+                exportPage = Function[{html, url, permissions}, exported[url] = html; CloudObject[url]]
+            },
+            result = DeployPacletPage[cloudCatalog, "Site", "Source" -> "dir", "Feedback" -> False, "ViewSource" -> False]
+        ];
+        {published, result["Source"], KeyTake[configOf[exported["https://c.example/obj/u/SitePage"]], {"source", "viewSource"}]}
+    ],
+    {0, None, <|"source" -> "", "viewSource" -> False|>},
+    TestID -> "Cloud: \"ViewSource\" -> False publishes no sources and shows none"
 ]
 
 VerificationTest[

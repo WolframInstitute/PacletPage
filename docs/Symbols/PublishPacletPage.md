@@ -39,7 +39,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"DryRun"` | `False` | build and scrape, deploy nothing |
 | `"BuildOptions"` | `{}` | options for `BuildPacletDocumentation` |
 | `"ResourceOptions"` | `{}` | options for `DeployPacletResource`, such as `"Archive"` or `"Exclude"`; the submission builds its archive with them too |
-| `"SiteOptions"` | `{}` | options for `DeployPacletPage` |
+| `"SiteOptions"` | `{}` | options for `DeployPacletPage`; a `"Source"` among them wins over the paclet's own, and `"ViewSource" -> False` publishes no sources and shows none |
 | `"CheckOptions"` | `{}` | options for `CheckPacletPage`, such as `"Pages" -> 50` for a sample of a large site |
 | `"Monitor"` | `False` | whether every step prints a line as it goes |
 

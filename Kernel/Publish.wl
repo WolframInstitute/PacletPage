@@ -2192,7 +2192,8 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$d
                 "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[OptionValue["ResourceOptions"]]], None]|>, "publish"]];
         catalog = PacletPageCatalog[resource["Resource"], "Documentation" -> dir, "Monitor" -> monitored];
         If[ catalog === $Failed, Throw[$Failed, "publish"]];
-        site = DeployPacletPage[catalog, name, "Source" -> dir, "Account" -> OptionValue["Account"], Sequence @@ OptionValue["SiteOptions"]];
+        (* the site's options before the paclet's sources, so a "Source" among them wins *)
+        site = DeployPacletPage[catalog, name, "Account" -> OptionValue["Account"], Sequence @@ OptionValue["SiteOptions"], "Source" -> dir];
         If[ site === $Failed, Throw[$Failed, "publish"]];
         (* a site just published may have pages the cloud has not rendered yet: what fails is
            checked again for up to two minutes *)
