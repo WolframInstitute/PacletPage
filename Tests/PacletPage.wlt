@@ -1206,6 +1206,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Needs["PacletResource`"];
+    Block[{PacletResource`Notebooks`Private`$packageURLTemplate = "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/`1`.html",
+            PacletResource`Notebooks`Private`$pacletName = "Pub/Name", PacletResource`Notebooks`Private`$validRefs = None},
+        Cases[
+            Cell[BoxData[TemplateBox[{Cell[TextData["Conics"]], "paclet:Pub/Name/guide/Conics"}, "OrangeLink", BaseStyle -> "GuideFunctionsSubsection"]],
+                "GuideFunctionsSubsection"] /. orangeLinkRule[],
+            TemplateBox[{_, {URL[u_], None}, ___}, "HyperlinkTemplate"] :> u, Infinity]],
+    {"https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/guide/Conics.html"},
+    TestID -> "Publish: a guide's sub-guide heading links to the deployed page"
+]
+
+VerificationTest[
     Module[{dir = localFixture[], archive, files},
         CreateDirectory[FileNameJoin[{dir, "build"}]];
         Export[FileNameJoin[{dir, "build", "Built.nb"}], "Notebook[{}]", "Text"];

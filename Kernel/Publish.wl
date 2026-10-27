@@ -795,7 +795,7 @@ $guideTreeScript = StringJoin[
    whose transform fails there, or takes over five minutes, is transformed again in this kernel.
    Each page's transform is kept in build/transform, keyed by everything it is made from: the
    notebook, its links into the paclet and whether a page is there for each, the transform's
-   options and version, and the symbols' form. A page whose key is kept is taken from there, and
+   options and version, the symbols' form, and the link rule for a page with an OrangeLink. A page whose key is kept is taken from there, and
    the transforms a completed deploy did not use are deleted. *)
 $transform = None;
 
@@ -841,7 +841,9 @@ transformKey[file_String, type_, options_List, valid_Association] := With[{held 
         pacletLinks[held, Lookup[options, "PacletName", None], valid],
         type,
         DeleteCases[options, ("PackageURIs" | "PacletInfo") -> _],
-        $transform["Context"]
+        $transform["Context"],
+        (* the link rule a page with a sub-guide heading is transformed by *)
+        If[FreeQ[held, "OrangeLink"], None, orangeLinkRule[]]
     }, "SHA256", "HexString"]
 ];
 
@@ -858,7 +860,7 @@ pacletLinks[_, _, _] := {};
 transformFiles[{}, _, _] := <||>;
 transformFiles[files_List, type_, options_List] := Module[{results = <||>, again},
     If[ Length[files] >= 24 && $transform["Kernels"] =!= {},
-        With[{setup = <|"Type" -> type, "Options" -> options, "SymbolRules" -> $transform["SymbolRules"], "PinRules" -> $transform["PinRules"]|>},
+        With[{setup = <|"Type" -> type, "Options" -> options, "SymbolRules" -> $transform["SymbolRules"], "PinRules" -> $transform["PinRules"], "LinkRules" -> {orangeLinkRule[]}|>},
             ParallelEvaluate[$transformSetup = setup, DistributedContexts -> None]
         ];
         Scan[
@@ -866,10 +868,13 @@ transformFiles[files_List, type_, options_List] := Module[{results = <||>, again
                 results = Join[results, AssociationThread[block -> ParallelMap[
                     Function[file,
                         Needs["PacletResource`"];
-                        Internal`InheritedBlock[{PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols},
+                        Internal`InheritedBlock[{PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols,
+                                PacletResource`Notebooks`Private`$embeddedLinkRules},
                             Unprotect[PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols];
                             DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = Join[$transformSetup["SymbolRules"], DownValues[PacletResource`Private`fancyPacletSymbolBoxes]];
                             DownValues[PacletResource`Private`pacletDeclaredSymbols] = Join[$transformSetup["PinRules"], DownValues[PacletResource`Private`pacletDeclaredSymbols]];
+                            With[{rules = PacletResource`Notebooks`Private`$embeddedLinkRules},
+                                If[Head[rules] === Dispatch, PacletResource`Notebooks`Private`$embeddedLinkRules = Dispatch[Join[Normal[rules], $transformSetup["LinkRules"]]]]];
                             Replace[
                                 TimeConstrained[PacletResource`Notebooks`ProcessNotebookForEmbedding[file, $transformSetup["Type"], Sequence @@ $transformSetup["Options"]], 300, $TimedOut],
                                 Except[_String] -> $Failed
@@ -1009,10 +1014,19 @@ patchDeployFunctions[rule_, skip_ : Function[False]] := Scan[
     deployFunctions[]
 ];
 
+(* A guide's sub-guide heading, which DocumentationBuild builds as an OrangeLink to a paclet: page,
+   links to the deployed page, as the stock deploy's other paclet: links do: the cloud renders an
+   OrangeLink as no link, and its viewer opens the paclet: link's cloud reference URL, where a
+   deployed paclet has no page *)
+orangeLinkRule[] := TemplateBox[{label_, ref_String?PacletResource`Notebooks`Private`pacletRefQ}, "OrangeLink", ___, BaseStyle -> style_, ___] :>
+    RuleCondition[PacletResource`Notebooks`Private`makeEmbeddedPackageLink[label, ref, style]]
+
 (* one definition, guarded inside: a literal installDeployFixes[] := Null beside a conditional
    rule would always be tried first, and the fixes would never run *)
 installDeployFixes[] := If[ ! TrueQ[$deployFixesInstalled], Module[{probe = CloudObject["PacletPageAppearanceProbe.html"]},
     Needs["PacletResource`"];
+    With[{rules = PacletResource`Notebooks`Private`$embeddedLinkRules},
+        If[Head[rules] === Dispatch, PacletResource`Notebooks`Private`$embeddedLinkRules = Dispatch[Append[Normal[rules], orangeLinkRule[]]]]];
     ResourceSystemClient`Private`loadDeployResourceShingle[];
     If[ DownValues[DeployedResourceShingle`Private`htmlFragmentExport] === {} && OwnValues[DeployedResourceShingle`Private`htmlFragmentExport] === {},
         DeployedResourceShingle`Private`htmlFragmentExport[s_String] := s
