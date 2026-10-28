@@ -2214,7 +2214,9 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$d
         If[ TrueQ[OptionValue["DryRun"]],
             Throw[<|"Build" -> build, "Resource" -> resource, "Site" -> None, "Check" -> None,
                 "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[OptionValue["ResourceOptions"]]], None]|>, "publish"]];
-        catalog = PacletPageCatalog[resource["Resource"], "Documentation" -> dir, "Monitor" -> monitored];
+        (* the version just deployed, whatever the catalog read from the cloud *)
+        catalog = Replace[PacletPageCatalog[resource["Resource"], "Documentation" -> dir, "Monitor" -> monitored],
+            c_Association :> Append[c, "Version" -> resource["Version"]]];
         If[ catalog === $Failed, Throw[$Failed, "publish"]];
         (* the site's options before the paclet's sources, so a "Source" among them wins *)
         site = DeployPacletPage[catalog, name, "Account" -> OptionValue["Account"], Sequence @@ OptionValue["SiteOptions"], "Source" -> dir];

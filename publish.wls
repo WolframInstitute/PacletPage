@@ -14,6 +14,8 @@
      --email ADDRESS       the address the feedback falls back to
      --account ID          refuse to publish unless this Wolfram ID is connected
      --no-feedback         publish no feedback form
+     --version-label       show the paclet's published version under the site's name
+     --footer              a footer naming the PacletPage the site was made with
      --private             publish everything private, for a trial run
      --pages N|all         how many pages the check reads (10)
 
@@ -26,7 +28,7 @@ PacletDirectoryLoad[DirectoryName[$InputFileName]]
 Needs["WolframInstitute`PacletPage`"]
 
 arguments = Rest[$ScriptCommandLine]
-flags = {"--no-feedback", "--private"}
+flags = {"--no-feedback", "--private", "--version-label", "--footer"}
 valued = {"--documentation", "--source", "--domains", "--readers", "--email", "--account", "--pages"}
 
 (* the positional arguments and the options, by name *)
@@ -39,7 +41,7 @@ parse[{argument_String, rest___}, positional_, named_] := parse[{rest}, Append[p
 
 {positional, named} = parse[arguments, {}, <||>]
 If[ Length[positional] =!= 2,
-    Print["usage: wl -f publish.wls RESOURCE NAME [--documentation DIR] [--source DIR] [--domains A,B] [--readers X,Y] [--email ADDRESS] [--account ID] [--no-feedback] [--private] [--pages N|all]"];
+    Print["usage: wl -f publish.wls RESOURCE NAME [--documentation DIR] [--source DIR] [--domains A,B] [--readers X,Y] [--email ADDRESS] [--account ID] [--no-feedback] [--version-label] [--footer] [--private] [--pages N|all]"];
     Exit[2]
 ]
 {resource, name} = positional
@@ -64,6 +66,8 @@ result = DeployPacletPage[catalog, name,
     ],
     "Source" -> Lookup[named, "--source", None],
     "Account" -> Lookup[named, "--account", Automatic],
+    "VersionLabel" -> TrueQ[Lookup[named, "--version-label", False]],
+    "Footer" -> TrueQ[Lookup[named, "--footer", False]],
     Permissions -> If[private, "Private", "Public"]
 ]
 If[ ! AssociationQ[result], Exit[1]]

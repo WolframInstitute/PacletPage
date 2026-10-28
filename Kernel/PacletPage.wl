@@ -81,6 +81,11 @@ $packageDirectory = DirectoryName[$InputFileName];
 
 $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web"}];
 
+(* the version of this PacletPage, the one whose code runs, and its documentation site, which a
+   site's footer names and links to *)
+$pacletPageVersion := $pacletPageVersion = Replace[PacletObject[File[ParentDirectory[$packageDirectory]]], {p_PacletObject :> p["Version"], _ -> None}];
+$pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage";
+
 Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl"}];
 
 End[]

@@ -94,12 +94,13 @@ The catalog of PacletPage's published pages:
 catalog = PacletPageCatalog[CloudObject["DeployedResources/Paclet/WolframInstitute/PacletPage"], "Documentation" -> PacletObject["WolframInstitute/PacletPage"]];
 ```
 
-`DeployPacletPage` publishes the site in the connected account: its pages, PacletPage's authoring notebooks as their sources, and a feedback form whose entries the accounts of two email domains may read:
+`DeployPacletPage` publishes the site in the connected account: its pages, PacletPage's authoring notebooks as their sources, a feedback form whose entries the accounts of two email domains may read, the version under the site's name, and a footer naming the PacletPage it was made with:
 
 ```wl
 site = DeployPacletPage[catalog, "PacletPage",
     "Source" -> PacletObject["WolframInstitute/PacletPage"]["Location"],
-    "FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}}]
+    "FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}},
+    "VersionLabel" -> True, "Footer" -> True]
 ```
 
 The site lives on `https://www.wolframcloud.com`, the origin that serves the notebooks it renders:

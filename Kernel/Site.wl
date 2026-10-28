@@ -268,8 +268,25 @@ Options[PacletPageFiles] = {
     "Filter" -> True,
     "SymbolsRail" -> True,
     "ResourceLink" -> True,
-    "AllFeedbackLink" -> True
+    "AllFeedbackLink" -> True,
+    "VersionLabel" -> False,
+    "Footer" -> False
 };
+
+(* The label under the site's name: the version given, or with True the catalog's "Version", the
+   paclet's published version; none otherwise. *)
+versionLabel[label_String, _] := label;
+versionLabel[True, catalog_Association] := Replace[Lookup[catalog, "Version", None], Except[_String] -> None];
+versionLabel[_, _] := None;
+
+(* the site's name in the header, with its version label under it where it has one *)
+brandHTML[title_String, None] := esc[title];
+brandHTML[title_String, label_String] := "<span class=\"name\">" <> esc[title] <> "<span class=\"ver\">" <>
+    esc[If[StringMatchQ[label, DigitCharacter ~~ ___], "v" <> label, label]] <> "</span></span>";
+
+(* the footer: the PacletPage the site was published with, linked to its documentation *)
+footerHTML[version_] := "<footer id=\"ftr\">Published with <a href=\"" <> $pacletPageSite <> "\" target=\"_blank\" rel=\"noopener\">PacletPage" <>
+    If[StringQ[version], " " <> esc[version], ""] <> "</a></footer>";
 
 PacletPageFiles::accent = "`1` is not a color; give a color or a hex string such as \"#dd1100\".";
 PacletPageFiles::home = "`1` is not a home page; use \"Definition\", \"RootGuide\", \"Resource\" or Automatic.";
@@ -349,9 +366,12 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
         "index.html" -> fillTemplate[readAsset["site.html"], <|
             "title" -> esc[title],
             (* the parts of the shell a switch leaves out, hidden by the stylesheet *)
-            "bodyClass" -> StringRiffle[Pick[{"no-filter", "no-symbols", "no-resource-link"},
-                ! TrueQ[OptionValue[#]] & /@ {"Filter", "SymbolsRail", "ResourceLink"}], " "],
-            "brand" -> esc[title],
+            "bodyClass" -> StringRiffle[Join[
+                Pick[{"no-filter", "no-symbols", "no-resource-link"}, ! TrueQ[OptionValue[#]] & /@ {"Filter", "SymbolsRail", "ResourceLink"}],
+                If[TrueQ[OptionValue["Footer"]], {"with-footer"}, {}]
+            ], " "],
+            "brand" -> brandHTML[title, versionLabel[OptionValue["VersionLabel"], catalog]],
+            "footer" -> If[TrueQ[OptionValue["Footer"]], footerHTML[$pacletPageVersion], ""],
             "subtitle" -> If[subtitle === "" || subtitle === None, "", "<span class=\"sub\">" <> esc[subtitle] <> "</span>"],
             "resource" -> esc[catalog["Resource"]],
             "resourceLabel" -> Switch[kind, "cloud", "Resource page", "local", "Open page", _, "Paclet Repository"],

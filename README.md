@@ -52,7 +52,8 @@ paclet with a documentation site, without a front end and without scripts of the
   definition notebook, the guides and the tutorials in the left rail, the symbols in the right, and
   each page painted at once from the cloud's static render, then made live. Every page has its own
   address, Back and Forward step through the pages read, links to the paclet's own pages stay in
-  the site, and any other link opens in a new tab.
+  the site, and any other link opens in a new tab. A label under the site's name can show the
+  paclet's version, and a footer the PacletPage the site was made with.
 - Feedback on every page: text in any language and attachments, kept in a Databin of the
   publishing account and confirmed to the reader once stored, with an email fallback. The team
   reads and triages it, each entry with a status, set one at a time or many in one write, on pages

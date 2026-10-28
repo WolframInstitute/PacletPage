@@ -32,7 +32,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Account"` | `Automatic` | the Wolfram ID that must be connected |
 | `Permissions` | `"Public"` | the permissions of the two pages and the source notebooks |
 
-- `DeployPacletPage` also takes the options of `PacletPageFiles` that shape the site: `"Title"`, `"Subtitle"`, `"Accent"`, `"Home"`, `"FeedbackEmail"`, `"FeedbackThanks"`, `"DefinitionPage"`, `"ViewSource"`, `"Filter"`, `"SymbolsRail"`, `"ResourceLink"` and `"AllFeedbackLink"`. With `"ViewSource" -> False` no page has a toggle to its source, the definition notebook's included, and no authoring notebooks are published, whatever `"Source"` says.
+- `DeployPacletPage` also takes the options of `PacletPageFiles` that shape the site: `"Title"`, `"Subtitle"`, `"Accent"`, `"Home"`, `"FeedbackEmail"`, `"FeedbackThanks"`, `"DefinitionPage"`, `"ViewSource"`, `"Filter"`, `"SymbolsRail"`, `"ResourceLink"`, `"AllFeedbackLink"`, `"VersionLabel"` and `"Footer"`. With `"ViewSource" -> False` no page has a toggle to its source, the definition notebook's included, and no authoring notebooks are published, whatever `"Source"` says.
 - One email setting serves the site and the feedback pages: the address of `"FeedbackEmail"` is the feedback pages' `"Email"` too, and an `"Email"` among `"FeedbackOptions"` gives the site its email fallback, unless each is given.
 - The site works on the same origin as the pages it shows, `https://www.wolframcloud.com`, where both the Paclet Repository's notebooks and deployed resources are served.
 
@@ -44,12 +44,13 @@ The catalog of PacletPage's own published documentation:
 catalog = PacletPageCatalog["https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/PacletPage", "Documentation" -> PacletObject["WolframInstitute/PacletPage"]];
 ```
 
-Publish its site in the connected account, with the authoring notebooks as the pages' sources and a feedback form whose entries the accounts of two email domains may read:
+Publish its site in the connected account, with the authoring notebooks as the pages' sources, a feedback form whose entries the accounts of two email domains may read, its version under its name, and a footer:
 
 ```wl
 site = DeployPacletPage[catalog, "PacletPage",
     "Source" -> PacletObject["WolframInstitute/PacletPage"]["Location"],
-    "FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}}]
+    "FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}},
+    "VersionLabel" -> True, "Footer" -> True]
 ```
 
 The site:

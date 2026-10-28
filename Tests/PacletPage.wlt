@@ -378,6 +378,24 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{brand = Function[html, StringCases[html, "<span class=\"ver\">" ~~ v : Except["<"] ... ~~ "</span>" :> v]],
+        footer = Function[html, StringCases[html, "<footer id=\"ftr\">" ~~ f : Shortest[___] ~~ "</footer>" :> f]]},
+        {
+            brand[PacletPageFiles[Append[cloudCatalog, "Version" -> "1.2.3"], "VersionLabel" -> True]["index.html"]],
+            brand[PacletPageFiles[cloudCatalog, "VersionLabel" -> "preview"]["index.html"]],
+            brand[PacletPageFiles[cloudCatalog, "VersionLabel" -> True]["index.html"]],
+            brand[PacletPageFiles[Append[cloudCatalog, "Version" -> "1.2.3"]]["index.html"]],
+            With[{html = PacletPageFiles[cloudCatalog, "Footer" -> True]["index.html"]},
+                {StringContainsQ[html, "<body class=\"with-footer\""], footer[html]}],
+            footer[PacletPageFiles[cloudCatalog]["index.html"]]
+        }
+    ],
+    {{"v1.2.3"}, {"preview"}, {}, {},
+        {True, {"Published with <a href=\"" <> $pacletPageSite <> "\" target=\"_blank\" rel=\"noopener\">PacletPage " <> $pacletPageVersion <> "</a>"}}, {}},
+    TestID -> "Site: \"VersionLabel\" puts the paclet's version under the name, \"Footer\" names the PacletPage it was published with; both off by default"
+]
+
+VerificationTest[
     {
         configOf[PacletPageFiles[cloudCatalog, "FeedbackThanks" -> "The team will read it."]["page.html"]]["thanks"],
         configOf[PacletPageFiles[cloudCatalog]["page.html"]]["thanks"]

@@ -40,9 +40,12 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"SymbolsRail"` | `True` | whether the symbols have a rail of their own |
 | `"ResourceLink"` | `True` | whether the header links to the published page of the page shown |
 | `"AllFeedbackLink"` | `True` | whether the Feedback panel links to the team's list of all the feedback |
+| `"VersionLabel"` | `False` | the label under the site's name: a string, or `True` for the paclet's published version |
+| `"Footer"` | `False` | whether a footer names the PacletPage the site was made with, linked to its documentation |
 
 - With `"Home" -> Automatic`, the site opens on the resource, with its Feedback button and its source, when the catalog has its definition notebook, else on the root guide. `"DefinitionPage" -> False` leaves the definition notebook out of the site; the resource page itself stays its home on request, with `"Home" -> "Resource"`, which hides an empty Examples section and the author's Paclet Source link.
 - Without the symbols rail, the symbols stay pages of the site, reached from the guides and by the filter's Enter.
+- With `"VersionLabel" -> True`, the label is the catalog's `"Version"`, and there is none when the catalog has no version. A label that starts with a digit shows with a v before it, as v1.1.0.
 - The tutorials are listed in the order of their titles, an Overview page first, labelled Overview unless its title says so already, and the ones with the keyword "application" apart as Applications. A page is an Overview when its notebook's metadata types it as one, or, with no notebook at hand, when its name is Overview. A tutorial whose authoring notebook has nothing between its title and the template's closing sections is a placeholder: it is shown greyed, and the filter's Enter opens a written page before it.
 - While the filter shows a match, the labels of the groups it shows stay, so a match keeps its heading.
 - An email template's body may use `{title}`, `{page}`, `{link}`, `{view}`, `{notebook}` and `{date}`, filled in for the page the reader is on; an address alone gets a template that asks what is wrong, where, what was expected, and anything else.
@@ -95,6 +98,34 @@ An address makes the Feedback button open a prefilled email when the site has no
 
 ```wl
 PacletPageFiles[catalog, "FeedbackEmail" -> "docs@example.org"]["page.html"] // StringContainsQ["docs@example.org"]
+```
+
+### VersionLabel
+
+The catalog of a paclet on the Paclet Repository:
+
+```wl
+catalog = PacletPageCatalog["Wolfram/AccessibleColors"];
+```
+
+The version it is published at, which the header shows under the site's name:
+
+```wl
+PacletPageFiles[catalog, "VersionLabel" -> True]["index.html"] // StringCases["<span class=\"ver\">" ~~ Shortest[__] ~~ "</span>"]
+```
+
+### Footer
+
+The catalog of a paclet on the Paclet Repository:
+
+```wl
+catalog = PacletPageCatalog["Wolfram/AccessibleColors"];
+```
+
+A footer names the PacletPage the site was made with and links to its documentation:
+
+```wl
+PacletPageFiles[catalog, "Footer" -> True]["index.html"] // StringCases["<footer" ~~ Shortest[__] ~~ "</footer>"]
 ```
 
 ## Applications

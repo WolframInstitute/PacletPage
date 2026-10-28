@@ -17,9 +17,10 @@ RelatedTutorials: [PublishingADocumentationSite]
 ## Details & Options
 
 - `resource` is `"Publisher/Name"` or a Paclet Repository URL for a paclet on the Paclet Repository, or the URL or `CloudObject` of a paclet resource deployed to a cloud account, under `DeployedResources/Paclet`.
-- The catalog is an association with keys `"Name"`, `"Title"`, `"Kind"` (`"Repository"` or `"Cloud"`), `"Resource"`, `"DocBase"`, `"RootGuide"`, `"Pages"`, `"Unpublished"` and `"Date"`.
+- The catalog is an association with keys `"Name"`, `"Title"`, `"Kind"` (`"Repository"` or `"Cloud"`), `"Resource"`, `"DocBase"`, `"RootGuide"`, `"Pages"`, `"Unpublished"`, `"Version"` and `"Date"`.
 - `"Pages"` associates each page id, such as `"guide/X"`, `"ref/X"` or `"tutorial/X"`, with the page's `"Kind"`, `"Name"`, `"Title"`, `"Keywords"`, `"Guides"`, `"HTML"` and `"Notebook"`. A page name keeps any `$` it has.
 - The pages are the ones the resource page links to, and the ones its guides link to in turn, when they are published. `"Unpublished"` lists the pages a guide links to that are not published, such as pages added since the resource was last deployed.
+- `"Version"` is the paclet's published version: the one the deployed resource's last deploy records, or the newest on the Paclet Repository. It is `None` when neither can be read, such as for a deployed resource from a kernel not connected to the cloud.
 - A guide's `"Guides"` are the guides its section headings link to, in its order: they place it in the site's guide tree. A guide may sit under several guides.
 - A resource deployed to a cloud account has its definition notebook beside its resource page; the catalog includes it as the page `"resource/Name"`.
 - On the Paclet Repository each page names the notebook it shows, and the catalog reads every page to find it. A deployed resource keeps each notebook beside its page.
@@ -52,6 +53,12 @@ The guide at the root of its guide tree:
 
 ```wl
 catalog["RootGuide"]
+```
+
+The version it is published at:
+
+```wl
+catalog["Version"]
 ```
 
 Its pages, by id:

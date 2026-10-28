@@ -17,6 +17,9 @@ a { text-decoration: none; color: inherit; }
 }
 #hdr .brand { font-size: 20px; font-weight: 600; letter-spacing: .2px; color: #fff; cursor: pointer; white-space: nowrap; }
 #hdr .brand .sub { font-size: 12px; font-weight: 400; color: #b9bdc1; margin-left: 10px; }
+/* the version label a site publishes with "VersionLabel", small under its name */
+#hdr .brand .name { display: inline-flex; flex-direction: column; line-height: 1.1; }
+#hdr .brand .ver { font-size: 10.5px; font-weight: 400; letter-spacing: .3px; color: #9aa1a7; margin-top: 1px; }
 #hdr #q {
   margin-left: 28px; flex: 0 1 360px; min-width: 140px;
   background: #16181a; color: #e8eaec; border: 1px solid #3a3f44; border-radius: 4px;
@@ -41,6 +44,15 @@ a { text-decoration: none; color: inherit; }
 
 /* layout: guides and tutorials (left) | content | symbols (right) */
 #main { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; display: flex; }
+/* the footer a site publishes with "Footer" -> True: the PacletPage it was published with */
+#ftr {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 22px; z-index: 20;
+  display: flex; align-items: center; justify-content: flex-end; padding: 0 14px;
+  background: #f4f5f6; border-top: 1px solid #e1e4e6; color: #7a838b; font-size: 11px;
+}
+#ftr a { color: #4b555e; margin-left: 4px; }
+#ftr a:hover { color: var(--pp-accent); }
+.with-footer #main { bottom: 22px; }
 #side, #side-right {
   height: 100%; overflow-y: auto; overflow-x: hidden;
   background: #fafafa; padding: 14px 0 40px;
@@ -135,6 +147,7 @@ a { text-decoration: none; color: inherit; }
   #side.open, #side-right.open { transform: translateX(0); }
 
   #scrim.on { display: block; position: fixed; inset: 56px 0 0; background: rgba(0, 0, 0, .38); z-index: 35; }
+  .with-footer #side, .with-footer #side-right { bottom: 22px; }
   #content { width: 100%; }
 }
 

@@ -226,6 +226,18 @@ definitionPages[spec_Association] /; spec["Kind"] === "Cloud" := With[
 ];
 definitionPages[_] := <||>;
 
+(* The paclet version a site shows with "VersionLabel" -> True: the one a deployed resource's last
+   deploy records, or the newest on the Paclet Repository; None when neither can be read. *)
+publishedVersion[spec_Association] /; spec["Kind"] === "Cloud" := Replace[
+    cloudMeta[CloudObject[StringDrop[spec["Resource"], -1]]],
+    {meta_Association :> Replace[Lookup[meta, "PacletVersion", None], Except[_String] -> None], _ -> None}
+];
+publishedVersion[spec_Association] /; spec["Kind"] === "Repository" := Replace[
+    Select[#["Version"] & /@ PacletFindRemote[spec["Name"], UpdatePacletSites -> True], StringQ],
+    {{latest_, ___} :> latest, _ -> None}
+];
+publishedVersion[_] := None;
+
 pageKind[id_String] := First[StringSplit[id, "/", 2]];
 
 pageName[id_String] := Last[StringSplit[id, "/", 2]];
@@ -352,6 +364,7 @@ PacletPageCatalog[source_, opts : OptionsPattern[]] := Module[
         "Pages" -> pages,
         (* pages a guide links to that are not published, such as pages added since the last deploy *)
         "Unpublished" -> unpublished,
+        "Version" -> publishedVersion[spec],
         "Date" -> DateString[TimeZoneConvert[Now, 0], "ISODateTime"]
     |>
 ];
