@@ -27,7 +27,12 @@ $ProgressReporting = False
 PacletDirectoryLoad[DirectoryName[$InputFileName]]
 Needs["WolframInstitute`PacletPage`"]
 
-arguments = Rest[$ScriptCommandLine]
+(* the arguments after this script's own path, read the same when another script runs it, such as
+   one that connects a cloud account first *)
+arguments = Replace[$ScriptCommandLine, {
+    {___, script_String /; ExpandFileName[script] === ExpandFileName[$InputFileName], rest___} :> {rest},
+    {_, rest___} :> {rest}
+}]
 flags = {"--no-feedback", "--private", "--version-label", "--footer"}
 valued = {"--documentation", "--source", "--domains", "--readers", "--email", "--account", "--pages"}
 
