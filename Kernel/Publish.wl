@@ -1017,9 +1017,19 @@ patchDeployFunctions[rule_, skip_ : Function[False]] := Scan[
 (* A guide's sub-guide heading, which DocumentationBuild builds as an OrangeLink to a paclet: page,
    links to the deployed page, as the stock deploy's other paclet: links do: the cloud renders an
    OrangeLink as no link, and its viewer opens the paclet: link's cloud reference URL, where a
-   deployed paclet has no page *)
-orangeLinkRule[] := TemplateBox[{label_, ref_String?PacletResource`Notebooks`Private`pacletRefQ}, "OrangeLink", ___, BaseStyle -> style_, ___] :>
-    RuleCondition[PacletResource`Notebooks`Private`makeEmbeddedPackageLink[label, ref, style]]
+   deployed paclet has no page. The link keeps the OrangeLink's look in the cloud: the heading's
+   style, not the code font of the link's inline cell, and the template's orange, lighter under the
+   mouse, given in the hyperlink's own style slots, as the cloud draws a dynamic colour in the label
+   as blue. The rule uses none of this package's definitions, as the parallel kernels apply it
+   without the package. *)
+orangeLinkRule[] := With[{
+        orange = LightDarkSwitched[RGBColor[0.85098, 0.396078, 0.]],
+        lighter = LightDarkSwitched[RGBColor[0.9686274509803922, 0.4666666666666667, 0.]]},
+    TemplateBox[{label_, ref_String?PacletResource`Notebooks`Private`pacletRefQ}, "OrangeLink", ___, BaseStyle -> style_, ___] :>
+        RuleCondition[PacletResource`Notebooks`Private`makeEmbeddedPackageLink[label, ref, style] /.
+            TemplateBox[{text_, target_, note_, action_, _, BaseStyle -> _, rest___}, "HyperlinkTemplate"] :>
+                TemplateBox[{text, target, note, action, {FontColor -> lighter}, BaseStyle -> Flatten[{"Hyperlink", style, FontColor -> orange}], rest}, "HyperlinkTemplate"]]
+]
 
 (* one definition, guarded inside: a literal installDeployFixes[] := Null beside a conditional
    rule would always be tried first, and the fixes would never run *)

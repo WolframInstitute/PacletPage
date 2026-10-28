@@ -1210,11 +1210,23 @@ VerificationTest[
     Block[{PacletResource`Notebooks`Private`$packageURLTemplate = "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/`1`.html",
             PacletResource`Notebooks`Private`$pacletName = "Pub/Name", PacletResource`Notebooks`Private`$validRefs = None},
         Cases[
-            Cell[BoxData[TemplateBox[{Cell[TextData["Conics"]], "paclet:Pub/Name/guide/Conics"}, "OrangeLink", BaseStyle -> "GuideFunctionsSubsection"]],
+            Cell[BoxData[TemplateBox[{Cell[TextData[RowBox[{"Plane", " ", "Conics"}]]], "paclet:Pub/Name/guide/Conics"}, "OrangeLink", BaseStyle -> "GuideFunctionsSubsection"]],
                 "GuideFunctionsSubsection"] /. orangeLinkRule[],
-            TemplateBox[{_, {URL[u_], None}, ___}, "HyperlinkTemplate"] :> u, Infinity]],
-    {"https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/guide/Conics.html"},
-    TestID -> "Publish: a guide's sub-guide heading links to the deployed page"
+            TemplateBox[{text_, {URL[u_], None}, _, _, active_, BaseStyle -> base_, ___}, "HyperlinkTemplate"] :> {text, u, active, base}, Infinity]],
+    {{Cell[TextData[RowBox[{"Plane", " ", "Conics"}]]], "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/guide/Conics.html",
+      {FontColor -> LightDarkSwitched[RGBColor[0.9686274509803922, 0.4666666666666667, 0.]]},
+      {"Hyperlink", "GuideFunctionsSubsection", FontColor -> LightDarkSwitched[RGBColor[0.85098, 0.396078, 0.]]}}},
+    TestID -> "Publish: a guide's sub-guide heading links to the deployed page, in the heading's style and the OrangeLink's orange"
+]
+
+(* the parallel kernels apply the rule without this package loaded *)
+VerificationTest[
+    Select[
+        Union[Cases[orangeLinkRule[], s_Symbol :> HoldComplete[s], {0, Infinity}, Heads -> True]],
+        MatchQ[#, HoldComplete[s_] /; StringStartsQ[Context[s], "WolframInstitute`PacletPage`"] && (DownValues[s] =!= {} || OwnValues[s] =!= {})] &
+    ],
+    {},
+    TestID -> "Publish: the sub-guide heading link rule uses none of the package's definitions"
 ]
 
 VerificationTest[
