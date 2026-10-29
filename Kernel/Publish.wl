@@ -154,7 +154,10 @@ buildKernels[n_Integer] := (If[ Length[Kernels[]] < n, LaunchKernels[n - Length[
 (* a converted page, with the sections the converter reports: a page that resets its context at
    each heading names, with MarkdownToNotebook::section, what a section uses from an earlier one,
    since those names come out unevaluated without a message of their own *)
-convertPage[convert_, task_Association, limit_] := Module[{work = task["Work"], run, result},
+(* The Global` symbols a page gives definitions to are cleared after it: a page whose examples put
+   Global` on their context path reads and assigns names there, and every page converted after it
+   in the same kernel would see their values. *)
+convertPage[convert_, task_Association, limit_] := globalsClearedAfter[globalState[], Module[{work = task["Work"], run, result},
     If[ FileExistsQ[work], DeleteFile[work]];
     run = EvaluationData[TimeConstrained[convert[task["File"], work, "UseCache" -> task["UseCache"], Sequence @@ task["Options"]], limit, $TimedOut]];
     result = run["Result"];
@@ -167,7 +170,19 @@ convertPage[convert_, task_Association, limit_] := Module[{work = task["Work"], 
         "Result" -> If[FailureQ[result] || result === $TimedOut, result, Null],
         "Unevaluated" -> sectionReports[run["MessagesExpressions"]]
     |>
-];
+]];
+
+(* the names in Global`, and those of them with no definitions *)
+globalState[] := With[{names = Names["Global`*"]}, {names, Select[names, ! globalDefinedQ[#] &]}];
+
+(* the result, after the Global` symbols with definitions that had none in the state, or were not
+   there, are cleared: a symbol defined before keeps its definitions *)
+globalsClearedAfter[{names_List, bare_List}, result_] := (
+    Replace[Select[Union[Complement[Names["Global`*"], names], bare], globalDefinedQ], assigned : {__} :> ClearAll @@ assigned];
+    result
+);
+
+globalDefinedQ[name_String] := AnyTrue[{OwnValues, DownValues, UpValues, SubValues}, #[name] =!= {} &];
 
 sectionReports[messages_List] := Cases[messages,
     Hold[Message[MessageName[_, "section"], _, heading_String, names_List]] :> <|"Heading" -> heading, "Symbols" -> names|>];
