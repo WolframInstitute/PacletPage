@@ -68,10 +68,10 @@ Each page goes out as HTML:
 html[page_String] := HTTPResponse[page, <|"ContentType" -> "text/html; charset=utf-8"|>]
 ```
 
-The site at `/`, the frame's page beside it:
+The site at `/`, the frame's page beside it, served by one parallel kernel, where `LocalDeploy` by default launches as many as twelve:
 
 ```wl
-preview = LocalDeploy[URLDispatcher[{"/page.html" -> html[PacletPageFiles[catalog]["page.html"]], "/" -> html[PacletPageFiles[catalog]["index.html"]]}]]
+preview = LocalDeploy[URLDispatcher[{"/page.html" -> html[PacletPageFiles[catalog]["page.html"]], "/" -> html[PacletPageFiles[catalog]["index.html"]]}], "InitialKernelCount" -> 1]
 ```
 
 Opened in a browser, the preview is the site, served by this kernel while it is idle; the pages it renders come from the cloud. It answers here too:

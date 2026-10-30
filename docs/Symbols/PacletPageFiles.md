@@ -143,13 +143,13 @@ PacletInstall["ToneAr/LocalDeploy"];
 Needs["ToneAr`LocalDeploy`"]
 ```
 
-The site at `/`, the frame's page beside it:
+The site at `/`, the frame's page beside it, served by one parallel kernel, where `LocalDeploy` by default launches as many as twelve:
 
 ```wl
 preview = LocalDeploy[URLDispatcher[{
     "/page.html" -> HTTPResponse[PacletPageFiles[catalog]["page.html"], <|"ContentType" -> "text/html; charset=utf-8"|>],
     "/" -> HTTPResponse[PacletPageFiles[catalog]["index.html"], <|"ContentType" -> "text/html; charset=utf-8"|>]
-}]]
+}], "InitialKernelCount" -> 1]
 ```
 
 It answers while the kernel is idle, at its URL:
