@@ -228,20 +228,27 @@ linkStatementEntered[link_LinkObject, statement_String] := (
     linkCaptured[linkPackets[link, _InputNamePacket]]
 );
 
-(* The statements of a cell's code as a kernel reads them, each top-level expression's text, with
-   the comments and newlines between them left out: a kernel given a cell's text whole as boxes
-   reads its newlines as spaces, so that two lines multiply. Code that does not parse is one
-   statement, whose message the kernel gives. *)
-cellStatements[code_String] := Module[{tree},
+(* The statements of a cell's code as a front end divides it, at its line breaks: each run of
+   top-level expressions that no line break separates, from the first to the last, without the
+   comments around it. A kernel given a cell's text whole as boxes reads its newlines as spaces, so
+   that two lines multiply; and a line that CodeParser reads as more than one expression, such as
+   ??f, an error and a symbol, is one statement still, whose answer or message the kernel gives. *)
+cellStatements[code_String] := Module[{tree, runs},
     Needs["CodeParser`"];
     tree = CodeParser`CodeConcreteParse[code, "SourceConvention" -> "SourceCharacterIndex"];
     If[ Head[tree] =!= CodeParser`ContainerNode, Return[{code}, Module]];
-    Cases[tree[[2]],
-        node : Except[CodeParser`LeafNode[Token`Newline | Token`Comment | Token`LineContinuation | Whitespace, _, _]] /;
-            MatchQ[Lookup[Last[node], CodeParser`Source, None], {_Integer, _Integer}] :>
-            StringTake[code, Lookup[Last[node], CodeParser`Source]]
+    runs = Map[
+        Function[run, Select[run, Function[node, ! triviaNodeQ[node] && MatchQ[Lookup[Last[node], CodeParser`Source, None], {_Integer, _Integer}]]]],
+        Split[tree[[2]], ! newlineNodeQ[#1] && ! newlineNodeQ[#2] &]
+    ];
+    Map[
+        Function[run, StringTake[code, {First[Lookup[Last[First[run]], CodeParser`Source]], Last[Lookup[Last[Last[run]], CodeParser`Source]]}]],
+        DeleteCases[runs, {}]
     ]
 ];
+triviaNodeQ[node_] := MatchQ[node, CodeParser`LeafNode[Token`Newline | Token`Comment | Token`LineContinuation | Whitespace, _, _]];
+newlineNodeQ[node_] := MatchQ[node, CodeParser`LeafNode[Token`Newline, _, _]];
+
 linkCaptured[packets_List] := Module[{afterMessage = False, outs = {}, msgs = {}, prints = {}},
     Scan[
         Function[packet, Switch[packet,

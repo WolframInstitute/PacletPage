@@ -1714,10 +1714,12 @@ VerificationTest[
         cellStatements["(* c *)\nf[x_] :=\n  x^2\n\n f[2]  (* after *)"],
         cellStatements["x = 1;"],
         cellStatements["1 +"],
-        cellStatements["(* only a comment *)"]
+        cellStatements["(* only a comment *)"],
+        cellStatements["??Expand"],
+        cellStatements["a = 1\n??a  (* about a *)\n\n1 + 2 (* note *)"]
     },
-    {{"y = 7", "z = y + 1"}, {"f[x_] :=\n  x^2", "f[2]"}, {"x = 1;"}, {"1 +"}, {}},
-    TestID -> "Evaluation kernel: a cell is entered a statement at a time, without the comments between"
+    {{"y = 7", "z = y + 1"}, {"f[x_] :=\n  x^2", "f[2]"}, {"x = 1;"}, {"1 +"}, {}, {"??Expand"}, {"a = 1", "??a", "1 + 2"}},
+    TestID -> "Evaluation kernel: a cell is entered a statement at a time, divided at its line breaks as a front end divides it, without the comments around"
 ]
 
 VerificationTest[
