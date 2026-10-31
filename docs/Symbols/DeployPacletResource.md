@@ -20,6 +20,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 - `dir` needs its documentation notebooks and `ResourceDefinition.nb`, which `BuildPacletDocumentation` writes.
 - The archive is built afresh into `build/` every time, in a kernel of its own, since the deploy packs the archive it finds there; `PacletBuild` also turns the documentation notebooks into finished pages. A build that fails on the pages still succeeds, with none, so nothing is deployed unless the archive holds a page for every documentation notebook, or lacks no more than `"MaxFailures"` of them: `Automatic` allows three or a hundredth of the pages, whichever is more, and names them in a `DeployPacletResource::missing` message.
 - The archive is then loaded in a fresh kernel, extracted to a temporary directory: its primary context must load without a message, from there, at the archive's version. The kernel that deploys has the paclet's source loaded, so it cannot tell. A message about two of the kernel's own packages defining one symbol, which names none of the paclet's contexts, does not count.
+- With `"EvaluationKernel"`, for a paclet that loads only on another kernel, the archive is loaded the same way on a fresh kernel of that spec, over its link, in at most fifteen minutes; given by template, the kernel of the `"Paclet"` template, else the first one given.
 - Both fresh kernels load the paclet directories this kernel has loaded with `PacletDirectoryLoad`, such as the paclet's dependencies, but never the paclet's own source or another copy of it.
 - A symbolic link in the paclet that leads outside it would put what it leads to in the archive, such as a runtime the paclet links to from a toolchain on this computer. Such a link is refused, unless `"Exclude"` leaves it out. `"Exclude"` takes string patterns for paths within the paclet, such as `"LibraryResources/*/libruntime*"`; the archive is then built from a copy of the paclet without them.
 - A paclet whose `PacletInfo.wl` declares LibraryLink libraries must have some in the archive, under the extension's root. A check of the paclet's own, given as `"ArchiveCheck"`, is applied to the built archive's file name last, and must give `True`.
@@ -58,6 +59,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Commit"` | `Automatic` | the commit the release records; by default the paclet's git commit, marked `+dirty` and a hash of its sources when it has uncommitted changes |
 | `"Republish"` | `False` | whether to replace a version deployed from another commit |
 | `"LoadCheck"` | `True` | whether to load the built archive in a fresh kernel first |
+| `"EvaluationKernel"` | `None` | the kernel the archive is checked to load alone on, a command or an association as `BuildPacletDocumentation` takes it, for a paclet that loads only there; `None` checks it in a fresh kernel of this Wolfram |
 | `"Exclude"` | `{}` | patterns for the paths within the paclet the archive leaves out |
 | `"ArchiveCheck"` | `None` | a function of the built archive that must give `True` |
 | `"Symbols"` | `Automatic` | the symbols the archive declares, when the paclet declares none |

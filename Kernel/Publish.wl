@@ -149,6 +149,205 @@ buildKernels[True] := buildKernels[Max[2, Min[$ProcessorCount, Floor[MemoryAvail
 buildKernels[n_Integer] /; n < 2 := {};
 buildKernels[n_Integer] := (If[ Length[Kernels[]] < n, LaunchKernels[n - Length[Kernels[]]]]; Kernels[]);
 
+(* ::Section:: *)
+(*Examples on another kernel*)
+
+(* A page's evaluation kernel, as "EvaluationKernel" gives one for its template: None; a command,
+   {program, arguments...}, that LinkLaunch runs with -wstp among its arguments; <|"Command" ->
+   command, "Directory" -> where it starts, "Initialization" -> Hold[code] it evaluates after the
+   paclet loads, "Scope" -> "Page" or "Template", "Identity" -> what keys the page cache|>; or an
+   association of templates to them, which evaluates a template it leaves out here. The spec carries
+   the paclet the kernel loads, its identity, by default the command and the hash of its program,
+   and the key of what its outputs depend on: the identity, the scope, the initialization and the
+   directory. *)
+evaluationSpec[spec_Association /; ! KeyExistsQ[spec, "Command"], template_String, dir_String, context_] :=
+    evaluationSpec[Lookup[spec, template, None], template, dir, context];
+evaluationSpec[command : {__String}, template_String, dir_String, context_] := evaluationSpec[<|"Command" -> command|>, template, dir, context];
+evaluationSpec[spec_Association /; MatchQ[spec["Command"], {__String}], template_String, dir_String, context_] := With[{
+        full = <|
+            "Command" -> spec["Command"], "Directory" -> Lookup[spec, "Directory", None], "Initialization" -> Lookup[spec, "Initialization", None],
+            "Scope" -> Lookup[spec, "Scope", "Page"], "Paclet" -> dir, "Context" -> context, "Template" -> template,
+            "Identity" -> Lookup[spec, "Identity", StringRiffle[spec["Command"]] <>
+                If[FileExistsQ[First[spec["Command"]]], " " <> FileHash[First[spec["Command"]], "SHA256", "HexString"], ""]]
+        |>},
+    Append[full, "Key" -> Lookup[full, {"Identity", "Scope", "Initialization", "Directory"}]]
+];
+evaluationSpec[_, _, _, _] := None;
+
+(* the command as the one line LinkLaunch runs, each part quoted *)
+launchLine[command_List] := StringRiffle[Map["\"" <> StringReplace[#, "\"" -> "\\\""] <> "\"" &, command], " "];
+
+(* how long a kernel may take to answer its first prompt *)
+$evaluationKernelStart = 300;
+
+(* a kernel that fails a page: its reason thrown to the page, which fails with it *)
+evaluationKernelFailure[reason_String] := Throw[
+    Failure["EvaluationKernel", <|"MessageTemplate" -> "the kernel that evaluates the examples `1`", "MessageParameters" -> {reason}|>],
+    $evaluationKernelTag
+];
+
+(* The packets of the link up to the first the pattern end matches: a short wait at a time, so that
+   the time limit of the page around it stops a kernel that no longer answers. A link that closes,
+   as a kernel's does when the kernel dies, fails the page, with that reason and not the link's
+   messages. *)
+linkPackets[link_LinkObject, end_] := Module[{packets = {}, packet = None},
+    While[ ! MatchQ[packet, Hold[end]],
+        Switch[ Quiet[LinkReadyQ[link, 0.05], {LinkObject::linkd, LinkObject::linkn}],
+            True,
+                packet = Quiet[LinkRead[link, Hold], {LinkObject::linkd, LinkObject::linkn}];
+                If[ MatchQ[packet, $Failed | Hold[$Failed]], evaluationKernelFailure["closed its link"]];
+                AppendTo[packets, packet],
+            False, Null,
+            _, evaluationKernelFailure["closed its link"]
+        ]
+    ];
+    packets
+];
+
+(* a packet written to the link, held as it is *)
+linkWritten[link_LinkObject, packet_] := If[ Quiet[LinkWrite[link, Unevaluated[packet]], {LinkObject::linkd, LinkObject::linkn}] === $Failed,
+    evaluationKernelFailure["closed its link"]];
+SetAttributes[linkWritten, HoldRest];
+
+(* an expression evaluated on the kernel, held until it gets there; its value *)
+linkEvaluated[link_LinkObject, Hold[e___]] := (
+    linkWritten[link, EvaluatePacket[CompoundExpression[e]]];
+    Replace[Last[linkPackets[link, _ReturnPacket]], Hold[ReturnPacket[v_]] :> v]
+);
+
+(* A cell's code entered on the kernel as a front end enters it, a statement at a time, each a
+   string of boxes, and what came back as the converter takes an evaluation: each output's boxes,
+   or from a kernel that gives text the box of its text, which an Output cell shows as it is; each
+   message's text, the text after its MessagePacket; and each print's cell *)
+linkEntered[link_LinkObject, code_String] := Merge[
+    Prepend[Map[linkStatementEntered[link, #] &, cellStatements[code]], <|"outs" -> {}, "msgs" -> {}, "prints" -> {}, "cells" -> {}|>],
+    Apply[Join]
+];
+linkStatementEntered[link_LinkObject, statement_String] := (
+    linkWritten[link, EnterExpressionPacket[MakeExpression[BoxData[statement], StandardForm]]];
+    linkCaptured[linkPackets[link, _InputNamePacket]]
+);
+
+(* The statements of a cell's code as a kernel reads them, each top-level expression's text, with
+   the comments and newlines between them left out: a kernel given a cell's text whole as boxes
+   reads its newlines as spaces, so that two lines multiply. Code that does not parse is one
+   statement, whose message the kernel gives. *)
+cellStatements[code_String] := Module[{tree},
+    Needs["CodeParser`"];
+    tree = CodeParser`CodeConcreteParse[code, "SourceConvention" -> "SourceCharacterIndex"];
+    If[ Head[tree] =!= CodeParser`ContainerNode, Return[{code}, Module]];
+    Cases[tree[[2]],
+        node : Except[CodeParser`LeafNode[Token`Newline | Token`Comment | Token`LineContinuation | Whitespace, _, _]] /;
+            MatchQ[Lookup[Last[node], CodeParser`Source, None], {_Integer, _Integer}] :>
+            StringTake[code, Lookup[Last[node], CodeParser`Source]]
+    ]
+];
+linkCaptured[packets_List] := Module[{afterMessage = False, outs = {}, msgs = {}, prints = {}},
+    Scan[
+        Function[packet, Switch[packet,
+            Hold[_MessagePacket], afterMessage = True,
+            Hold[TextPacket[_String]], If[afterMessage, AppendTo[msgs, StringTrim[packet[[1, 1]]]], AppendTo[prints, Cell[StringTrim[packet[[1, 1]], "\n"], "Print"]]];
+                afterMessage = False,
+            Hold[ExpressionPacket[BoxData[_, ___]]], AppendTo[prints, Cell[BoxData[packet[[1, 1, 1]]], "Print"]]; afterMessage = False,
+            Hold[ReturnExpressionPacket[BoxData[_, ___]]], AppendTo[outs, packet[[1, 1, 1]]]; afterMessage = False,
+            Hold[ReturnTextPacket[_String]], AppendTo[outs, ToBoxes[packet[[1, 1]]]]; afterMessage = False,
+            _, afterMessage = False
+        ]],
+        packets
+    ];
+    <|"outs" -> outs, "msgs" -> msgs, "prints" -> prints, "cells" -> {}|>
+];
+
+(* What a kernel keeps to start each page and section afresh: the context path and the names of
+   Global`, where the cells are entered, that it had once the paclet loaded; a page's start loads
+   the contexts it names, on that path, and a reset clears the names made since the baseline. *)
+$evaluationSetup = Hold[
+    PacletPageEvaluation`$contextPath = $ContextPath;
+    PacletPageEvaluation`globalNames[] := StringDelete[Names["Global`*"], StartOfString ~~ "Global`"];
+    PacletPageEvaluation`$initial = PacletPageEvaluation`$baseline = PacletPageEvaluation`globalNames[];
+    PacletPageEvaluation`start[PacletPageEvaluation`path_List] := With[{PacletPageEvaluation`contexts = DeleteCases[PacletPageEvaluation`path, "System`" | "Global`"]},
+        Scan[If[! MemberQ[$Packages, #], Needs[#]] &, PacletPageEvaluation`contexts];
+        $ContextPath = DeleteDuplicates[Join[PacletPageEvaluation`contexts, PacletPageEvaluation`$contextPath]]
+    ];
+    PacletPageEvaluation`clear[PacletPageEvaluation`since_List] := With[{PacletPageEvaluation`names = Map["Global`" <> # &, Complement[PacletPageEvaluation`globalNames[], PacletPageEvaluation`since]]},
+        If[ PacletPageEvaluation`names =!= {}, Unprotect @@ PacletPageEvaluation`names; ClearAll @@ PacletPageEvaluation`names]
+    ];
+];
+
+(* The converter's evaluator on the link's kernel: the cells entered there, the page's contexts
+   loaded there, the baseline the names of Global` at the setup's end, and a reset the clearing of
+   those made since *)
+linkEvaluator[link_LinkObject, spec_Association] := <|
+    "Evaluate" -> Function[{code, options}, linkEntered[link, code]],
+    "Start" -> Function[path, linkEvaluated[link, Hold[PacletPageEvaluation`start[path]]]],
+    "Baseline" -> Function[linkEvaluated[link, Hold[PacletPageEvaluation`$baseline = PacletPageEvaluation`globalNames[]]]],
+    "Reset" -> Function[linkEvaluated[link, Hold[PacletPageEvaluation`clear[PacletPageEvaluation`$baseline]]]],
+    "Identity" -> spec["Key"]
+|>;
+
+(* A kernel of the spec launched where the spec starts it, once it answers: <|"Link" -> its link,
+   "Process" -> {its process ID, its machine}|> *)
+launchedKernel[spec_Association] := Module[{link},
+    link = If[ StringQ[spec["Directory"]],
+        WithCleanup[SetDirectory[spec["Directory"]], LinkLaunch[launchLine[spec["Command"]]], ResetDirectory[]],
+        LinkLaunch[launchLine[spec["Command"]]]
+    ];
+    If[ Head[link] =!= LinkObject, evaluationKernelFailure["could not be launched by " <> launchLine[spec["Command"]]]];
+    TimeConstrained[linkPackets[link, _InputNamePacket], $evaluationKernelStart,
+        LinkClose[link]; evaluationKernelFailure["launched by " <> launchLine[spec["Command"]] <> " did not answer in " <> ToString[$evaluationKernelStart] <> " seconds"]];
+    <|"Link" -> link, "Process" -> linkEvaluated[link, Hold[{$ProcessID, $MachineName}]]|>
+];
+
+(* a kernel for pages: launched, the paclet loaded on it, the initialization evaluated and the
+   setup made *)
+evaluationKernel[spec_Association] := With[{kernel = launchedKernel[spec]},
+    With[{dir = spec["Paclet"], context = spec["Context"]}, linkEvaluated[kernel["Link"], Hold[PacletDirectoryLoad[dir]; If[StringQ[context], Needs[context]]]]];
+    If[ MatchQ[spec["Initialization"], _Hold], linkEvaluated[kernel["Link"], spec["Initialization"]]];
+    linkEvaluated[kernel["Link"], $evaluationSetup];
+    kernel
+];
+
+(* A kernel closed: its link, and then its process, on this machine, if the process is still there
+   two seconds after, as a kernel in the middle of an evaluation may be *)
+closeEvaluationKernel[kernel_Association] := (
+    If[ MemberQ[Links[], kernel["Link"]], Quiet[LinkClose[kernel["Link"]], {LinkObject::linkd, LinkObject::linkn}]];
+    Replace[kernel["Process"], {pid_Integer, machine_String} /; machine === $MachineName && $OperatingSystem =!= "Windows" :>
+        If[ NoneTrue[Range[20], (Pause[0.1]; RunProcess[{"kill", "-0", ToString[pid]}]["ExitCode"] =!= 0) &],
+            RunProcess[{"kill", "-9", ToString[pid]}]]];
+);
+
+(* The kernel a page's examples are evaluated on: one of its own, or the template's, which the
+   pages of the template share, each starting from the names it had when it was made. A template's
+   kernel is this process's: parallel kernels are given the definitions, and this table with them,
+   and each launches its own. A template's kernel that died since its last page is replaced. *)
+$evaluationKernels = <||>;
+pageEvaluationKernel[spec_Association] := If[ spec["Scope"] =!= "Template",
+    evaluationKernel[spec],
+    With[{key = {$ProcessID, spec["Template"], spec["Key"]}},
+        If[ KeyExistsQ[$evaluationKernels, key] && ! FailureQ[Catch[
+                linkEvaluated[$evaluationKernels[key]["Link"],
+                    Hold[PacletPageEvaluation`clear[PacletPageEvaluation`$initial]; PacletPageEvaluation`$baseline = PacletPageEvaluation`$initial]],
+                $evaluationKernelTag]],
+            $evaluationKernels[key],
+            If[ KeyExistsQ[$evaluationKernels, key], closeEvaluationKernel[$evaluationKernels[key]]];
+            $evaluationKernels[key] = evaluationKernel[spec]
+        ]
+    ]
+];
+
+(* after a page: its own kernel closed; a template's kept for the next page, unless the page failed
+   on it, which may have left it in the middle of an evaluation *)
+pageEvaluationDone[spec_Association, kernel_, ok_] := Which[
+    ! AssociationQ[kernel], Null,
+    spec["Scope"] =!= "Template", closeEvaluationKernel[kernel],
+    ! TrueQ[ok], closeEvaluationKernel[kernel]; $evaluationKernels = KeyDrop[$evaluationKernels, Key[{$ProcessID, spec["Template"], spec["Key"]}]]
+];
+
+closeEvaluationKernels[] := With[{own = Select[Keys[$evaluationKernels], First[#] === $ProcessID &]},
+    Scan[closeEvaluationKernel, Lookup[$evaluationKernels, own]];
+    $evaluationKernels = KeyDrop[$evaluationKernels, own]
+];
+
 (* One page converted into its work file, under a time limit: "OK", "Result". A converter that
    wrote its notebook and then hung still counts, when the notebook it wrote is whole. *)
 (* a converted page, with the sections the converter reports: a page that resets its context at
@@ -157,10 +356,22 @@ buildKernels[n_Integer] := (If[ Length[Kernels[]] < n, LaunchKernels[n - Length[
 (* The Global` symbols a page gives definitions to are cleared after it: a page whose examples put
    Global` on their context path reads and assigns names there, and every page converted after it
    in the same kernel would see their values. *)
-convertPage[convert_, task_Association, limit_] := globalsClearedAfter[globalState[], Module[{work = task["Work"], run, result},
+convertPage[convert_, task_Association, limit_] := globalsClearedAfter[globalState[], Module[
+    {work = task["Work"], run, result, evaluation = Lookup[task, "Evaluation", None], kernel = None},
     If[ FileExistsQ[work], DeleteFile[work]];
-    run = EvaluationData[TimeConstrained[convert[task["File"], work, "UseCache" -> task["UseCache"], Sequence @@ task["Options"]], limit, $TimedOut]];
+    run = EvaluationData[TimeConstrained[
+        If[ AssociationQ[evaluation],
+            Catch[
+                kernel = pageEvaluationKernel[evaluation];
+                convert[task["File"], work, "UseCache" -> task["UseCache"], "Evaluator" -> linkEvaluator[kernel["Link"], evaluation], Sequence @@ task["Options"]],
+                $evaluationKernelTag
+            ],
+            convert[task["File"], work, "UseCache" -> task["UseCache"], Sequence @@ task["Options"]]
+        ],
+        limit, $TimedOut
+    ]];
     result = run["Result"];
+    If[ AssociationQ[evaluation], pageEvaluationDone[evaluation, kernel, ! MatchQ[result, _?FailureQ | $TimedOut | $Aborted]]];
     <|
         "OK" -> Which[
             FailureQ[result], False,
@@ -188,7 +399,8 @@ sectionReports[messages_List] := Cases[messages,
     Hold[Message[MessageName[_, "section"], _, heading_String, names_List]] :> <|"Heading" -> heading, "Symbols" -> names|>];
 sectionReports[_] := {};
 
-(* a page converted in this kernel: the parallel kernels its examples launched are closed after it,
+(* a page converted in this kernel, its examples evaluated here or on the kernel its evaluation spec
+   gives: the parallel kernels its examples launched are closed after it,
    so that none of them is left to the examples of the pages after it *)
 convertHere[spec_Association, setup_Association][task_Association] := With[{before = Kernels[]},
     With[{done = convertPage[spec["Function"], task, setup["TimeConstraint"]]},
@@ -232,12 +444,17 @@ workerFunction[setup_Association] := With[
 (* The pages converted, in order: one by one in this kernel, or on the parallel kernels after the
    first, which this kernel converts so that whatever the converter installs is in place before
    they look for it; a page that fails on a parallel kernel is tried once more here. *)
-convertTasks[{}, _, _, _] := {};
-convertTasks[tasks_List, spec_, setup_, {}] := Map[convertHere[spec, setup], tasks];
-convertTasks[{task_}, spec_, setup_, _] := {convertHere[spec, setup][task]};
-convertTasks[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest},
+convertTasks[tasks_List, spec_, setup_, kernels_] := With[{done = tasksConverted[tasks, spec, setup, kernels]},
+    closeEvaluationKernels[];
+    If[ kernels =!= {}, ParallelEvaluate[closeEvaluationKernels[], kernels]];
+    done
+];
+tasksConverted[{}, _, _, _] := {};
+tasksConverted[tasks_List, spec_, setup_, {}] := Map[convertHere[spec, setup], tasks];
+tasksConverted[{task_}, spec_, setup_, _] := {convertHere[spec, setup][task]};
+tasksConverted[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest},
     first = convertHere[spec, setup][First[tasks]];
-    DistributeDefinitions[convertPage, matchGeneralMessages];
+    DistributeDefinitions[convertPage, matchGeneralMessages, closeEvaluationKernels];
     If[ MatchQ[spec["Distribute"], _Hold], DistributeDefinitions @@ spec["Distribute"]];
     rest = ParallelMap[
         workerFunction[Join[setup, <|"Directories" -> DeleteDuplicates[Join[setup["Directories"], parserDirectories[]]], "Off" -> offGeneralMessages[]|>]],
@@ -255,7 +472,10 @@ convertTasks[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest},
    because every page's Related Guides links show them. *)
 $pageCacheVersion = "2";
 pageKey[task_Association, converterID_, code_String, guides_List] := Hash[
-    {$pageCacheVersion, task["Page"], FileHash[task["File"], "SHA256"], task["Options"], converterID, code, guides},
+    Join[
+        {$pageCacheVersion, task["Page"], FileHash[task["File"], "SHA256"], task["Options"], converterID, code, guides},
+        Replace[Lookup[task, "Evaluation", None], {spec_Association :> {spec["Key"]}, _ -> {}}]
+    ],
     "SHA256", "HexString"
 ];
 
@@ -290,6 +510,7 @@ Options[BuildPacletDocumentation] = {
     "TimeConstraint" -> 1800,
     "CacheDirectory" -> Automatic,
     "Dependencies" -> Automatic,
+    "EvaluationKernel" -> None,
     "Monitor" -> False
 };
 
@@ -320,7 +541,8 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     PacletDirectoryLoad[dir];
     Scan[PacletDirectoryLoad, Select[Replace[OptionValue["Dependencies"], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &]];
     paclet = PacletObject[File[dir]];
-    If[ StringQ[paclet["PrimaryContext"]], Needs[paclet["PrimaryContext"]]];
+    (* a paclet whose examples run on another kernel loads there, and need not load here *)
+    If[ StringQ[paclet["PrimaryContext"]] && OptionValue["EvaluationKernel"] === None, Needs[paclet["PrimaryContext"]]];
     spec = converterSpec[OptionValue["Converter"]];
     (* the cache: each page's notebook under a key of everything it depends on, and the code each
        page's examples were last evaluated with, since the converter caches an example's result by
@@ -353,7 +575,8 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
             <|
                 "File" -> file, "Page" -> relativePath[source, file],
                 "Out" -> pageNotebook[target, template, metas[file], file],
-                "Options" -> Join[{"EvaluateSeparator" -> separator[template]}, converterOptions[OptionValue["ConverterOptions"], file]]
+                "Options" -> Join[{"EvaluateSeparator" -> separator[template]}, converterOptions[OptionValue["ConverterOptions"], file]],
+                "Evaluation" -> evaluationSpec[OptionValue["EvaluationKernel"], template, dir, paclet["PrimaryContext"]]
             |>
         ]],
         pageFiles
@@ -378,7 +601,8 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     If[ StringQ[definitionSource] && FileExistsQ[definitionSource],
         AppendTo[tasks, <|
             "File" -> definitionSource, "Page" -> "ResourceDefinition", "Out" -> FileNameJoin[{dir, "ResourceDefinition.nb"}],
-            "Options" -> Join[{"EvaluateSeparator" -> separator["Paclet"]}, converterOptions[OptionValue["ConverterOptions"], definitionSource]]
+            "Options" -> Join[{"EvaluateSeparator" -> separator["Paclet"]}, converterOptions[OptionValue["ConverterOptions"], definitionSource]],
+            "Evaluation" -> evaluationSpec[OptionValue["EvaluationKernel"], "Paclet", dir, paclet["PrimaryContext"]]
         |>]
     ];
     tasks = Map[
@@ -398,7 +622,8 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     kernelsBefore = Kernels[];
     kernels = If[ Length[misses] > 1, buildKernels[OptionValue["Parallel"]], {}];
     setup = <|
-        "Directories" -> DeleteDuplicates[Append[pacletDirectories[], dir]], "Context" -> paclet["PrimaryContext"], "Load" -> spec["Load"],
+        "Directories" -> DeleteDuplicates[Append[pacletDirectories[], dir]], "Load" -> spec["Load"],
+        "Context" -> If[OptionValue["EvaluationKernel"] === None, paclet["PrimaryContext"], None],
         "TimeConstraint" -> OptionValue["TimeConstraint"], "Monitor" -> TrueQ[OptionValue["Monitor"]]
     |>;
     results = AssociationThread[Lookup[misses, "Entry", {}], convertTasks[misses, spec, setup, kernels]];
@@ -1270,6 +1495,13 @@ kernelExecutable[] := SelectFirst[
    context loaded without a message, from there, and at the archive's version. The kernel that
    publishes has the source paclet loaded, so it cannot tell. *)
 archiveLoadScript[archive_String, context_String, dependencies_List : {}] := StringJoin[
+    archiveLoadCode[archive, context, dependencies],
+    "WriteString[\"stdout\", \"PACLETPAGE-LOAD \" <> ExportString[report, \"RawJSON\", \"Compact\" -> True] <> \"\\n\"];\n",
+    "DeleteDirectory[dir, DeleteContents -> True];\n"
+];
+
+(* the code of the check, up to its report *)
+archiveLoadCode[archive_String, context_String, dependencies_List : {}] := StringJoin[
     "$ProgressReporting = False;\n",
     dependencyLoadCode[dependencies],
     "dir = CreateDirectory[];\n",
@@ -1280,9 +1512,7 @@ archiveLoadScript[archive_String, context_String, dependencies_List : {}] := Str
     "report = <|\"Loaded\" -> MemberQ[$Packages, ", wlString[context], "], \"Messages\" -> load[\"MessagesText\"], ",
         "\"FromArchive\" -> StringQ[file] && StringStartsQ[file, location], \"Version\" -> PacletObject[File[location]][\"Version\"], ",
         "\"Symbols\" -> Length[Names[", wlString[context <> "*"], "]], ",
-        "\"SymbolNames\" -> Sort[Map[", wlString[context], " <> Last[StringSplit[#, \"`\"]] &, Names[", wlString[context <> "*"], "]]]|>;\n",
-    "WriteString[\"stdout\", \"PACLETPAGE-LOAD \" <> ExportString[report, \"RawJSON\", \"Compact\" -> True] <> \"\\n\"];\n",
-    "DeleteDirectory[dir, DeleteContents -> True];\n"
+        "\"SymbolNames\" -> Sort[Map[", wlString[context], " <> Last[StringSplit[#, \"`\"]] &, Names[", wlString[context <> "*"], "]]]|>;\n"
 ];
 
 archiveLoadCheck[archive_String, version_String, context_String, dependencies_List : {}] := Module[{kernel = kernelExecutable[], script, run, line, report},
@@ -1294,15 +1524,59 @@ archiveLoadCheck[archive_String, version_String, context_String, dependencies_Li
     line = If[AssociationQ[run], SelectFirst[StringSplit[run["StandardOutput"], "\n"], StringStartsQ[#, "PACLETPAGE-LOAD "] &, None], None];
     report = If[StringQ[line], ImportString[StringDrop[line, 16], "RawJSON"], <|"Reason" -> "the fresh kernel gave no report: " <> If[AssociationQ[run], StringTake[run["StandardError"] <> run["StandardOutput"], UpTo[500]], ToString[run]]|>];
     If[ ! AssociationQ[report], report = <|"Reason" -> "the fresh kernel's report could not be read"|>];
-    (* a kernel may report two of its own packages defining one symbol (SystemSymbolQ::shdw in
-       15.0); a shadowing message that names none of the paclet's contexts is not the paclet's *)
-    If[ ListQ[report["Messages"]],
-        report = Join[report, <|
-            "Messages" -> Select[report["Messages"], ! foreignShadowQ[#, context] &],
-            "IgnoredMessages" -> Select[report["Messages"], foreignShadowQ[#, context] &]
-        |>]
-    ];
+    judgedLoadReport[report, version, context]
+];
+
+(* a load report judged: the paclet loaded from the archive, at its version, with no message. A
+   kernel may report two of its own packages defining one symbol (SystemSymbolQ::shdw in 15.0); a
+   shadowing message that names none of the paclet's contexts is not the paclet's. *)
+judgedLoadReport[report0_Association, version_String, context_String] := With[{report = If[ ListQ[report0["Messages"]],
+        Join[report0, <|
+            "Messages" -> Select[report0["Messages"], ! foreignShadowQ[#, context] &],
+            "IgnoredMessages" -> Select[report0["Messages"], foreignShadowQ[#, context] &]
+        |>],
+        report0
+    ]},
     Append[report, "OK" -> And[TrueQ[report["Loaded"]], report["Messages"] === {}, TrueQ[report["FromArchive"]], report["Version"] === version]]
+];
+
+(* The archive loaded alone on a fresh kernel of an evaluation spec, for a paclet that loads there
+   and not here: the stock check's code, evaluated on that kernel, in at most $loadCheckTime seconds *)
+$loadCheckTime = 900;
+archiveLoadCheckOnKernel[spec_Association, archive_String, version_String, context_String, dependencies_List : {}] := Module[{script, kernel = None, report},
+    script = FileNameJoin[{$TemporaryDirectory, CreateUUID["pacletpage-load-"] <> ".wl"}];
+    Export[script, archiveLoadCode[archive, context, dependencies] <> "DeleteDirectory[dir, DeleteContents -> True];\nreport\n", "Text"];
+    monitor["archive: the archive loads alone on the evaluation kernel"];
+    report = Catch[
+        TimeConstrained[
+            kernel = launchedKernel[spec];
+            linkEvaluated[kernel["Link"], With[{file = script}, Hold[Get[file]]]],
+            $loadCheckTime,
+            <|"Reason" -> "the evaluation kernel gave no report in " <> ToString[$loadCheckTime] <> " seconds"|>
+        ],
+        $evaluationKernelTag
+    ];
+    If[ AssociationQ[kernel], closeEvaluationKernel[kernel]];
+    DeleteFile[script];
+    judgedLoadReport[
+        Which[
+            AssociationQ[report], report,
+            FailureQ[report], <|"Reason" -> ToString[report["Message"]]|>,
+            True, <|"Reason" -> "the evaluation kernel's report could not be read"|>
+        ],
+        version, context
+    ]
+];
+
+(* the check of an archive's loading alone: none; the stock one; or, for a paclet whose examples
+   run on another kernel, one on the kernel of the "Paclet" template's pages, else of the first
+   template given one *)
+loadCheckOf[check_, evaluation_, dir_String] := Which[
+    ! TrueQ[check], False,
+    AssociationQ[evaluationSpec[evaluation, "Paclet", dir, None]], evaluationSpec[evaluation, "Paclet", dir, None],
+    AssociationQ[evaluation] && ! KeyExistsQ[evaluation, "Command"],
+        Replace[SelectFirst[Map[evaluationSpec[#, "Paclet", dir, None] &, Values[evaluation]], AssociationQ, None], None -> True],
+    True, True
 ];
 
 foreignShadowQ[text_String, context_String] := StringContainsQ[text, "::shdw"] && ! StringContainsQ[text, StringDrop[context, -1]];
@@ -1680,9 +1954,13 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
     If[ Length[missing] > failureBudget[Lookup[pageOptions, "MaxFailures", 0], Length[authoring] - Length[flagged]],
         Message[head::pages, Length[authoring] - Length[missing], Length[authoring], Take[missing, UpTo[10]]]; Return[$Failed, Module]];
     If[ missing =!= {}, Message[head::missing, Length[missing], Take[missing, UpTo[10]]]];
-    load = If[ TrueQ[loadCheck],
-        With[{paclet = PacletObject[File[dir]]}, archiveLoadCheck[built["Archive"], paclet["Version"], paclet["PrimaryContext"], dependencies]],
-        None
+    load = Which[
+        TrueQ[loadCheck],
+            With[{paclet = PacletObject[File[dir]]}, archiveLoadCheck[built["Archive"], paclet["Version"], paclet["PrimaryContext"], dependencies]],
+        AssociationQ[loadCheck],
+            With[{paclet = PacletObject[File[dir]]}, archiveLoadCheckOnKernel[loadCheck, built["Archive"], paclet["Version"], paclet["PrimaryContext"], dependencies]],
+        True,
+            None
     ];
     If[ AssociationQ[load] && ! TrueQ[load["OK"]], Message[head::load, KeyDrop[load, "OK"]]; Return[$Failed, Module]];
     (* a paclet that declares LibraryLink libraries ships some; a check of the caller's has the last word *)
@@ -1869,6 +2147,7 @@ Options[DeployPacletResource] = {
     "Commit" -> Automatic,
     "Republish" -> False,
     "LoadCheck" -> True,
+    "EvaluationKernel" -> None,
     "Incremental" -> False,
     "Parallel" -> False,
     "TimeConstraint" -> 900,
@@ -1950,7 +2229,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
     built = With[
         {pageOptions = <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"], "MaxFailures" -> OptionValue["MaxFailures"]|>},
         If[ TrueQ[OptionValue["Build"]],
-            freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], OptionValue["LoadCheck"], pageOptions],
+            freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], loadCheckOf[OptionValue["LoadCheck"], OptionValue["EvaluationKernel"], dir], pageOptions],
             builtArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], pageOptions]
         ]
     ];
@@ -2085,7 +2364,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
 (* ==================== submitting to the Paclet Repository ==================== *)
 
 Options[SubmitPacletResource] = {
-    "Account" -> Automatic, "DryRun" -> False, "DocumentationSource" -> Automatic, "LoadCheck" -> True,
+    "Account" -> Automatic, "DryRun" -> False, "DocumentationSource" -> Automatic, "LoadCheck" -> True, "EvaluationKernel" -> None,
     "Incremental" -> False, "Parallel" -> False, "TimeConstraint" -> 900, "Exclude" -> {}, "ArchiveCheck" -> None, "Symbols" -> Automatic
 };
 
@@ -2152,7 +2431,7 @@ SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         Select[Normal[check], #Level === "Error" && #Tag =!= "NoPacletInfoFileCell" &]
     ]];
     If[ issues =!= {}, Message[SubmitPacletResource::check, Lookup[issues, "Tag"]]; Throw[$Failed, "submit"]];
-    built = freshArchive[SubmitPacletResource, dir, paclet["Name"], OptionValue["DocumentationSource"], OptionValue["LoadCheck"],
+    built = freshArchive[SubmitPacletResource, dir, paclet["Name"], OptionValue["DocumentationSource"], loadCheckOf[OptionValue["LoadCheck"], OptionValue["EvaluationKernel"], dir],
         <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"]|>];
     If[ built === $Failed, Throw[$Failed, "submit"]];
     (* Scrape and submit with the notebook open: the scraped record reads its notebook data while
@@ -2210,6 +2489,13 @@ newerVersionQ[version_String, than_String] := With[{a = versionKey[version], b =
 (* the resource options a submission builds its archive with too *)
 submissionOptions[options_List] := Sequence @@ FilterRules[options, Except["Account" | "DryRun", Options[SubmitPacletResource]]];
 
+(* the resource's options and, after them, the build's evaluation kernel: a paclet whose examples
+   run on another kernel is checked to load alone there *)
+resourceOptionsWith[resourceOptions_, buildOptions_] := Join[
+    Cases[Flatten[{resourceOptions}], _Rule | _RuleDelayed],
+    Replace[Lookup[Association[Cases[Flatten[{buildOptions}], _Rule]], "EvaluationKernel", None], {None -> {}, evaluation_ :> {"EvaluationKernel" -> evaluation}}]
+];
+
 PublishPacletPage::cloud = DeployPacletResource::cloud;
 PublishPacletPage::account = "Connected to the Wolfram Cloud as `1`, not as `2`; nothing was built or published. Connect as `2` to publish this paclet.";
 
@@ -2224,11 +2510,12 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$d
     (* the parallel kernels the deploy asks for serve the site's uploads too, so they stay until the
        site is published and checked *)
     withDeployKernels[Lookup[Association[Cases[Flatten[{OptionValue["ResourceOptions"]}], _Rule]], "Parallel", False], Function[kernels,
-        resource = DeployPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> OptionValue["DryRun"], Sequence @@ OptionValue["ResourceOptions"]];
+        resource = DeployPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> OptionValue["DryRun"],
+            Sequence @@ resourceOptionsWith[OptionValue["ResourceOptions"], OptionValue["BuildOptions"]]];
         If[ resource === $Failed || FailureQ[resource], Throw[resource, "publish"]];
         If[ TrueQ[OptionValue["DryRun"]],
             Throw[<|"Build" -> build, "Resource" -> resource, "Site" -> None, "Check" -> None,
-                "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[OptionValue["ResourceOptions"]]], None]|>, "publish"]];
+                "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[resourceOptionsWith[OptionValue["ResourceOptions"], OptionValue["BuildOptions"]]]], None]|>, "publish"]];
         (* the version just deployed, whatever the catalog read from the cloud *)
         catalog = Replace[PacletPageCatalog[resource["Resource"], "Documentation" -> dir, "Monitor" -> monitored],
             c_Association :> Append[c, "Version" -> resource["Version"]]];
@@ -2242,6 +2529,6 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$d
     ]];
     <|
         "Build" -> build, "Resource" -> resource, "Site" -> site, "Check" -> check,
-        "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], submissionOptions[OptionValue["ResourceOptions"]]], None]
+        "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], submissionOptions[resourceOptionsWith[OptionValue["ResourceOptions"], OptionValue["BuildOptions"]]]], None]
     |>
 ], "publish"]];

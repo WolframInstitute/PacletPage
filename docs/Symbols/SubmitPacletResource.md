@@ -19,6 +19,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 - The definition notebook's Submit button asks for the version in a dialog, which a kernel without a front end cannot show. `SubmitPacletResource` makes the same submission headless: the notebook scraped into a resource and handed to `ResourceSubmit` with the version and publisher of `PacletInfo.wl`.
 - Before anything is built, it checks the definition notebook, and any error stops the submission. The exception is the missing file listing of `PacletInfo.wl`, which a definition notebook built from markdown lacks; the built paclet takes its place.
 - The archive is built afresh into `build/`, in a kernel of its own, and nothing is submitted unless it holds a page for every documentation notebook and loads, alone, in a fresh kernel: a build that fails on the pages still succeeds, with none, and a submission without them publishes a paclet without documentation.
+- With `"EvaluationKernel"`, for a paclet that loads only on another kernel, the fresh kernel the archive loads on is one of that spec, as `DeployPacletResource` checks it.
 - When `Documentation` already holds finished pages, give their authoring notebooks as `"DocumentationSource"`: the paclet is built from a copy whose documentation is those notebooks, since rebuilding finished pages packs none.
 - The scrape reads the definition notebook while it is open, with the notebook's own hints, which a headless front end otherwise looks for in a notebook it does not have; and the packed archive must be the version being submitted.
 - The connected account must own the paclet's publisher. A rejected request reports the repository's answer as a message.
@@ -34,6 +35,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"DryRun"` | `False` | do everything but the submission |
 | `"DocumentationSource"` | `Automatic` | the authoring notebooks to build from, when `Documentation` holds pages already built |
 | `"LoadCheck"` | `True` | whether to load the built archive in a fresh kernel first |
+| `"EvaluationKernel"` | `None` | the kernel the archive is checked to load alone on, a command or an association as `BuildPacletDocumentation` takes it, for a paclet that loads only there; `None` checks it in a fresh kernel of this Wolfram |
 | `"Exclude"` | `{}` | patterns for the paths within the paclet the archive leaves out |
 | `"ArchiveCheck"` | `None` | a function of the built archive that must give `True` |
 | `"Symbols"` | `Automatic` | the symbols the archive declares, when the paclet declares none |

@@ -35,9 +35,10 @@ paclet with a documentation site, without a front end and without scripts of the
 - Documentation from markdown: the pages under `docs/` and `ResourceDefinition.md` become notebooks
   through MarkdownToNotebook, with their examples evaluated. Unchanged pages come from a cache that a
   build server can keep, the others convert on parallel kernels when asked, and examples run again
-  when the code they run changes.
+  when the code they run changes. A paclet that loads only on another kernel has its examples
+  evaluated there.
 - Checked releases: nothing is published unless the archive holds every documentation page and
-  loads alone in a fresh kernel. A version already published from another commit, a link leading
+  loads alone in a fresh kernel, or on the kernel its examples run on. A version already published from another commit, a link leading
   outside the paclet, and LibraryLink libraries declared but not shipped are refused.
 - A complete resource page from its first visit, on any cloud subscription: Details, examples, the
   main guide, the hero image and the source link, with the paclet's version and commit recorded.

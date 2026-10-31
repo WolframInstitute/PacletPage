@@ -1635,6 +1635,144 @@ VerificationTest[
     TestID -> "Build: on parallel kernels, launched for the build and closed after it"
 ]
 
+(* === examples on another kernel: a converter that evaluates each line of its page after "EVAL: "
+   with the evaluator it is given, a "\n" in it a newline, and writes their outputs; a paclet
+   whose package loads on any kernel but this one === *)
+
+fakeEvaluatingConvert[file_String, out_String, opts : OptionsPattern[]] := Module[
+    {text = Import[file, "Text"], evaluator = Lookup[Association[Cases[{opts}, _Rule]], "Evaluator", None], outs = {}},
+    If[ AssociationQ[evaluator],
+        evaluator["Start"][{"System`"}];
+        outs = Flatten[Map[evaluator["Evaluate"][StringReplace[#, "\\n" -> "\n"], <||>]["outs"] &,
+            StringCases[text, StartOfLine ~~ "EVAL: " ~~ code : Except["\n"] .. :> code]]]
+    ];
+    Put[Notebook[Prepend[Map[Cell[BoxData[#], "Output"] &, outs], Cell[text, "Text"]]], out];
+    out
+];
+
+notebookOutputs[file_String] := Cases[Get[file], Cell[BoxData[b_], "Output"] :> b, Infinity];
+
+remoteOnlyPaclet[] := Module[{dir = CreateDirectory[]},
+    Export[FileNameJoin[{dir, "PacletInfo.wl"}],
+        "PacletObject[<|\"Name\" -> \"Pub/RemoteOnly\", \"Version\" -> \"1.0.0\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> {\"RemoteOnly`\"}}}|>]",
+        "Text"];
+    CreateDirectory[FileNameJoin[{dir, "Kernel"}]];
+    Export[FileNameJoin[{dir, "Kernel", "RemoteOnly.wl"}],
+        "If[$ProcessID === " <> ToString[$ProcessID] <> ", Abort[]];\nBeginPackage[\"RemoteOnly`\"];\nRemoteOnly`where[] := $ProcessID;\nEndPackage[];\n",
+        "Text"];
+    CreateDirectory[FileNameJoin[{dir, "docs", "Symbols"}], CreateIntermediateDirectories -> True];
+    dir
+];
+
+remotePage[dir_String, name_String, lines_List] := Export[FileNameJoin[{dir, "docs", "Symbols", name <> ".md"}],
+    "---\nTemplate: Symbol\nURI: Pub/RemoteOnly/ref/" <> name <> "\n---\n\n" <> StringRiffle[Map["EVAL: " <> # &, lines], "\n"] <> "\n", "Text"];
+
+(* the kernels this one launched with -wstp that are still running *)
+wstpChildren[] := Select[StringSplit[RunProcess[{"ps", "-Ao", "ppid=,command="}]["StandardOutput"], "\n"],
+    StringStartsQ[StringTrim[#], ToString[$ProcessID] <> " "] && StringContainsQ[#, "-wstp"] &];
+
+VerificationTest[
+    {
+        evaluationSpec[None, "Symbol", "/d", None],
+        evaluationSpec[<|"Symbol" -> {"k"}|>, "Guide", "/d", None],
+        KeyTake[evaluationSpec[{"k", "-wstp"}, "Symbol", "/d", "C`"], {"Command", "Scope", "Paclet", "Context", "Template", "Identity"}],
+        Lookup[evaluationSpec[<|"Symbol" -> <|"Command" -> {"k"}, "Scope" -> "Template", "Identity" -> "v2"|>|>, "Symbol", "/d", None], {"Scope", "Identity"}],
+        {loadCheckOf[True, None, "/d"], loadCheckOf[False, {"k"}, "/d"], loadCheckOf[True, {"k"}, "/d"]["Command"], loadCheckOf[True, <|"Guide" -> None, "Symbol" -> {"g"}|>, "/d"]["Command"],
+            loadCheckOf[True, <|"Paclet" -> {"p"}, "Symbol" -> {"g"}|>, "/d"]["Command"], loadCheckOf[True, <|"Guide" -> None|>, "/d"]}
+    },
+    {
+        None,
+        None,
+        <|"Command" -> {"k", "-wstp"}, "Scope" -> "Page", "Paclet" -> "/d", "Context" -> "C`", "Template" -> "Symbol", "Identity" -> "k -wstp"|>,
+        {"Template", "v2"},
+        {True, False, {"k"}, {"g"}, {"p"}, True}
+    },
+    TestID -> "Evaluation kernel: a spec by command, association or template, its identity and the load check it gives"
+]
+
+VerificationTest[
+    Module[{task = <|"Page" -> "p", "File" -> FindFile["WolframInstitute`PacletPage`"], "Options" -> {}|>, key},
+        key[evaluation_] := pageKey[Append[task, "Evaluation" -> evaluationSpec[evaluation, "Symbol", "/d", None]], "c", "code", {}];
+        {
+            pageKey[task, "c", "code", {}] === key[None],
+            key[None] === key[{"k"}],
+            key[{"k"}] === key[<|"Command" -> {"k"}|>],
+            key[{"k"}] === key[{"k2"}],
+            key[{"k"}] === key[<|"Command" -> {"k"}, "Scope" -> "Template"|>],
+            key[{"k"}] === key[<|"Command" -> {"k"}, "Initialization" -> Hold[x = 1]|>],
+            key[{"k"}] === key[<|"Command" -> {"k"}, "Directory" -> "/d"|>],
+            key[{"k"}] === key[<|"Command" -> {"k2"}, "Identity" -> "k"|>]
+        }
+    ],
+    {True, False, True, False, False, False, False, True},
+    TestID -> "Evaluation kernel: a page evaluated on another kernel is cached by the kernel its identity names, its scope, initialization and directory, and no other page's key changes"
+]
+
+VerificationTest[
+    {
+        cellStatements["y = 7\nz = y + 1"],
+        cellStatements["(* c *)\nf[x_] :=\n  x^2\n\n f[2]  (* after *)"],
+        cellStatements["x = 1;"],
+        cellStatements["1 +"],
+        cellStatements["(* only a comment *)"]
+    },
+    {{"y = 7", "z = y + 1"}, {"f[x_] :=\n  x^2", "f[2]"}, {"x = 1;"}, {"1 +"}, {}},
+    TestID -> "Evaluation kernel: a cell is entered a statement at a time, without the comments between"
+]
+
+VerificationTest[
+    linkCaptured[{
+        Hold[TextPacket["hi\n"]], Hold[MessagePacket[Power, "infy"]], Hold[TextPacket["Power::infy: Infinite expression 1/0 encountered.\n"]],
+        Hold[ExpressionPacket[BoxData[RowBox[{"a", "+", "b"}], StandardForm]]], Hold[OutputNamePacket["Out[1]= "]],
+        Hold[ReturnExpressionPacket[BoxData[RowBox[{"1", "+", "x"}], StandardForm]]], Hold[ReturnTextPacket["2"]], Hold[InputNamePacket["In[2]:= "]]
+    }],
+    <|"outs" -> {RowBox[{"1", "+", "x"}], "\"2\""}, "msgs" -> {"Power::infy: Infinite expression 1/0 encountered."},
+      "prints" -> {Cell["hi", "Print"], Cell[BoxData[RowBox[{"a", "+", "b"}]], "Print"]}, "cells" -> {}|>,
+    TestID -> "Evaluation kernel: what comes back is taken as the converter takes an evaluation"
+]
+
+VerificationTest[
+    Module[{dir = remoteOnlyPaclet[], built, a, b},
+        remotePage[dir, "A", {"RemoteOnly`where[] =!= " <> ToString[$ProcessID], "y = 7\\ny + 1", "y", "$ProcessID"}];
+        remotePage[dir, "B", {"{y0, y}", "$ProcessID"}];
+        built = BuildPacletDocumentation[dir, "Converter" -> fakeEvaluatingConvert, "Definition" -> None, "Parallel" -> False,
+            "EvaluationKernel" -> <|"Command" -> {kernelExecutable[], "-wstp", "-noinit"}, "Scope" -> "Template", "Initialization" -> Hold[Global`y0 = 1]|>];
+        {a, b} = notebookOutputs /@ Sort[built["Notebooks"]];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {Length[built["Converted"]], Most[a], First[b], Last[a] === Last[b], MemberQ[$Packages, "RemoteOnly`"], wstpChildren[]}
+    ],
+    {2, {"\"True\"", "\"7\"", "\"8\"", "\"7\""}, "\"{1, y}\"", True, False, {}},
+    TestID -> "Evaluation kernel: the examples run where the paclet loads, a template's pages on one kernel, each from its initialization"
+]
+
+VerificationTest[
+    Module[{dir = remoteOnlyPaclet[], died, silent},
+        remotePage[dir, "A", {"Exit[]", "1 + 1"}];
+        died = BuildPacletDocumentation[dir, "Converter" -> fakeEvaluatingConvert, "Definition" -> None, "Parallel" -> False, "UseCache" -> False,
+            "EvaluationKernel" -> {kernelExecutable[], "-wstp", "-noinit"}];
+        silent = Block[{$evaluationKernelStart = 3},
+            BuildPacletDocumentation[dir, "Converter" -> fakeEvaluatingConvert, "Definition" -> None, "Parallel" -> False, "UseCache" -> False,
+                "EvaluationKernel" -> {"/bin/sh", "-c", "exit 0"}]];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {Length[died["Failed"]], Length[silent["Failed"]], wstpChildren[]}
+    ],
+    {1, 1, {}},
+    {BuildPacletDocumentation::page, BuildPacletDocumentation::page},
+    TestID -> "Evaluation kernel: a page whose kernel dies, or never answers, fails and leaves no kernel"
+]
+
+VerificationTest[
+    Module[{dir = remoteOnlyPaclet[], out = CreateDirectory[], archive, report},
+        archive = CreatePacletArchive[dir, out];
+        report = archiveLoadCheckOnKernel[evaluationSpec[{kernelExecutable[], "-wstp", "-noinit"}, "Paclet", dir, None], archive, "1.0.0", "RemoteOnly`"];
+        DeleteDirectory[out, DeleteContents -> True];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {KeyTake[report, {"OK", "Loaded", "FromArchive", "Version", "Messages", "SymbolNames"}], MemberQ[$Packages, "RemoteOnly`"], wstpChildren[]}
+    ],
+    {<|"OK" -> True, "Loaded" -> True, "FromArchive" -> True, "Version" -> "1.0.0", "Messages" -> {}, "SymbolNames" -> {"RemoteOnly`where"}|>, False, {}},
+    TestID -> "Evaluation kernel: the archive is checked to load alone on the evaluation kernel"
+]
+
 VerificationTest[
     pageNotebook["/t", "Symbol", <|"URI" -> "Pub/Name/ref/Foo"|>, "/docs/Area/foo-page.md"],
     FileNameJoin[{"/t", "ReferencePages", "Symbols", "Foo.nb"}],

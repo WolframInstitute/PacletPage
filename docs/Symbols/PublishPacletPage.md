@@ -26,6 +26,7 @@ RelatedTutorials: [PublishingADocumentationSite]
   - and, with `"Submit" -> True`, `SubmitPacletResource`.
 - The result has `"Build"`, `"Resource"`, `"Site"`, `"Check"` and `"Submission"`: each step's result, `None` for a step not taken.
 - With `"Monitor" -> True`, every step prints a line as it starts, and at least once a minute while it runs: the conversion, the archive's build and load check, the deploy, the catalog, the site's uploads and the check. A build server that stops a job gone quiet sees it working.
+- An `"EvaluationKernel"` among `"BuildOptions"` goes to the deploy and the submission too, unless `"ResourceOptions"` give one, so that the archive is checked to load alone on the kernel the examples ran on.
 - The parallel kernels `"Parallel"` among `"ResourceOptions"` asks for are launched for the deploy and kept until the site is published and checked, so the site's source notebooks upload over them too.
 - With `"DryRun" -> True`, it builds the documentation and the archive, loads the archive in a fresh kernel and scrapes the resource, but deploys and submits nothing, and publishes no site. Since a paclet's documentation may publish as it is built, a dry run that builds checks the account as a real run does; with `"Build" -> False`, a dry run as another account only reports it. Without a cloud session the dry run runs offline.
 - The following options can be given:
