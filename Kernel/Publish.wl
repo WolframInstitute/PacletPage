@@ -1729,14 +1729,10 @@ singleRuleBeforeExamples[other_] := other;
 
 (* the built pages under a built paclet directory tidied in place, where they need it: the number
    tidied. A page tidied before has no delimiter left, and is only read. *)
-tidyBuiltPages[builtRoot_String] := Count[
-    Map[
-        Function[file, StringContainsQ[ReadString[file], "\"PageDelimiter\""] && With[{notebook = Get[file]},
-            With[{tidy = singleRuleBeforeExamples[notebook]}, tidy =!= notebook && StringQ[Export[file, tidy, "NB"]]]
-        ]],
-        FileNames["*.nb", FileNameJoin[{builtRoot, "Documentation"}], Infinity]
-    ],
-    True
+tidyBuiltPages[builtRoot_String] := Count[tidyBuiltPage /@ FileNames["*.nb", FileNameJoin[{builtRoot, "Documentation"}], Infinity], True];
+
+tidyBuiltPage[file_String] := StringContainsQ[ReadString[file], "\"PageDelimiter\""] && With[{notebook = Get[file]},
+    With[{tidy = singleRuleBeforeExamples[notebook]}, tidy =!= notebook && StringQ[Export[file, tidy, "NB"]]]
 ];
 
 (* PacletBuild in a fresh kernel: the build's own documentation step loads packages and issues
@@ -1848,8 +1844,10 @@ documentationLinkBase[paclet_PacletObject] := Replace[
 
 (* The script a page-building process runs: the stock documentation build over its share of the
    changed pages, in one call, since each call reads the whole documentation tree first, without
-   the search indexes, writing the record entries PacletBuild keeps for them to a file. Its output
-   goes to a log, so that nothing waits on a full pipe. *)
+   the search indexes, writing the record entries PacletBuild keeps for them to a file; then its
+   pages tidied, as PacletBuild's documentation step tidies the pages it finds untidied, which a
+   process does over its own share while the others build theirs. Its output goes to a log, so
+   that nothing waits on a full pipe. *)
 pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List] := StringJoin[
     "$ProgressReporting = False;\n",
     "$Output = $Messages = {OpenWrite[", wlString[log], "]};\n",
@@ -1869,6 +1867,9 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "Put[Association[KeyValueMap[\n",
     "    With[{page = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[MemberQ[pages, page], page -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
     "    Replace[processed, Except[_Association] -> <||>]]], ", wlString[recordOut], "];\n",
+    "PacletDirectoryLoad[", wlString[ParentDirectory[$packageDirectory]], "];\n",
+    "Needs[\"WolframInstitute`PacletPage`\"];\n",
+    "Scan[WolframInstitute`PacletPage`Private`tidyBuiltPage, Select[FileNameJoin[{", wlString[builtDocsDir], ", #}] & /@ pages, FileExistsQ]];\n",
     $endScriptCode
 ];
 

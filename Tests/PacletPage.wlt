@@ -1243,6 +1243,29 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = localFixture[], built = CreateDirectory[], page = FileNameJoin[{"English", "Guides", "Name.nb"}], script, file, tidied, again},
+        script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], built, {page}, "/w/r.wl", "/w/log.txt", {}];
+        file = FileNameJoin[{built, page}];
+        CreateDirectory[DirectoryName[file], CreateIntermediateDirectories -> True];
+        Export[file, Notebook[{Cell["", "PageDelimiter"], Cell[CellGroupData[{Cell["Examples", "PrimaryExamplesSection"]}, Open]]}], "NB"];
+        (* the script's last step, its share's pages tidied, with the list of its pages *)
+        Block[{pages}, ToExpression /@ Select[StringSplit[script, "\n"], StringStartsQ[#, "pages = "] || StringContainsQ[#, "tidyBuiltPage"] &]];
+        tidied = Get[file];
+        again = tidyBuiltPage[file];
+        DeleteDirectory[dir, DeleteContents -> True];
+        DeleteDirectory[built, DeleteContents -> True];
+        {
+            StringPosition[script, "tidyBuiltPage"][[1, 1]] > StringPosition[script, "Put["][[1, 1]],
+            FreeQ[tidied, "PageDelimiter"],
+            ! FreeQ[tidied, "PrimaryExamplesSection"],
+            again
+        }
+    ],
+    {True, True, True, False},
+    TestID -> "Archive: a page share tidies its pages once its record is written, and a tidied page is only read again"
+]
+
+VerificationTest[
     statusUpdate /@ {<|"id" -> "E1", "status" -> "fixed", "note" -> "n"|>, <|"ID" -> "E2", "Status" -> "open"|>},
     {<|"id" -> "E1", "status" -> "fixed", "note" -> "n"|>, <|"id" -> "E2", "status" -> "open", "note" -> ""|>},
     TestID -> "Feedback: an update's keys in either case"
