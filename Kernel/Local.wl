@@ -116,9 +116,8 @@ localTitle[nb_Notebook, name_String] := FirstCase[nb, Cell[c_, "ObjectName" | "G
 localTitle[_, name_String] := name;
 
 (* what a page's render is made from: its notebook, and the versions that render it *)
-renderKey[file_String] := Hash[
-    {FileHash[file, "SHA256", "HexString"], $VersionNumber, Replace[PacletFind["WolframInstitute/PacletPage"], {{paclet_, ___} :> paclet["Version"], _ -> None}]},
-    "SHA256", "HexString"
+renderKey[file_String] := digest[
+    {FileHash[file, "SHA256", "HexString"], $VersionNumber, Replace[PacletFind["WolframInstitute/PacletPage"], {{paclet_, ___} :> paclet["Version"], _ -> None}]}
 ];
 
 (* where a page's render lands: html/<kind>/<name>.html, and its images in html/<kind>/Files/<name>.en *)

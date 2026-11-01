@@ -38,7 +38,7 @@ converterSpec[Automatic] := converterSpec[Automatic] = Which[
         <|
             "Function" -> Global`MarkdownToNotebook, "Load" -> Hold[Symbol["Global`MarkdownToNotebook"]],
             "Distribute" -> Hold[Global`MarkdownToNotebook],
-            "ID" -> Hash[{DownValues[Global`MarkdownToNotebook], Options[Global`MarkdownToNotebook]}, "SHA256", "HexString"]
+            "ID" -> digest[{DownValues[Global`MarkdownToNotebook], Options[Global`MarkdownToNotebook]}]
         |>,
     FileExistsQ[FileNameJoin[{$checkoutDirectory, "MarkdownToNotebook.wl"}]],
         If[ DirectoryQ[FileNameJoin[{$checkoutDirectory, "examples", "Paclet", "WolframParser"}]],
@@ -50,16 +50,16 @@ converterSpec[Automatic] := converterSpec[Automatic] = Which[
 ];
 converterSpec[file_String] /; FileExistsQ[file] := converterSpec[file] = <|
     "Function" -> ReleaseHold[converterLoad[file]], "Load" -> converterLoad[file], "Distribute" -> None,
-    "ID" -> Hash[{FileHash[file, "SHA256", "HexString"], $converterContext}, "SHA256", "HexString"]
+    "ID" -> digest[{FileHash[file, "SHA256", "HexString"], $converterContext}]
 |>;
 (* a published function is used through its ResourceObject: a bare ResourceFunction[url] fails
    on parallel kernels *)
 converterSpec[url_String] := converterSpec[url] = With[{u = url, f = ResourceFunction[ResourceObject[url]]}, <|
     "Function" -> f, "Load" -> Hold[ResourceFunction[ResourceObject[u]]], "Distribute" -> None,
     (* the deployed definitions: a redeploy at the same URL is another converter *)
-    "ID" -> Hash[{u, ResourceFunction[f, "DefinitionData"]}, "SHA256", "HexString"]
+    "ID" -> digest[{u, ResourceFunction[f, "DefinitionData"]}]
 |>];
-converterSpec[f_] := <|"Function" -> f, "Load" -> Hold[f], "Distribute" -> Hold[f], "ID" -> Hash[f, "SHA256", "HexString"]|>;
+converterSpec[f_] := <|"Function" -> f, "Load" -> Hold[f], "Distribute" -> Hold[f], "ID" -> digest[f]|>;
 
 converter[spec_] := converterSpec[spec]["Function"];
 
@@ -100,20 +100,24 @@ relativePath[base_String, file_String] := With[{b = FileNameSplit[ExpandFileName
     If[ Length[f] > Length[b] && Take[f, Length[b]] === b, FileNameJoin[Drop[f, Length[b]]], file]
 ];
 
+(* A key that every kernel computes alike: the SHA-256 of an expression's WXF serialization, its
+   packed arrays unpacked, as one kernel may pack a list another does not. Hash of an expression
+   itself differs between kernels, and every key the builds and deploys keep is made by this. *)
+digest[expr_] := Hash[BinarySerialize[expr /. array_List?Developer`PackedArrayQ :> Developer`FromPackedArray[array]], "SHA256", "HexString"];
+
 (* a hash of the paclet's code (its PacletInfo, Kernel/ and Assets/): the documentation's examples
    are evaluated afresh when it changes, since the converter caches each example's result by its
    code alone; the PacletInfo carries the version an example may show *)
-codeHash[dir_String] := Hash[
+codeHash[dir_String] := digest[
     Map[
         {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &,
         Sort @ Join[
             Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
             Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &]
         ]
-    ],
-    "SHA256", "HexString"
+    ]
 ];
-codeHash[dirs_List] := Hash[codeHash /@ dirs, "SHA256", "HexString"];
+codeHash[dirs_List] := digest[codeHash /@ dirs];
 
 (* the paclet directories this kernel has loaded *)
 pacletDirectories[] := Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &];
@@ -376,7 +380,8 @@ convertPage[convert_, task_Association, limit_] := globalsClearedAfter[globalSta
             convert[task["File"], work, "UseCache" -> task["UseCache"], Sequence @@ task["Options"]]
         ],
         limit, $TimedOut
-    ]];
+    ]
+];
     result = run["Result"];
     If[ AssociationQ[evaluation], pageEvaluationDone[evaluation, kernel, ! MatchQ[result, _?FailureQ | $TimedOut | $Aborted]]];
     <|
@@ -478,12 +483,11 @@ tasksConverted[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest},
 (* the page cache's key: everything a page's notebook depends on. The guides' titles are in it
    because every page's Related Guides links show them. *)
 $pageCacheVersion = "2";
-pageKey[task_Association, converterID_, code_String, guides_List] := Hash[
+pageKey[task_Association, converterID_, code_String, guides_List] := digest[
     Join[
         {$pageCacheVersion, task["Page"], FileHash[task["File"], "SHA256"], task["Options"], converterID, code, guides},
         Replace[Lookup[task, "Evaluation", None], {spec_Association :> {spec["Key"]}, _ -> {}}]
-    ],
-    "SHA256", "HexString"
+    ]
 ];
 
 (* "EvaluateSeparator": the converter's, one value for every page or an association by template;
@@ -563,7 +567,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     evaluated = Replace[If[FileExistsQ[manifestFile], Get[manifestFile], <||>], Except[_Association] -> <||>];
     useCache = OptionValue["UseCache"] =!= False;
     (* the code the examples run against: the paclet's, its dependencies' and the converter's *)
-    code = Hash[{exampleCode[dir, OptionValue["Dependencies"]], spec["ID"]}, "SHA256", "HexString"];
+    code = digest[{exampleCode[dir, OptionValue["Dependencies"]], spec["ID"]}];
     separator[template_] := Replace[OptionValue["EvaluateSeparator"], {
         Automatic :> Lookup[$separatorByTemplate, template, Automatic],
         byTemplate_Association :> Lookup[byTemplate, template, Lookup[$separatorByTemplate, template, Automatic]]
@@ -824,13 +828,17 @@ flagCandidateQ[file_String] := With[{text = ReadString[file]}, StringQ[text] && 
 changedFiles[keys_Association, existing_Association, record_Association] :=
     Select[Keys[keys], ! KeyExistsQ[existing, #] || Lookup[record, #] =!= keys[#] &];
 
+(* a notebook file's expressions, parsed but not evaluated, without the Null that Wolfram 15 gives
+   for each comment or blank line before or between them and other kernels do not *)
+heldNotebook[file_String] := Replace[ToExpression[ReadString[file], InputForm, HoldComplete], held_HoldComplete :> DeleteCases[held, Null]];
+
 (* A file's content, for telling whether it changed. A notebook's is its expression, parsed but not
    evaluated, without what every build or deploy makes afresh: the random ids of its cells, and of
    the cells the build adds, the times its cells changed, and the time the page was built. *)
 contentKey[file_String] := If[ ToLowerCase[FileExtension[file]] === "nb",
-    With[{held = ToExpression[ReadString[file], InputForm, HoldComplete]},
+    With[{held = heldNotebook[file]},
         If[ MatchQ[held, _HoldComplete],
-            Hash[held /. $buildNoise, "SHA256", "HexString"],
+            digest[held /. $buildNoise],
             FileHash[file, "SHA256", "HexString"]
         ]
     ],
@@ -943,7 +951,7 @@ installPageRule[] := If[ DownValues[PacletResource`Private`createDocumentationEm
 
 makePage[as_Association, sidebar_String, url_String] := Module[{signature},
     If[ $pages["Context"] === None, $pages["Context"] = pageContext[as]];
-    signature = Hash[{$pages["Context"], sidebar, url, Lookup[$pages["Keys"], pageRelative[StringReplace[url, ".html" ~~ EndOfString -> ".nb"]], None]}, "SHA256", "HexString"];
+    signature = digest[{$pages["Context"], sidebar, url, Lookup[$pages["Keys"], pageRelative[StringReplace[url, ".html" ~~ EndOfString -> ".nb"]], None]}];
     $pages["Seen"] = Append[$pages["Seen"], url];
     Which[
         Lookup[$pages["Signatures"], url] === signature && pageExistsQ[url],
@@ -1035,7 +1043,7 @@ pageSetup[as_, sidebar_, url_String] := With[{
 (* what the page template makes of the resource, besides the sidebar and the notebook: the template
    and the values it shows, and the options the pages are deployed with *)
 pageContext[as_Association] := With[{template = PacletResource`Private`shingleTemplate["DocumentationPage"]},
-    Hash[{template, KeyTake[as, DeleteDuplicates[Cases[template, TemplateSlot[slot_String, ___] :> slot, Infinity]]], PacletResource`Private`$cloudObjectOpts}, "SHA256", "HexString"]
+    digest[{template, KeyTake[as, DeleteDuplicates[Cases[template, TemplateSlot[slot_String, ___] :> slot, Infinity]]], PacletResource`Private`$cloudObjectOpts}]
 ];
 
 pageExistsQ[url_String] := KeyExistsQ[$pages["Existing"], pageRelative[url]];
@@ -1167,8 +1175,8 @@ transformPages[dir_String, type_, opts_List] := Module[{files, options, valid, k
 transformFile[key_String] := FileNameJoin[{$transform["Cache"], key <> ".nb"}];
 
 (* everything a page's transform is made from *)
-transformKey[file_String, type_, options_List, valid_Association] := With[{held = ToExpression[ReadString[file], InputForm, HoldComplete]},
-    Hash[{
+transformKey[file_String, type_, options_List, valid_Association] := With[{held = heldNotebook[file]},
+    digest[{
         If[ MatchQ[held, _HoldComplete], held /. $buildNoise, FileHash[file, "SHA256", "HexString"]],
         pacletLinks[held, Lookup[options, "PacletName", None], valid],
         type,
@@ -1176,7 +1184,7 @@ transformKey[file_String, type_, options_List, valid_Association] := With[{held 
         $transform["Context"],
         (* the link rule a page with a sub-guide heading is transformed by *)
         If[FreeQ[held, "OrangeLink"], None, orangeLinkRule[]]
-    }, "SHA256", "HexString"]
+    }]
 ];
 
 (* a page's links into the paclet, each with whether a page is there for it, which is all the
@@ -1496,7 +1504,7 @@ $examplesSection = Shortest["<div" ~~ Whitespace ~~ "class=\"nb-collapse label e
 examplesTemplate[] := examplesTemplate[] = Module[{stock = PacletResource`Private`shingleTemplateFile["PacletShingle"], text, file},
     text = If[StringQ[stock] && FileExistsQ[stock], ByteArrayToString[ReadByteArray[stock], "UTF-8"], None];
     If[ ! StringQ[text] || Length[StringCases[text, $examplesSection]] =!= 1, Return[None, Module]];
-    file = FileNameJoin[{$TemporaryDirectory, "PacletPage-PacletShingle-" <> Hash[text, "SHA256", "HexString"] <> ".xml"}];
+    file = FileNameJoin[{$TemporaryDirectory, "PacletPage-PacletShingle-" <> digest[text] <> ".xml"}];
     Export[file, StringReplace[text, section : $examplesSection :> StringJoin[
         "<wolfram:if test=\"StringQ@#ExampleNotebookURL || StringQ@#CloudOpenExampleNotebook || StringQ@#ExampleNotebookDownload\">\n",
         section, "\n</wolfram:if>"]], "Text", CharacterEncoding -> "UTF-8"];
@@ -1706,14 +1714,13 @@ gitCommit[dir_String] := Module[{head, status},
 ];
 
 (* a hash of a paclet's sources: every file in its directory but what a build makes *)
-sourceHash[dir_String] := Hash[
+sourceHash[dir_String] := digest[
     Map[
         {relativePath[dir, #], FileHash[#, "SHA256"]} &,
         Sort @ Select[FileNames["*", dir, Infinity],
             FileType[#] === File && ! StringMatchQ[relativePath[dir, #], ("build" | "Documentation" | ".git") ~~ $PathnameSeparator ~~ ___] &&
                 ! StringEndsQ[#, ".paclet"] && FileNameTake[#] =!= "ResourceDefinition.nb" &]
-    ],
-    "SHA256", "HexString"
+    ]
 ];
 
 (* DocumentationBuild draws a PageDelimiter between a reference page's Details and its Examples,
@@ -2117,14 +2124,14 @@ builtArchive[head_Symbol, dir_String, name_String, docSource_, pageOptions_Assoc
 
 sourceHash[dir_String, docSource_, pageOptions_Association] := With[
     {excludedQ = Function[path, AnyTrue[Flatten[{Lookup[pageOptions, "Exclude", {}]}], StringMatchQ[path, #] &]]},
-    Hash[{
+    digest[{
         Map[{#, FileHash[FileNameJoin[{dir, #}], "SHA256", "HexString"]} &,
             Sort @ Select[relativePath[dir, #] & /@ Select[FileNames["*", dir, Infinity], FileType[#] === File &],
                 FileNameSplit[#][[1]] =!= "build" && ! AnyTrue[FileNameSplit[#], StringStartsQ[#, "."] &] && ! excludedQ[#] &]],
         If[ docSource === Automatic, None,
             Map[{relativePath[docSource, #], FileHash[#, "SHA256", "HexString"]} &, Sort @ Select[FileNames["*", docSource, Infinity], FileType[#] === File &]]],
         KeyTake[pageOptions, {"Exclude", "Symbols"}]
-    }, "SHA256", "HexString"]
+    }]
 ];
 
 (* the documentation pages an archive may lack: Automatic, three or a hundredth of them, whichever
@@ -2540,7 +2547,8 @@ SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
         check = DefinitionNotebookClient`CheckDefinitionNotebook[notebook];
         NotebookClose[notebook];
         Select[Normal[check], #Level === "Error" && #Tag =!= "NoPacletInfoFileCell" &]
-    ]];
+    ]
+];
     If[ issues =!= {}, Message[SubmitPacletResource::check, Lookup[issues, "Tag"]]; Throw[$Failed, "submit"]];
     built = freshArchive[SubmitPacletResource, dir, paclet["Name"], OptionValue["DocumentationSource"], loadCheckOf[OptionValue["LoadCheck"], OptionValue["EvaluationKernel"], dir],
         <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"]|>];
@@ -2637,7 +2645,8 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$d
         (* a site just published may have pages the cloud has not rendered yet: what fails is
            checked again for up to two minutes *)
         check = If[ TrueQ[OptionValue["Check"]], CheckPacletPage[catalog, name, Sequence @@ OptionValue["CheckOptions"], "Pages" -> All, "Wait" -> 120], None]
-    ]];
+    ]
+];
     <|
         "Build" -> build, "Resource" -> resource, "Site" -> site, "Check" -> check,
         "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], submissionOptions[resourceOptionsWith[OptionValue["ResourceOptions"], OptionValue["BuildOptions"]]]], None]
