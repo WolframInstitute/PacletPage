@@ -1266,6 +1266,24 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], page, same, other, tidied},
+        page[file_, rules_] := Export[FileNameJoin[{dir, file}], Notebook[{Cell["text", "Text"]}, TaggingRules -> rules], "NB"];
+        page["a.nb", {"Metadata" -> {"WorkflowDockedCell" -> "", "uri" -> "P/ref/A"}, "SearchTextTranslated" -> ""}];
+        page["b.nb", {"Metadata" -> {"uri" -> "P/ref/A"}}];
+        page["c.nb", {"Metadata" -> {"WorkflowDockedCell" -> "docked", "uri" -> "P/ref/A"}}];
+        same = contentKey[FileNameJoin[{dir, "a.nb"}]] === contentKey[FileNameJoin[{dir, "b.nb"}]];
+        other = contentKey[FileNameJoin[{dir, "c.nb"}]] =!= contentKey[FileNameJoin[{dir, "b.nb"}]];
+        tidied = {tidyBuiltPage[FileNameJoin[{dir, "a.nb"}]], tidyBuiltPage[FileNameJoin[{dir, "a.nb"}]], tidyBuiltPage[FileNameJoin[{dir, "c.nb"}]]};
+        With[{rules = Lookup[Options[Get[FileNameJoin[{dir, "a.nb"}]]], TaggingRules]},
+            DeleteDirectory[dir, DeleteContents -> True];
+            {same, other, tidied, rules}
+        ]
+    ],
+    {True, True, {True, False, False}, {"Metadata" -> {"uri" -> "P/ref/A"}}},
+    TestID -> "Archive: the empty entries the build's front end leaves on some builds are tidied away and change no key"
+]
+
+VerificationTest[
     statusUpdate /@ {<|"id" -> "E1", "status" -> "fixed", "note" -> "n"|>, <|"ID" -> "E2", "Status" -> "open"|>},
     {<|"id" -> "E1", "status" -> "fixed", "note" -> "n"|>, <|"id" -> "E2", "status" -> "open", "note" -> ""|>},
     TestID -> "Feedback: an update's keys in either case"

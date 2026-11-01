@@ -775,8 +775,17 @@ messageText[symbol_, tag_String] := With[{text = MessageName[symbol, tag]},
    complete (pruneDocumentation). *)
 $deployedDocumentation = None;
 
-(* what every build or deploy of a page makes afresh, which says nothing of its content *)
-$buildNoise = {((ExpressionUUID | CellID | CellChangeTimes) -> _) -> Sequence[], ("built" -> _) -> Sequence[]};
+(* the empty TaggingRules entries a page's trip through the documentation build's front end leaves
+   on some builds and not on others, of the same sources *)
+$frontEndNoise = ("WorkflowDockedCell" | "SearchTextTranslated") -> "";
+
+(* what every build or deploy of a page makes afresh, which says nothing of its content: its cells'
+   ids and change times, the time it was built, and the front end's empty entries *)
+$buildNoise = ((ExpressionUUID | CellID | CellChangeTimes) -> _) | ("built" -> _) | $frontEndNoise;
+
+(* an expression without its build noise, removed outright at every level, as a held notebook
+   would keep the Sequence[] a replacement leaves *)
+withoutNoise[expr_] := DeleteCases[expr, $buildNoise, Infinity];
 
 (* what a deploy writes and makes again whatever the record says: "Documentation", "Pages" *)
 $rewrite = {};
@@ -838,7 +847,7 @@ heldNotebook[file_String] := Replace[ToExpression[ReadString[file], InputForm, H
 contentKey[file_String] := If[ ToLowerCase[FileExtension[file]] === "nb",
     With[{held = heldNotebook[file]},
         If[ MatchQ[held, _HoldComplete],
-            digest[held /. $buildNoise],
+            digest[withoutNoise[held]],
             FileHash[file, "SHA256", "HexString"]
         ]
     ],
@@ -1177,7 +1186,7 @@ transformFile[key_String] := FileNameJoin[{$transform["Cache"], key <> ".nb"}];
 (* everything a page's transform is made from *)
 transformKey[file_String, type_, options_List, valid_Association] := With[{held = heldNotebook[file]},
     digest[{
-        If[ MatchQ[held, _HoldComplete], held /. $buildNoise, FileHash[file, "SHA256", "HexString"]],
+        If[ MatchQ[held, _HoldComplete], withoutNoise[held], FileHash[file, "SHA256", "HexString"]],
         pacletLinks[held, Lookup[options, "PacletName", None], valid],
         type,
         DeleteCases[options, ("PackageURIs" | "PacletInfo") -> _],
@@ -1735,11 +1744,12 @@ singleRuleBeforeExamples[Notebook[cells_List, opts___]] := Notebook[
 singleRuleBeforeExamples[other_] := other;
 
 (* the built pages under a built paclet directory tidied in place, where they need it: the number
-   tidied. A page tidied before has no delimiter left, and is only read. *)
+   tidied. A page tidied before has neither the delimiter nor the front end's empty entries left,
+   and is only read. *)
 tidyBuiltPages[builtRoot_String] := Count[tidyBuiltPage /@ FileNames["*.nb", FileNameJoin[{builtRoot, "Documentation"}], Infinity], True];
 
-tidyBuiltPage[file_String] := StringContainsQ[ReadString[file], "\"PageDelimiter\""] && With[{notebook = Get[file]},
-    With[{tidy = singleRuleBeforeExamples[notebook]}, tidy =!= notebook && StringQ[Export[file, tidy, "NB"]]]
+tidyBuiltPage[file_String] := StringContainsQ[ReadString[file], "\"PageDelimiter\"" | "\"WorkflowDockedCell\"" | "\"SearchTextTranslated\""] && With[{notebook = Get[file]},
+    With[{tidy = DeleteCases[singleRuleBeforeExamples[notebook], $frontEndNoise, Infinity]}, tidy =!= notebook && StringQ[Export[file, tidy, "NB"]]]
 ];
 
 (* PacletBuild in a fresh kernel: the build's own documentation step loads packages and issues
