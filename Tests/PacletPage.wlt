@@ -916,6 +916,66 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{made = {}, queued},
+        Block[{
+                $pages = Join[newPages[], <|"Root" -> CloudObject["https://c.example/obj/u/R"]|>],
+                $pageQueue = {},
+                parallelSameAccountQ = Function[False],
+                writeDeployRecord = Function[{r, kind, record}, Null],
+                PacletResource`Private`createDocumentationEmbedPage = Function[{as, side, url},
+                    AppendTo[made, FileBaseName[url]]; If[StringContainsQ[url, "Bad"], $Failed, CloudObject[url]]],
+                PacletResource`Private`shingleTemplate = Function[name, TemplateObject[{"<title>", TemplateSlot["Name"], "</title>"}]],
+                PacletResource`Private`$cloudObjectOpts = {}
+            },
+            Scan[makePage[<|"Name" -> "R"|>, "<nav/>", "https://c.example/obj/u/R/Documentation/ref/" <> # <> ".html"] &, {"A", "Bad", "C"}];
+            queued = made;
+            makeQueuedPages[];
+            {queued, made, Sort[FileBaseName /@ Keys[$pages["Signatures"]]], $pages["Made"], $pageQueue}
+        ]
+    ],
+    {{}, {"A", "Bad", "C"}, {"A", "C"}, 2, {}},
+    TestID -> "Publish: the pages the sidebar asks for are made once it is done, and a page not made keeps no signature"
+]
+
+VerificationTest[
+    Module[{kernels = LaunchKernels[1], here, page, run, urls},
+        (* a page's deploy: the stock delayed page of a template, deployed by a stub; the stock
+           package is loaded here, as it is in a deploy, whose sidebar asks for the pages *)
+        Needs["PacletResource`"];
+        page[name_String] := Function[{as, side, url},
+            PacletResource`Private`deployDelayedEmbedTemplate[url, TemplateObject[{"<p>", TemplateSlot["Name"], "</p>", side}], <|"Name" -> name|>, url <> "?static", {}]];
+        urls = "https://c.example/obj/u/R/Documentation/ref/" <> # <> ".html" & /@ {"A", "B", "C"};
+        run[there_] := (
+            With[{make = there}, ParallelEvaluate[
+                Needs["PacletResource`"];
+                PacletResource`Private`createDocumentationEmbedPage = make;
+                PacletResource`Private`deployDelayedEmbedTemplate = Function[{target, t, p, s, o}, CloudObject[target]];
+                Null,
+                kernels
+            ]];
+            here = {};
+            Block[{
+                    $pages = Join[newPages[], <|"Root" -> CloudObject["https://c.example/obj/u/R"]|>],
+                    parallelSameAccountQ = Function[True],
+                    writeDeployRecord = Function[{r, kind, record}, Null],
+                    PacletResource`Private`createDocumentationEmbedPage = Function[{as, side, url}, AppendTo[here, FileBaseName[url]]; page["R"][as, side, url]],
+                    PacletResource`Private`deployDelayedEmbedTemplate = Function[{target, t, p, s, o}, CloudObject[target]],
+                    PacletResource`Private`$cloudObjectOpts = {}
+                },
+                makePages[<|"Name" -> "R"|>, "<nav/>", Transpose[{urls, {"sa", "sb", "sc"}}]];
+                {here, FileBaseName /@ Keys[$pages["Signatures"]], $pages["Made"]}
+            ]
+        );
+        WithCleanup[
+            {run[page["R"]], run[page["Other"]]},
+            CloseKernels[kernels]
+        ]
+    ],
+    {{{"A"}, {"A", "B", "C"}, 3}, {{"A", "A", "B", "C"}, {"A", "B", "C"}, 3}},
+    TestID -> "Publish: the pages are made on the parallel kernels when each makes a page's deploy as this kernel does, else here"
+]
+
+VerificationTest[
     Module[{writes = {}},
         Block[{writeDeployRecord = Function[{r, kind, record}, AppendTo[writes, record]]},
             Block[{$pages = Join[newPages[], <|"Root" -> CloudObject["https://c.example/obj/u/R"], "Signatures" -> <|"a" -> 1, "gone" -> 2|>, "Recorded" -> <|"a" -> 1, "gone" -> 2|>, "Seen" -> {"a"}|>]},

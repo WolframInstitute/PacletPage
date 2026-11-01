@@ -914,17 +914,29 @@ pruneDocumentation[] := If[ ! AssociationQ[$deployedDocumentation], 0,
    changed: its template, the resource's values the template shows, the sidebar, which lists every
    page, the notebook's URL and the notebook itself, since the page keeps the notebook's render
    from the first time it is read. The resource's record keeps each page's signature, saved every
-   hundred pages and once the deploy is done. *)
+   hundred pages and once the deploy is done.
+   The stock sidebar asks for every page, one after another, each a cloud deploy of its own. The
+   pages it asks for are queued and made once it is done: over the parallel kernels, in blocks,
+   when every kernel acts as this kernel's account and makes a page's deploy exactly as this
+   kernel does, else here. A page not made on a parallel kernel is made again here. *)
 $pages = <||>;
+$pageQueue = None;
 
 newPages[] := <|"Root" -> None, "Existing" -> <||>, "Keys" -> <||>, "Signatures" -> <||>, "Recorded" -> <||>, "Made" -> 0, "Unchanged" -> 0, "Seen" -> {}, "Context" -> None|>;
 
 pageRule[] := HoldPattern[PacletResource`Private`createDocumentationEmbedPage[as_Association, sidebar_String, url_String] /; ! TrueQ[$makingPage]] :>
     makePage[as, sidebar, url];
 
+sidebarRule[] := HoldPattern[PacletResource`Private`createSidebarHTML[as_Association, nbs : {__CloudObject}] /; $pageQueue === None] :>
+    Block[{$pageQueue = {}},
+        With[{html = PacletResource`Private`createSidebarHTML[as, nbs]}, makeQueuedPages[]; html]
+    ];
+
 installPageRule[] := If[ DownValues[PacletResource`Private`createDocumentationEmbedPage] =!= {},
-    Unprotect[PacletResource`Private`createDocumentationEmbedPage];
+    Unprotect[PacletResource`Private`createDocumentationEmbedPage, PacletResource`Private`createSidebarHTML];
     DownValues[PacletResource`Private`createDocumentationEmbedPage] = Prepend[DownValues[PacletResource`Private`createDocumentationEmbedPage], pageRule[]];
+    If[ DownValues[PacletResource`Private`createSidebarHTML] =!= {},
+        DownValues[PacletResource`Private`createSidebarHTML] = Prepend[DownValues[PacletResource`Private`createSidebarHTML], sidebarRule[]]];
     True,
     False
 ];
@@ -933,17 +945,90 @@ makePage[as_Association, sidebar_String, url_String] := Module[{signature},
     If[ $pages["Context"] === None, $pages["Context"] = pageContext[as]];
     signature = Hash[{$pages["Context"], sidebar, url, Lookup[$pages["Keys"], pageRelative[StringReplace[url, ".html" ~~ EndOfString -> ".nb"]], None]}, "SHA256", "HexString"];
     $pages["Seen"] = Append[$pages["Seen"], url];
-    If[ Lookup[$pages["Signatures"], url] === signature && pageExistsQ[url],
-        $pages["Unchanged"]++;
-        CloudObject[url],
-        With[{made = Block[{$makingPage = True}, PacletResource`Private`createDocumentationEmbedPage[as, sidebar, url]]},
-            If[ MatchQ[made, _CloudObject],
-                $pages["Signatures", url] = signature;
-                $pages["Made"]++;
-                If[ Mod[$pages["Made"], 100] === 0 && MatchQ[$pages["Root"], _CloudObject], writeDeployRecord[$pages["Root"], "Pages", $pages["Signatures"]]]
-            ];
-            made
-        ]
+    Which[
+        Lookup[$pages["Signatures"], url] === signature && pageExistsQ[url],
+            $pages["Unchanged"]++;
+            CloudObject[url],
+        ListQ[$pageQueue],
+            AppendTo[$pageQueue, {as, sidebar, url, signature}];
+            CloudObject[url],
+        True,
+            pageMade[url, signature, pageHere[as, sidebar, url]]
+    ]
+];
+
+pageHere[as_, sidebar_, url_] := Block[{$makingPage = True}, PacletResource`Private`createDocumentationEmbedPage[as, sidebar, url]];
+
+(* a page made: its signature kept, and the record saved every hundred pages *)
+pageMade[url_String, signature_String, made_] := (
+    If[ MatchQ[made, _CloudObject],
+        $pages["Signatures", url] = signature;
+        $pages["Made"]++;
+        If[ Mod[$pages["Made"], 100] === 0 && MatchQ[$pages["Root"], _CloudObject], writeDeployRecord[$pages["Root"], "Pages", $pages["Signatures"]]]
+    ];
+    made
+);
+
+(* the queued pages, those of one sidebar together *)
+makeQueuedPages[] := With[{queue = $pageQueue},
+    $pageQueue = {};
+    Scan[makePages[#[[1, 1]], #[[1, 2]], #[[All, 3 ;; 4]]] &, Split[queue, #1[[1]] === #2[[1]] && #1[[2]] === #2[[2]] &]]
+];
+
+makePages[as_, sidebar_, pages_List] := If[ Length[pages] > 1 && Length[Kernels[]] > 0 && parallelSameAccountQ[] && pageSetup[as, sidebar, First[First[pages]]],
+    WithCleanup[
+        Scan[
+            Function[block,
+                MapThread[
+                    pageMade[First[#1], Last[#1], If[MatchQ[#2, _CloudObject], #2, pageHere[as, sidebar, First[#1]]]] &,
+                    {block, madeThere[block[[All, 1]]]}
+                ];
+                monitor["pages: " <> ToString[$pages["Made"]] <> " made, " <> ToString[$pages["Unchanged"]] <> " unchanged"]
+            ],
+            Partition[pages, UpTo[8 Length[Kernels[]]]]
+        ],
+        ParallelEvaluate[Clear[$pageSetup], DistributedContexts -> None]
+    ],
+    Scan[pageMade[First[#], Last[#], pageHere[as, sidebar, First[#]]] &, pages]
+];
+
+(* the pages of some URLs made on the parallel kernels, or $Failed for each when the kernels gave
+   no result for each *)
+madeThere[urls_List] := With[{made = With[{there = $pageThere}, ParallelMap[there, urls, DistributedContexts -> None, Method -> "FinestGrained"]]},
+    If[ListQ[made] && Length[made] === Length[urls], made, ConstantArray[$Failed, Length[urls]]]
+];
+
+(* A page made on a parallel kernel, from the resource, the sidebar and what the page's deploy
+   reads of this kernel's state; none of this package's definitions, as the kernel has none. *)
+$pageThere = Function[url,
+    Needs["PacletResource`"];
+    Block[{PacletResource`Private`$cloudObjectOpts = $pageSetup["Options"]},
+        PacletResource`Private`createDocumentationEmbedPage[$pageSetup["As"], $pageSetup["Sidebar"], url]
+    ]
+];
+
+(* what a page's deploy would deploy, the delayed page, made by the stock function without deploying *)
+$pageDeployed = Function[{make, url},
+    Block[{PacletResource`Private`deployDelayedEmbedTemplate = Function[{target, template, params, static, opts},
+            PacletResource`Private`delayedEmbedTemplate[template, params, static, opts]]},
+        make[url]
+    ]
+];
+
+(* Sets the parallel kernels up to make a sidebar's pages, and says whether each makes the delayed
+   page of one URL as this kernel does; when one does not, the pages are made here. *)
+pageSetup[as_, sidebar_, url_String] := With[{
+        setup = <|"As" -> as, "Sidebar" -> sidebar, "Options" -> Flatten[{PacletResource`Private`$cloudObjectOpts}]|>,
+        deployed = $pageDeployed, there = $pageThere},
+    ParallelEvaluate[$pageSetup = setup, DistributedContexts -> None];
+    With[{
+            here = Block[{$makingPage = True}, deployed[PacletResource`Private`createDocumentationEmbedPage[as, sidebar, #] &, url]],
+            others = ParallelEvaluate[Needs["PacletResource`"]; deployed[there, url], DistributedContexts -> None]},
+        MatchQ[here, _Delayed] && ListQ[others] && AllTrue[others, SameQ[#, here] &] || (
+            monitor["cloud", "the parallel kernels make the pages otherwise than this kernel: the pages are made here"];
+            ParallelEvaluate[Clear[$pageSetup], DistributedContexts -> None];
+            False
+        )
     ]
 ];
 
@@ -2259,7 +2344,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
     {resource, location, deployed} = Replace[
         If[ offline, {None, None, None}, UsingFrontEnd @ Internal`InheritedBlock[
             {PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols, DefinitionNotebookClient`Inspectors`PackagePrivate`codeInspectFileQ,
-             PacletResource`Private`createDocumentationEmbedPage, PacletResource`Notebooks`ProcessNotebookForEmbedding, PacletResource`Private`createSidebarLinkSection,
+             PacletResource`Private`createDocumentationEmbedPage, PacletResource`Private`createSidebarHTML, PacletResource`Notebooks`ProcessNotebookForEmbedding, PacletResource`Private`createSidebarLinkSection,
              CreatePacletArchive, $rewrite},
             $rewrite = rewriteKinds[OptionValue["Upload"]];
             installPageRule[];
