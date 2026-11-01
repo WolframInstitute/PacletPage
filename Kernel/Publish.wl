@@ -1187,40 +1187,58 @@ pacletLinks[held_HoldComplete, name_String, valid_Association] := Map[
 ];
 pacletLinks[_, _, _] := {};
 
-(* The transforms: over the parallel kernels, in blocks, each kernel with the symbols' rules for
-   the duration of a page; the pages that failed there, here *)
+(* The transforms: over the parallel kernels, in blocks, each kernel with the symbols' rules from
+   the first page to the last, so that the boxes the stock transform keeps for each symbol, the
+   same for every page, are made once a kernel rather than once a page; then the stock rules
+   again. The pages that failed there, here. *)
 transformFiles[{}, _, _] := <||>;
 transformFiles[files_List, type_, options_List] := Module[{results = <||>, again},
     If[ Length[files] >= 24 && $transform["Kernels"] =!= {},
         With[{setup = <|"Type" -> type, "Options" -> options, "SymbolRules" -> $transform["SymbolRules"], "PinRules" -> $transform["PinRules"], "LinkRules" -> {orangeLinkRule[]}|>},
-            ParallelEvaluate[$transformSetup = setup, DistributedContexts -> None]
+            ParallelEvaluate[
+                $transformSetup = setup;
+                Needs["PacletResource`"];
+                $transformStock = {
+                    DownValues[PacletResource`Private`fancyPacletSymbolBoxes],
+                    DownValues[PacletResource`Private`pacletDeclaredSymbols],
+                    PacletResource`Notebooks`Private`$embeddedLinkRules
+                };
+                Unprotect[PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols];
+                DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = Join[setup["SymbolRules"], DownValues[PacletResource`Private`fancyPacletSymbolBoxes]];
+                DownValues[PacletResource`Private`pacletDeclaredSymbols] = Join[setup["PinRules"], DownValues[PacletResource`Private`pacletDeclaredSymbols]];
+                With[{rules = PacletResource`Notebooks`Private`$embeddedLinkRules},
+                    If[Head[rules] === Dispatch, PacletResource`Notebooks`Private`$embeddedLinkRules = Dispatch[Join[Normal[rules], setup["LinkRules"]]]]];
+                Null,
+                DistributedContexts -> None
+            ]
         ];
-        Scan[
-            Function[block,
-                results = Join[results, AssociationThread[block -> ParallelMap[
-                    Function[file,
-                        Needs["PacletResource`"];
-                        Internal`InheritedBlock[{PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols,
-                                PacletResource`Notebooks`Private`$embeddedLinkRules},
-                            Unprotect[PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols];
-                            DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = Join[$transformSetup["SymbolRules"], DownValues[PacletResource`Private`fancyPacletSymbolBoxes]];
-                            DownValues[PacletResource`Private`pacletDeclaredSymbols] = Join[$transformSetup["PinRules"], DownValues[PacletResource`Private`pacletDeclaredSymbols]];
-                            With[{rules = PacletResource`Notebooks`Private`$embeddedLinkRules},
-                                If[Head[rules] === Dispatch, PacletResource`Notebooks`Private`$embeddedLinkRules = Dispatch[Join[Normal[rules], $transformSetup["LinkRules"]]]]];
+        WithCleanup[
+            Scan[
+                Function[block,
+                    results = Join[results, AssociationThread[block -> ParallelMap[
+                        Function[file,
                             Replace[
                                 TimeConstrained[PacletResource`Notebooks`ProcessNotebookForEmbedding[file, $transformSetup["Type"], Sequence @@ $transformSetup["Options"]], 300, $TimedOut],
                                 Except[_String] -> $Failed
                             ]
-                        ]
-                    ],
-                    block,
-                    DistributedContexts -> None
-                ]]];
-                monitor["pages: " <> ToString[Length[results]] <> " of " <> ToString[Length[files]] <> " transformed"]
+                        ],
+                        block,
+                        DistributedContexts -> None
+                    ]]];
+                    monitor["pages: " <> ToString[Length[results]] <> " of " <> ToString[Length[files]] <> " transformed"]
+                ],
+                Partition[files, UpTo[8 Length[$transform["Kernels"]]]]
             ],
-            Partition[files, UpTo[8 Length[$transform["Kernels"]]]]
-        ];
-        ParallelEvaluate[Clear[$transformSetup], DistributedContexts -> None]
+            ParallelEvaluate[
+                If[ ListQ[$transformStock],
+                    DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = $transformStock[[1]];
+                    DownValues[PacletResource`Private`pacletDeclaredSymbols] = $transformStock[[2]];
+                    PacletResource`Notebooks`Private`$embeddedLinkRules = $transformStock[[3]]
+                ];
+                Clear[$transformSetup, $transformStock],
+                DistributedContexts -> None
+            ]
+        ]
     ];
     again = Select[files, ! StringQ[Lookup[results, #]] &];
     If[ results =!= <||> && again =!= {}, monitor["pages: " <> ToString[Length[again]] <> " transformed again here"]];
