@@ -42,6 +42,11 @@ SetPacletPageFeedbackStatus[name, {update1, update2, ...}] records several statu
 SetPacletPagePermissions::usage = "SetPacletPagePermissions[dir, permissions] sets permissions on the cloud directory \
 dir and on every directory beneath it.";
 
+UnpublishPacletPage::usage = "UnpublishPacletPage[dir, name] gives everything PublishPacletPage deployed for the \
+paclet in dir, or the paclet named dir, under the site name in the connected account: the site's objects, the paclet \
+resource's directory and the paclet's archives, deepest first, and the feedback form's Databin. With \"Delete\" -> True \
+it deletes them, and the Databin too with \"DeleteDatabin\" -> True.";
+
 CheckPacletPage::usage = "CheckPacletPage[catalog, name] checks that the site name, the pages it frames and its \
 feedback form are reachable, and gives a report.";
 
@@ -86,7 +91,7 @@ $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web
 $pacletPageVersion := $pacletPageVersion = Replace[PacletObject[File[ParentDirectory[$packageDirectory]]], {p_PacletObject :> p["Version"], _ -> None}];
 $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage";
 
-Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl"}];
+Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl"}];
 
 End[]
 
