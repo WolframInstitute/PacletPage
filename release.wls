@@ -7,7 +7,8 @@
 
        wl -f release.wls             (or --dry-run: the build and the resource, not deployed)
 
-   The account is PACLETPAGE_ACCOUNT, by default the Wolfram Institute's. *)
+   The account is PACLETPAGE_ACCOUNT, by default the Wolfram Institute's. With PACLETPAGE_PARALLEL=0
+   the pages are built in this kernel alone. *)
 
 $ProgressReporting = False
 
@@ -20,6 +21,8 @@ result = PublishPacletPage[dir, "PacletPage",
     "Account" -> account,
     "DryRun" -> MemberQ[Rest[$ScriptCommandLine], "--dry-run"],
     "Monitor" -> True,
+    (* PACLETPAGE_PARALLEL=0 builds the pages in this kernel alone, on a machine others share *)
+    "BuildOptions" -> {"Parallel" -> Replace[Environment["PACLETPAGE_PARALLEL"], {"0" | "False" -> False, _ -> Automatic}]},
     "SiteOptions" -> {"FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}}, "VersionLabel" -> True, "Footer" -> True}
 ]
 If[ ! AssociationQ[result], Exit[1]]
