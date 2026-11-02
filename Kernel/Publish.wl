@@ -102,8 +102,10 @@ relativePath[base_String, file_String] := With[{b = FileNameSplit[ExpandFileName
 
 (* A key that every kernel computes alike: the SHA-256 of an expression's WXF serialization, its
    packed arrays unpacked, as one kernel may pack a list another does not. Hash of an expression
-   itself differs between kernels, and every key the builds and deploys keep is made by this. *)
-digest[expr_] := Hash[BinarySerialize[expr /. array_List?Developer`PackedArrayQ :> Developer`FromPackedArray[array]], "SHA256", "HexString"];
+   itself differs between kernels, and every key the builds and deploys keep is made by this. A
+   list is tested as it stands, unevaluated, so code held in it, such as a page's NotebookLocate
+   button, never runs. *)
+digest[expr_] := Hash[BinarySerialize[expr /. array_List /; Developer`PackedArrayQ[Unevaluated[array]] :> Developer`FromPackedArray[array]], "SHA256", "HexString"];
 
 (* a hash of the paclet's code (its PacletInfo, Kernel/ and Assets/): the documentation's examples
    are evaluated afresh when it changes, since the converter caches each example's result by its

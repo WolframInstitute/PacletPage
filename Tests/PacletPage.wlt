@@ -2444,5 +2444,14 @@ VerificationTest[
     TestID -> "Feedback: the copied code is Wolfram Language"
 ]
 
+VerificationTest[
+    Block[{ran = 0, held},
+        held[x_] := (ran++; x);
+        {digest[{Range[10], Cell[BoxData[ButtonBox["x", ButtonFunction :> FrontEndExecute[{held[1]}]]]]}] === digest[{Developer`FromPackedArray[Range[10]], Cell[BoxData[ButtonBox["x", ButtonFunction :> FrontEndExecute[{held[1]}]]]]}], ran}
+    ],
+    {True, 0},
+    TestID -> "digest: packed arrays key as unpacked ones, and code held in the expression never runs"
+]
+
 
 End[]
