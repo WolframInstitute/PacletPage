@@ -42,6 +42,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"AllFeedbackLink"` | `True` | whether the Feedback panel links to the team's list of all the feedback |
 | `"VersionLabel"` | `False` | the label under the site's name: a string, or `True` for the paclet's published version |
 | `"Footer"` | `False` | whether a footer names the PacletPage the site was made with, linked to its documentation |
+| `"RootGuide"` | `True` | whether the left rail lists the root guide above its tree; guides the tree does not reach are listed under "Other guides" |
 
 - With `"Home" -> Automatic`, the site opens on the resource, with its Feedback button and its source, when the catalog has its definition notebook, else on the root guide. `"DefinitionPage" -> False` leaves the definition notebook out of the site; the resource page itself stays its home on request, with `"Home" -> "Resource"`, which hides an empty Examples section and the author's Paclet Source link.
 - Without the symbols rail, the symbols stay pages of the site, reached from the guides and by the filter's Enter.

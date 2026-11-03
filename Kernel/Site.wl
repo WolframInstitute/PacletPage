@@ -103,10 +103,10 @@ railPage[page_Association] := If[ overviewQ[page] && ! StringContainsQ[page["Tit
     page
 ];
 
-(* the left rail: the resource's definition notebook, the root guide, its tree, the guides it
-   does not reach, then the tutorials and the applications (tutorials with the keyword
-   "application") *)
-sidebarHTML[catalog_Association, notebooks_Association] := Module[
+(* the left rail: the resource's definition notebook, the root guide, unless rootGuide is False,
+   and its tree, the guides it does not reach under a label of their own, then the tutorials and
+   the applications (tutorials with the keyword "application") *)
+sidebarHTML[catalog_Association, notebooks_Association, rootGuide_ : True] := Module[
     {pages = catalog["Pages"], root = catalog["RootGuide"], tree, reached, others, tutorials, list, definitions},
     definitions = Select[Keys[pages], StringStartsQ[#, "resource/"] &];
     tree = If[KeyExistsQ[pages, root], guideTree[pages, root, {}], Nothing];
@@ -122,12 +122,16 @@ sidebarHTML[catalog_Association, notebooks_Association] := Module[
         "<ul class=\"nav-root\">",
         Map["<li class=\"leaf\">" <> navLink[#, pages[#], "res", notebooks] <> "</li>" &, definitions],
         If[ AssociationQ[tree],
-            {"<li class=\"leaf\">", navLink[root, pages[root], "gd", notebooks], "</li>",
+            {If[TrueQ[rootGuide], {"<li class=\"leaf\">", navLink[root, pages[root], "gd", notebooks], "</li>"}, ""],
                 treeItem[pages, notebooks, #] & /@ tree["Children"]},
             ""
         ],
-        treeItem[pages, notebooks, guideTree[pages, #, reached]] & /@ others,
         "</ul>",
+        If[ others === {},
+            "",
+            {"<div class=\"nav-label\">Other guides</div><ul class=\"nav-root\">",
+                treeItem[pages, notebooks, guideTree[pages, #, reached]] & /@ others, "</ul>"}
+        ],
         If[tutorials === {}, "", "<div class=\"nav-sep\"></div>"],
         list[Select[tutorials, ! applicationQ[pages[#]] &], "Tutorials", "tut"],
         list[Select[tutorials, applicationQ[pages[#]] &], "Applications", "app"]
@@ -185,6 +189,8 @@ $stockChromeCSS = StringJoin[
     "header.stickyheader,#pg-header,#pac-nav-sidebar,#pac-nav-sidebar-frame,",
     ".page-sidebar,.page-sidebar-frame,.page-sidebar-toggle,#pageSidebar,#pageSidebarFrame,",
     ".menu-container,#_footer,#_footer-offset{display:none!important}",
+    (* the stock template's paclet guide below the details: the site's rail holds the guides *)
+    "div.documentation-notebook.paclet-guide{display:none!important}",
     (* the page stylesheet reserves a band for the wolfram.com header as a border on the root *)
     "html{border-top:0!important}",
     ".shingle-content,main.shingle-content{margin-left:0!important;max-width:none!important;width:auto!important}",
@@ -270,7 +276,8 @@ Options[PacletPageFiles] = {
     "ResourceLink" -> True,
     "AllFeedbackLink" -> True,
     "VersionLabel" -> False,
-    "Footer" -> False
+    "Footer" -> False,
+    "RootGuide" -> True
 };
 
 (* The label under the site's name: the version given, or with True the catalog's "Version", the
@@ -376,7 +383,7 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
             "resource" -> esc[catalog["Resource"]],
             "resourceLabel" -> Switch[kind, "cloud", "Resource page", "local", "Open page", _, "Paclet Repository"],
             "css" -> css,
-            "sidebar" -> sidebarHTML[catalog, notebooks],
+            "sidebar" -> sidebarHTML[catalog, notebooks, OptionValue["RootGuide"]],
             "symbols" -> symbolsHTML[catalog, notebooks],
             "config" -> toJSON[shellConfig],
             "js" -> readAsset["site.js"]

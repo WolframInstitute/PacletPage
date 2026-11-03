@@ -11,7 +11,8 @@
   :root { --pp-accent: `accent`; }
   html { -webkit-text-size-adjust: 100%; }
   body { margin: 0; background: #fff; }
-  #notebook-embed { padding: 0 24px 48px; }
+  /* the notebook starts clear of the header's rule and below the fixed page controls */
+  #notebook-embed { padding: 48px 24px 48px; }
   /* the resource page, the built view of the definition notebook: the whole window, under the
      page controls */
   #resource-frame { display: none; position: fixed; inset: 0; width: 100%; height: 100%; border: 0; z-index: 1; background: #fff; }
