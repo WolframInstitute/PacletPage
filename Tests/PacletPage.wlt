@@ -2445,6 +2445,24 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], hashes},
+        CreateDirectory[FileNameJoin[{dir, "Kernel"}]];
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"T\"|>]", "Text"];
+        Export[FileNameJoin[{dir, "Kernel", "Code.wl"}], "f[x_] := x", "Text"];
+        Export[FileNameJoin[{dir, "Kernel", "Usage.wl"}], "f::usage = \"one\";", "Text"];
+        hashes = {codeHash[dir, {"Kernel/Usage.wl"}], codeHash[dir]};
+        Export[FileNameJoin[{dir, "Kernel", "Usage.wl"}], "f::usage = \"two\";", "Text"];
+        AppendTo[hashes, codeHash[dir, {"Kernel/Usage.wl"}]]; AppendTo[hashes, codeHash[dir]];
+        Export[FileNameJoin[{dir, "Kernel", "Code.wl"}], "f[x_] := 2 x", "Text"];
+        AppendTo[hashes, codeHash[dir, {"Kernel/Usage.wl"}]];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {hashes[[1]] === hashes[[3]], hashes[[2]] === hashes[[4]], hashes[[3]] === hashes[[5]]}
+    ],
+    {True, False, False},
+    TestID -> "Build: a file the code hash leaves out changes no key, and any other file still does"
+]
+
+VerificationTest[
     Block[{ran = 0, held},
         held[x_] := (ran++; x);
         {digest[{Range[10], Cell[BoxData[ButtonBox["x", ButtonFunction :> FrontEndExecute[{held[1]}]]]]}] === digest[{Developer`FromPackedArray[Range[10]], Cell[BoxData[ButtonBox["x", ButtonFunction :> FrontEndExecute[{held[1]}]]]]}], ran}

@@ -109,17 +109,22 @@ digest[expr_] := Hash[BinarySerialize[expr /. array_List /; Developer`PackedArra
 
 (* a hash of the paclet's code (its PacletInfo, Kernel/ and Assets/): the documentation's examples
    are evaluated afresh when it changes, since the converter caches each example's result by its
-   code alone; the PacletInfo carries the version an example may show *)
-codeHash[dir_String] := digest[
+   code alone; the PacletInfo carries the version an example may show. The files excluded, paths
+   relative to the paclet's directory with * for any characters, are left out: a change to them
+   leaves the examples' results as they are. *)
+codeHash[dir_String, excluded_List : {}] := digest[
     Map[
         {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &,
-        Sort @ Join[
-            Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
-            Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &]
+        Select[
+            Sort @ Join[
+                Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
+                Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &]
+            ],
+            ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], excluded] &
         ]
     ]
 ];
-codeHash[dirs_List] := digest[codeHash /@ dirs];
+codeHash[dirs_List, excluded_List : {}] := digest[codeHash[#, excluded] & /@ dirs];
 
 (* the paclet directories this kernel has loaded *)
 pacletDirectories[] := Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &];
@@ -134,7 +139,7 @@ dependencyName[_] := Nothing;
 dependencyDirectory[location_String] /; DirectoryQ[location] := location;
 dependencyDirectory[name_String] := Replace[PacletFind[name], {{paclet_PacletObject, ___} :> paclet["Location"], _ -> Nothing}];
 
-exampleCode[dir_String, dependencies_] := codeHash @ DeleteDuplicates @ Prepend[
+exampleCode[dir_String, dependencies_, excluded_List : {}] := codeHash[#, excluded] & @ DeleteDuplicates @ Prepend[
     Map[dependencyDirectory, Replace[dependencies, {
         Automatic :> Map[dependencyName, Replace[PacletObject[File[dir]]["Dependencies"], Except[_List] -> {}]],
         Except[_List] -> {}
@@ -523,6 +528,7 @@ Options[BuildPacletDocumentation] = {
     "TimeConstraint" -> 1800,
     "CacheDirectory" -> Automatic,
     "Dependencies" -> Automatic,
+    "CacheExcludedFiles" -> {},
     "EvaluationKernel" -> None,
     "Monitor" -> False
 };
@@ -569,7 +575,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     evaluated = Replace[If[FileExistsQ[manifestFile], Get[manifestFile], <||>], Except[_Association] -> <||>];
     useCache = OptionValue["UseCache"] =!= False;
     (* the code the examples run against: the paclet's, its dependencies' and the converter's *)
-    code = digest[{exampleCode[dir, OptionValue["Dependencies"]], spec["ID"]}];
+    code = digest[{exampleCode[dir, OptionValue["Dependencies"], Flatten[{OptionValue["CacheExcludedFiles"]}]], spec["ID"]}];
     separator[template_] := Replace[OptionValue["EvaluateSeparator"], {
         Automatic :> Lookup[$separatorByTemplate, template, Automatic],
         byTemplate_Association :> Lookup[byTemplate, template, Lookup[$separatorByTemplate, template, Automatic]]
