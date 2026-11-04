@@ -2472,4 +2472,12 @@ VerificationTest[
 ]
 
 
+VerificationTest[
+    With[{o = DocumentationSearch`Skeletonizer`Private`skeletonizeFiles},
+        {withoutLanguageData[Lookup[Options[o], "UseWolframLanguageData"]], Lookup[Options[o], "UseWolframLanguageData"]}
+    ],
+    {False, True},
+    TestID -> "Publish: the search index asks WolframLanguageData nothing during a deploy, and the option is back after it"
+]
+
 End[]

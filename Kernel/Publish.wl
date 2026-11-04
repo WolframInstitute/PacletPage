@@ -126,6 +126,21 @@ codeHash[dir_String, excluded_List : {}] := digest[
 ];
 codeHash[dirs_List, excluded_List : {}] := digest[codeHash[#, excluded] & /@ dirs];
 
+(* PacletResource's search index data skeletonizes each page, and DocumentationSearch asks
+   WolframLanguageData about every page that is not one of System's symbols, a paclet's own among
+   them, which have no entries. While that service fails, the unevaluated query is what it caches,
+   and each page waits on it again. So the lookup is off around the deploy and the submission; the
+   index is the same. DocumentationSearch is loaded first, as a later load would set the option
+   back. *)
+SetAttributes[withoutLanguageData, HoldFirst];
+withoutLanguageData[expr_] := (
+    Needs["DocumentationSearch`"];
+    Internal`InheritedBlock[{DocumentationSearch`Skeletonizer`Private`skeletonizeFiles},
+        SetOptions[DocumentationSearch`Skeletonizer`Private`skeletonizeFiles, "UseWolframLanguageData" -> False];
+        expr
+    ]
+);
+
 (* the paclet directories this kernel has loaded *)
 pacletDirectories[] := Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &];
 
@@ -2436,7 +2451,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
                             If[built["Pages"] >= 24, OptionValue["Parallel"], False],
                             Function[kernels,
                                 $transform = newTransform[FileNameJoin[{dir, "build", "transform"}], transformContext[symbolRules, pinned], symbolRules, pinned, kernels];
-                                stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]
+                                withoutLanguageData[stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]]
                             ]
                         ]]},
                         If[ MatchQ[deploy, _CloudObject], pruneTransforms[]];
@@ -2588,7 +2603,7 @@ SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
             ! StringQ[packed] || ! StringContainsQ[FileNameTake[packed], version], Message[SubmitPacletResource::version, packed, version]; $Failed,
             realPath[packed] =!= realPath[built["Archive"]], Message[SubmitPacletResource::packed, packed, built["Archive"]]; $Failed,
             TrueQ[OptionValue["DryRun"]], <|"Submitted" -> False, "Archive" -> packed|>,
-            True, ResourceSubmit[ResourceObject[scraped], "Version" -> version, PublisherID -> publisher]
+            True, withoutLanguageData[ResourceSubmit[ResourceObject[scraped], "Version" -> version, PublisherID -> publisher]]
         ];
         NotebookClose[notebook];
         submitted
