@@ -2495,4 +2495,20 @@ VerificationTest[
     TestID -> "Build: with CacheVersion False a new version alone changes no key, and another PacletInfo change still does"
 ]
 
+VerificationTest[
+    Module[{d = CloudObject["https://www.wolframcloud.com/obj/u/Doc"], calls = 0, twice, once, works},
+        twice = Block[{$listingPause = 0, DirectoryQ = (True &), CloudObjects = Function[Null, calls++; $Failed]},
+            {cloudListing[d], calls, cloudFiles[d], cloudDirectories[d]}];
+        calls = 0;
+        once = Block[{$listingPause = 0, DirectoryQ = (True &), CloudObjects = Function[Null, calls++; If[calls === 1, $Failed, {}]]},
+            {cloudListing[d], calls}];
+        works = Block[{$listingPause = 0, DirectoryQ = (True &),
+                CloudObjects = Function[Null, If[Length[{##}] > 1, {}, {CloudObject[First[#1] <> "/a.nb"]}]]},
+            cloudFiles[d]];
+        {twice, once, works}
+    ],
+    {{$Failed, 2, $Failed, $Failed}, {{}, 2}, <|"a.nb" -> True|>},
+    TestID -> "Cloud: a listing that fails is tried once more, and one that fails twice is $Failed, never an empty directory"
+]
+
 End[]

@@ -830,6 +830,9 @@ replaceDocumentation[dir_String, root_CloudObject, permissions_] := Module[
     {target = FileNameJoin[{root, "Documentation"}], relatives, existing, record, keys, changed, written, failure},
     relatives = relativePath[dir, #] & /@ Select[FileNames["*", dir, Infinity], FileType[#] === File &];
     existing = cloudFiles[target];
+    (* the files to write are never found from a listing that failed *)
+    If[ existing === $Failed,
+        Throw[cloudWriteFailureObject["the listing of the deployed documentation, " <> First[target] <> ", failed", "CloudObjects"], "cloudwrite"]];
     record = If[rewriteQ["Documentation"], <||>, readDeployRecord[root, "Documentation"]];
     keys = AssociationMap[contentKey[FileNameJoin[{dir, #}]] &, relatives];
     changed = changedFiles[keys, existing, record];
@@ -933,8 +936,15 @@ documentationDirectories[relatives_List] := DeleteDuplicates @ Catenate @ Map[
 (* the files beneath a cloud directory, by their paths within it, none when it is not there: two
    listings for each directory *)
 cloudFiles[dir_CloudObject] := If[ ! TrueQ[DirectoryQ[dir]], <||>,
-    AssociationMap[True &,
-        cloudRelativePath[dir, #] & /@ Catenate[Complement[CloudObjects[#], CloudObjects[#, "Directory"]] & /@ cloudDirectories[dir]]]
+    With[{directories = cloudDirectories[dir]},
+        If[ directories === $Failed, $Failed,
+            With[{files = cloudListing[#] & /@ directories, subdirectories = cloudListing[#, "Directory"] & /@ directories},
+                If[ MemberQ[Join[files, subdirectories], $Failed], $Failed,
+                    AssociationMap[True &, cloudRelativePath[dir, #] & /@ Catenate[MapThread[Complement, {files, subdirectories}]]]
+                ]
+            ]
+        ]
+    ]
 ];
 
 (* the path of a cloud object within a cloud directory *)

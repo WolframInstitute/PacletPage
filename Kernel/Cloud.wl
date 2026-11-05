@@ -250,7 +250,23 @@ sharedFeedbackEmail[siteMail_, feedbackOptions_List] := With[
 (* ==================== permissions ==================== *)
 
 (* the directory tree beneath dir, dir first: one listing per directory, of its directories only *)
-cloudDirectories[dir_CloudObject] := Prepend[Catenate[cloudDirectories /@ CloudObjects[dir, "Directory"]], dir];
+cloudDirectories[dir_CloudObject] := With[{listed = cloudListing[dir, "Directory"]},
+    If[ listed === $Failed, $Failed,
+        With[{beneath = cloudDirectories /@ listed}, If[MemberQ[beneath, $Failed], $Failed, Prepend[Catenate[beneath], dir]]]
+    ]
+];
+
+(* A listing of a cloud directory, the kinds of object given, checked: a list of cloud objects, or
+   $Failed. A listing that fails, as one does when the session's authentication lapses, is tried
+   once more after ten seconds; work never goes on from a listing that failed. *)
+$listingPause = 10;
+cloudListing[dir_CloudObject, kinds___] := With[
+    {listed = Block[{$cloudWriteRetry = True}, Quiet[CloudObjects[dir, kinds], {CloudObjects::notauth, CloudObjects::srverr, CloudObjects::unavailable}]]},
+    If[ MatchQ[listed, {___CloudObject}], listed,
+        Pause[$listingPause];
+        Replace[CloudObjects[dir, kinds], Except[{___CloudObject}] -> $Failed]
+    ]
+];
 
 Options[SetPacletPagePermissions] = {"Objects" -> "Directories"};
 
@@ -260,8 +276,12 @@ SetPacletPagePermissions[dir_String, permissions_, opts : OptionsPattern[]] :=
 SetPacletPagePermissions[dir_CloudObject, permissions_, opts : OptionsPattern[]] := Module[{directories, objects, results},
     If[ ! TrueQ[DirectoryQ[dir]], Message[SetPacletPagePermissions::dir, First[dir]]; Return[$Failed, Module]];
     directories = cloudDirectories[dir];
+    If[ directories === $Failed, Message[SetPacletPagePermissions::listing, First[dir]]; Return[$Failed, Module]];
     objects = If[ OptionValue["Objects"] === All,
-        Join[directories, Catenate[Complement[CloudObjects[#], CloudObjects[#, "Directory"]] & /@ directories]],
+        With[{files = cloudListing[#] & /@ directories},
+            If[ MemberQ[files, $Failed], Message[SetPacletPagePermissions::listing, First[dir]]; Return[$Failed, Module]];
+            Join[directories, Catenate[MapThread[Complement, {files, cloudListing[#, "Directory"] & /@ directories}]]]
+        ],
         directories
     ];
     results = mapBlocks[First[#] -> MatchQ[SetPermissions[#, permissions], _CloudObject | {___}] &, objects];

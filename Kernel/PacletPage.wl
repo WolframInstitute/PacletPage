@@ -79,6 +79,7 @@ DeployPacletPageFeedback::deploy = "Publishing the feedback page `1` failed: `2`
 SetPacletPageFeedbackStatus::status = "`1` is not a feedback status; use one of `2`.";
 SetPacletPageFeedbackStatus::update = "`1` is not a status update: give id -> status, {id, status}, {id, status, note}, or an entry with \"ID\", \"Status\" and \"Note\".";
 SetPacletPagePermissions::dir = "`1` is not a cloud directory.";
+SetPacletPagePermissions::listing = "Listing the cloud directory `1` failed twice; no permissions were set.";
 
 Begin["`Private`"]
 
