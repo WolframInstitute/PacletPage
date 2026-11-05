@@ -52,6 +52,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"CacheDirectory"` | `Automatic` | where the cache is, by default `build/cache` |
 | `"Dependencies"` | `Automatic` | the paclets whose code the examples run besides the paclet's own, as directories, which are loaded, or names; by default the ones its `PacletInfo.wl` declares |
 | `"CacheExcludedFiles"` | `{}` | files of the paclet and its dependencies, as paths relative to each paclet's directory with `*` for any characters, whose changes leave the cached results of the examples as they are, such as `"Kernel/Usage.wl"` of usage messages |
+| `"CacheVersion"` | `True` | whether the version in a `PacletInfo.wl` is part of the key of the cached results; with `False` a new version alone keeps them, for pages whose examples do not show it |
 | `"EvaluationKernel"` | `None` | the kernel the examples are evaluated on: a command, an association, or an association of templates to them; `None` evaluates them here |
 | `"Monitor"` | `False` | whether to print how many pages there are, cached and to convert, then each page as it is converted |
 

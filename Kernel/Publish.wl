@@ -111,10 +111,11 @@ digest[expr_] := Hash[BinarySerialize[expr /. array_List /; Developer`PackedArra
    are evaluated afresh when it changes, since the converter caches each example's result by its
    code alone; the PacletInfo carries the version an example may show. The files excluded, paths
    relative to the paclet's directory with * for any characters, are left out: a change to them
-   leaves the examples' results as they are. *)
-codeHash[dir_String, excluded_List : {}] := digest[
+   leaves the examples' results as they are. With versioned False a PacletInfo is hashed without
+   its "Version" rule, so that a new version alone leaves them too. *)
+codeHash[dir_String, excluded_List : {}, versioned_ : True] := digest[
     Map[
-        {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &,
+        {StringDrop[#, StringLength[dir]], fileKey[#, versioned]} &,
         Select[
             Sort @ Join[
                 Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
@@ -124,7 +125,13 @@ codeHash[dir_String, excluded_List : {}] := digest[
         ]
     ]
 ];
-codeHash[dirs_List, excluded_List : {}] := digest[codeHash[#, excluded] & /@ dirs];
+codeHash[dirs_List, excluded_List : {}, versioned_ : True] := digest[codeHash[#, excluded, versioned] & /@ dirs];
+
+(* a file's part of the code hash: its content's hash, a PacletInfo's without its version where versioned is False *)
+fileKey[file_String, versioned_] := If[ TrueQ[versioned] || ! StringStartsQ[FileNameTake[file], "PacletInfo."],
+    FileHash[file, "SHA256"],
+    Hash[StringDelete[ByteArrayToString[ReadByteArray[file], "UTF-8"], RegularExpression["\"Version\"\\s*->\\s*\"[^\"]*\"\\s*,?"]], "SHA256"]
+];
 
 (* PacletResource's search index data skeletonizes each page, and DocumentationSearch asks
    WolframLanguageData about every page that is not one of System's symbols, a paclet's own among
@@ -154,7 +161,7 @@ dependencyName[_] := Nothing;
 dependencyDirectory[location_String] /; DirectoryQ[location] := location;
 dependencyDirectory[name_String] := Replace[PacletFind[name], {{paclet_PacletObject, ___} :> paclet["Location"], _ -> Nothing}];
 
-exampleCode[dir_String, dependencies_, excluded_List : {}] := codeHash[#, excluded] & @ DeleteDuplicates @ Prepend[
+exampleCode[dir_String, dependencies_, excluded_List : {}, versioned_ : True] := codeHash[#, excluded, versioned] & @ DeleteDuplicates @ Prepend[
     Map[dependencyDirectory, Replace[dependencies, {
         Automatic :> Map[dependencyName, Replace[PacletObject[File[dir]]["Dependencies"], Except[_List] -> {}]],
         Except[_List] -> {}
@@ -544,6 +551,7 @@ Options[BuildPacletDocumentation] = {
     "CacheDirectory" -> Automatic,
     "Dependencies" -> Automatic,
     "CacheExcludedFiles" -> {},
+    "CacheVersion" -> True,
     "EvaluationKernel" -> None,
     "Monitor" -> False
 };
@@ -590,7 +598,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     evaluated = Replace[If[FileExistsQ[manifestFile], Get[manifestFile], <||>], Except[_Association] -> <||>];
     useCache = OptionValue["UseCache"] =!= False;
     (* the code the examples run against: the paclet's, its dependencies' and the converter's *)
-    code = digest[{exampleCode[dir, OptionValue["Dependencies"], Flatten[{OptionValue["CacheExcludedFiles"]}]], spec["ID"]}];
+    code = digest[{exampleCode[dir, OptionValue["Dependencies"], Flatten[{OptionValue["CacheExcludedFiles"]}], OptionValue["CacheVersion"]], spec["ID"]}];
     separator[template_] := Replace[OptionValue["EvaluateSeparator"], {
         Automatic :> Lookup[$separatorByTemplate, template, Automatic],
         byTemplate_Association :> Lookup[byTemplate, template, Lookup[$separatorByTemplate, template, Automatic]]

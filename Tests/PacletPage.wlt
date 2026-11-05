@@ -2480,4 +2480,19 @@ VerificationTest[
     TestID -> "Publish: the search index asks WolframLanguageData nothing during a deploy, and the option is back after it"
 ]
 
+VerificationTest[
+    Module[{dir = CreateDirectory[], info, h},
+        CreateDirectory[FileNameJoin[{dir, "Kernel"}]];
+        info[v_, deps_] := Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\n    \"Name\" -> \"T\",\n    \"Version\" -> \"" <> v <> "\",\n    \"Dependencies\" -> " <> deps <> "\n|>]", "Text"];
+        Export[FileNameJoin[{dir, "Kernel", "Code.wl"}], "f[x_] := x", "Text"];
+        info["1.0.0", "{}"]; h = {codeHash[dir, {}, False], codeHash[dir]};
+        info["1.0.1", "{}"]; h = Join[h, {codeHash[dir, {}, False], codeHash[dir]}];
+        info["1.0.1", "{\"A\"}"]; AppendTo[h, codeHash[dir, {}, False]];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {h[[1]] === h[[3]], h[[2]] === h[[4]], h[[3]] === h[[5]]}
+    ],
+    {True, False, False},
+    TestID -> "Build: with CacheVersion False a new version alone changes no key, and another PacletInfo change still does"
+]
+
 End[]
