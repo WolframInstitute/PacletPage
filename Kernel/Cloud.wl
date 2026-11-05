@@ -149,13 +149,16 @@ publishSource[dir_String, sourceURL_String, manifestURL_String, permissions_, sh
         ]],
         Partition[changed, UpTo[50]]
     ];
+    If[retired =!= {}, monitor["site", "source notebooks: removing " <> ToString[Length[retired]] <> " whose pages are gone"]];
+    (* a delete first, and the cloud asked whether the object is there only when it fails *)
     removed = Select[retired,
         Function[path,
             With[{url = sourceURL <> "/" <> path},
-                strictlyBeneathQ[sourceURL, url] && (! TrueQ[FileExistsQ[CloudObject[url]]] || MatchQ[DeleteObject[CloudObject[url]], Null])
+                strictlyBeneathQ[sourceURL, url] && (MatchQ[Quiet[DeleteObject[CloudObject[url]], CloudObject::cloudnf], Null] || ! TrueQ[FileExistsQ[CloudObject[url]]])
             ]
         ]
     ];
+    If[retired =!= {}, monitor["site", "source notebooks: " <> ToString[Length[removed]] <> " removed"]];
     CloudPut[
         Join[KeyDrop[manifest, Join[failed, removed]], KeyDrop[hashes, failed]],
         CloudObject[manifestURL],

@@ -953,7 +953,9 @@ writeDeployRecord[root_CloudObject, kind_String, record_Association] := CloudPut
 
 pruneDocumentation[] := If[ ! AssociationQ[$deployedDocumentation], 0,
     With[{target = $deployedDocumentation["Target"], stale = staleDocumentation[$deployedDocumentation["Existing"], $deployedDocumentation["Files"]]},
+        If[stale =!= {}, monitor["documentation: removing " <> ToString[Length[stale]] <> " files the documentation no longer has"]];
         Scan[DeleteObject[FileNameJoin[Prepend[FileNameSplit[#], target]]] &, stale];
+        If[stale =!= {}, monitor["documentation: " <> ToString[Length[stale]] <> " files removed"]];
         Length[stale]
     ]
 ];
