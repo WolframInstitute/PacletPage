@@ -1824,7 +1824,7 @@ VerificationTest[
 ]
 
 VerificationTest[
-    linkCaptured[{
+    linkCaptured[None, {
         Hold[TextPacket["hi\n"]], Hold[MessagePacket[Power, "infy"]], Hold[TextPacket["Power::infy: Infinite expression 1/0 encountered.\n"]],
         Hold[ExpressionPacket[BoxData[RowBox[{"a", "+", "b"}], StandardForm]]], Hold[OutputNamePacket["Out[1]= "]],
         Hold[ReturnExpressionPacket[BoxData[RowBox[{"1", "+", "x"}], StandardForm]]], Hold[ReturnTextPacket["2"]], Hold[InputNamePacket["In[2]:= "]]
@@ -1832,6 +1832,18 @@ VerificationTest[
     <|"outs" -> {RowBox[{"1", "+", "x"}], "\"2\""}, "msgs" -> {"Power::infy: Infinite expression 1/0 encountered."},
       "prints" -> {Cell["hi", "Print"], Cell[BoxData[RowBox[{"a", "+", "b"}]], "Print"]}, "cells" -> {}|>,
     TestID -> "Evaluation kernel: what comes back is taken as the converter takes an evaluation"
+]
+
+VerificationTest[
+    Module[{link = LinkLaunch[launchLine[{kernelExecutable[], "-wstp", "-noinit"}]], captured},
+        linkPackets[link, _InputNamePacket];
+        linkEvaluated[link, Hold[Unprotect[Out]; Out[5] = Range[3]; Null]];
+        captured = linkCaptured[link, {Hold[OutputNamePacket["Out[5]= "]], Hold[ReturnExpressionPacket[{1, 2, 3}]], Hold[InputNamePacket["In[6]:= "]]}];
+        LinkClose[link];
+        captured["outs"]
+    ],
+    {RowBox[{"{", RowBox[{"1", ",", "2", ",", "3"}], "}"}]},
+    TestID -> "Evaluation kernel: a value that comes back itself, as a kernel answers a client that is not a front end, is that kernel's boxes of its Out[n]"
 ]
 
 VerificationTest[

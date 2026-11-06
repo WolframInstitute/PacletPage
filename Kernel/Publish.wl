@@ -251,14 +251,16 @@ linkEvaluated[link_LinkObject, Hold[e___]] := (
 (* A cell's code entered on the kernel as a front end enters it, a statement at a time, each a
    string of boxes, and what came back as the converter takes an evaluation: each output's boxes,
    or from a kernel that gives text the box of its text, which an Output cell shows as it is; each
-   message's text, the text after its MessagePacket; and each print's cell *)
+   message's text, the text after its MessagePacket; and each print's cell. A kernel that answers a
+   client that is not a front end with the value itself, ReturnExpressionPacket[value], as
+   Wolfram 15 does, is asked for the boxes of that Out[n], so that they are its own formatting *)
 linkEntered[link_LinkObject, code_String] := Merge[
     Prepend[Map[linkStatementEntered[link, #] &, cellStatements[code]], <|"outs" -> {}, "msgs" -> {}, "prints" -> {}, "cells" -> {}|>],
     Apply[Join]
 ];
 linkStatementEntered[link_LinkObject, statement_String] := (
     linkWritten[link, EnterExpressionPacket[MakeExpression[BoxData[statement], StandardForm]]];
-    linkCaptured[linkPackets[link, _InputNamePacket]]
+    linkCaptured[link, linkPackets[link, _InputNamePacket]]
 );
 
 (* The statements of a cell's code as a front end divides it, at its line breaks: each run of
@@ -282,14 +284,17 @@ cellStatements[code_String] := Module[{tree, runs},
 triviaNodeQ[node_] := MatchQ[node, CodeParser`LeafNode[Token`Newline | Token`Comment | Token`LineContinuation | Whitespace, _, _]];
 newlineNodeQ[node_] := MatchQ[node, CodeParser`LeafNode[Token`Newline, _, _]];
 
-linkCaptured[packets_List] := Module[{afterMessage = False, outs = {}, msgs = {}, prints = {}},
+linkCaptured[link_, packets_List] := Module[{afterMessage = False, outs = {}, msgs = {}, prints = {}, line = None},
     Scan[
         Function[packet, Switch[packet,
             Hold[_MessagePacket], afterMessage = True,
             Hold[TextPacket[_String]], If[afterMessage, AppendTo[msgs, StringTrim[packet[[1, 1]]]], AppendTo[prints, Cell[StringTrim[packet[[1, 1]], "\n"], "Print"]]];
                 afterMessage = False,
             Hold[ExpressionPacket[BoxData[_, ___]]], AppendTo[prints, Cell[BoxData[packet[[1, 1, 1]]], "Print"]]; afterMessage = False,
+            Hold[OutputNamePacket[_String]], line = Replace[StringCases[packet[[1, 1]], "Out[" ~~ n : DigitCharacter .. ~~ "]" :> FromDigits[n]], {{n_} :> n, _ -> None}],
             Hold[ReturnExpressionPacket[BoxData[_, ___]]], AppendTo[outs, packet[[1, 1, 1]]]; afterMessage = False,
+            Hold[ReturnExpressionPacket[_]], If[ IntegerQ[line], AppendTo[outs, linkEvaluated[link, With[{n = line}, Hold[ToBoxes[Out[n], StandardForm]]]]]];
+                afterMessage = False,
             Hold[ReturnTextPacket[_String]], AppendTo[outs, ToBoxes[packet[[1, 1]]]]; afterMessage = False,
             _, afterMessage = False
         ]],
