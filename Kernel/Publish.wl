@@ -161,12 +161,198 @@ dependencyName[_] := Nothing;
 dependencyDirectory[location_String] /; DirectoryQ[location] := location;
 dependencyDirectory[name_String] := Replace[PacletFind[name], {{paclet_PacletObject, ___} :> paclet["Location"], _ -> Nothing}];
 
-exampleCode[dir_String, dependencies_, excluded_List : {}, versioned_ : True] := codeHash[#, excluded, versioned] & @ DeleteDuplicates @ Prepend[
+exampleCode[dir_String, dependencies_, excluded_List : {}, versioned_ : True] := codeHash[exampleDirectories[dir, dependencies], excluded, versioned];
+exampleDirectories[dir_String, dependencies_] := DeleteDuplicates @ Prepend[
     Map[dependencyDirectory, Replace[dependencies, {
         Automatic :> Map[dependencyName, Replace[PacletObject[File[dir]]["Dependencies"], Except[_List] -> {}]],
         Except[_List] -> {}
     }]],
     dir
+];
+
+(* The code a page's examples run, by what the page uses ("CacheKey" -> "Definitions"): the
+   dependency cones of the paclet's symbols its markdown names, and what no definition shows.
+   DefinitionScan.wls loads the paclet in a fresh kernel and gives, for each symbol of the contexts
+   its directories and its loading make, its dependencies' among them, the hash of its whole
+   definition, Language`ExtendedDefinition, and the symbols its definition names, as code or in a
+   string. A page's cone is every symbol the names in its markdown reach through them. Its code is
+   the hashes of that cone and a part every page shares: the PacletInfo, the files under Kernel/
+   and Assets/ the loading did not read, such as data a function reads when it runs or code it
+   loads on first use, the definitions of System` and Global` symbols the loading made, the
+   dependencies' code and the converter. So a change to one function converts again only the
+   pages whose markdown reaches it. *)
+$definitionScan := FileNameJoin[{$packageDirectory, "DefinitionScan.wls"}];
+
+BuildPacletDocumentation::scan = "The paclet's definitions were not scanned (`1`), so every page's key has all of its code.";
+
+(* the scan, kept in the cache under the paclet's and its dependencies' whole code, the Wolfram
+   version and the scan's own code, and done again when one of them changes *)
+definitionScan[dirs_List, context_String, key_String, cache_String, work_String] := Module[
+    {saved = FileNameJoin[{cache, "definitions.wxf"}], in = FileNameJoin[{work, "definitions-in.wxf"}], out = FileNameJoin[{work, "definitions.wxf"}], old, data},
+    old = If[FileExistsQ[saved], Import[saved, "WXF"], None];
+    If[ AssociationQ[old] && Lookup[old, "Key", None] === key, Return[old["Scan"], Module]];
+    Export[in, <|"Directories" -> dirs, "Context" -> context|>, "WXF"];
+    runKernelScripts[{<|"Script" -> $definitionScan, "Arguments" -> {in, out}, "Deadline" -> 3600, "Label" -> "definitions"|>}, 1, "definitions"];
+    data = If[FileExistsQ[out], Import[out, "WXF"], <|"Failure" -> "the scan wrote nothing"|>];
+    If[ AssociationQ[data] && KeyExistsQ[data, "Symbols"],
+        Export[saved, <|"Key" -> key, "Scan" -> data|>, "WXF"]; data,
+        Failure["DefinitionScan", <|"MessageTemplate" -> "`1`", "MessageParameters" -> {Lookup[Replace[data, Except[_Association] -> <||>], "Failure", "no result"]}|>]
+    ]
+];
+
+(* the part of the code every page's key shares *)
+sharedCode[dir_String, scan_Association, dependencies_, excluded_List, versioned_, converterID_] := With[
+    {read = AssociationThread[ExpandFileName /@ scan["Read"] -> True]},
+    digest[{
+        fileKey[#, versioned] & /@ Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
+        Map[
+            {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &,
+            Select[
+                Sort @ Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &],
+                ! KeyExistsQ[read, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], excluded] &
+            ]
+        ],
+        scan["Foreign"],
+        codeHash[#, excluded, versioned] & /@ Rest[exampleDirectories[dir, dependencies]],
+        converterID
+    }]
+];
+
+(* the names a text holds *)
+$identifier = (LetterCharacter | "$") ~~ ((WordCharacter | "$") ...) ~~ (("`" ~~ (LetterCharacter | "$") ~~ ((WordCharacter | "$") ...)) ...);
+textNames[text_String] := DeleteDuplicates[StringCases[text, $identifier]];
+
+(* what the codes of pages and examples are made of: the scan's symbols and edges, and the shared
+   part *)
+definitionKeys[scan_Association, shared_String] := <|
+    "Symbols" -> scan["Symbols"], "Shared" -> shared,
+    "Graph" -> Graph[Keys[scan["Symbols"]], Catenate[KeyValueMap[Function[{from, to}, DirectedEdge[from, #] & /@ to], scan["Edges"]]]],
+    "ByOwnName" -> GroupBy[Keys[scan["Symbols"]], Last[StringSplit[#, "`"]] &],
+    "System" -> AssociationThread[StringReplace[Names["System`*"], StartOfString ~~ "System`" -> ""] -> True]
+|>;
+
+(* the code names reach: the shared part and the hashes of the cone of the paclet's symbols they
+   name, a name in full or by its own name, unless that is a System` symbol's *)
+namesCode[keys_Association, names_List] := With[
+    {start = DeleteDuplicates @ Catenate @ Map[
+        Which[
+            KeyExistsQ[keys["Symbols"], #], {#},
+            KeyExistsQ[keys["System"], Last[StringSplit[#, "`"]]], {},
+            True, Lookup[keys["ByOwnName"], Last[StringSplit[#, "`"]], {}]
+        ] &,
+        names
+    ]},
+    With[{cone = If[start === {}, {}, Sort[VertexOutComponent[keys["Graph"], start]]]},
+        digest[{keys["Shared"], Transpose[{cone, Lookup[keys["Symbols"], cone]}]}]
+    ]
+];
+
+(* a page's code: what the names of its markdown reach, its code and its front matter among them,
+   and its own name *)
+pageCode[keys_Association, file_String] := namesCode[keys, Prepend[textNames[ByteArrayToString[ReadByteArray[file], "UTF-8"]], FileBaseName[file]]];
+
+(* each page's code, by "CacheKey": "Definitions", Automatic for a paclet with a primary context
+   whose examples run here, or "Code", the paclet's whole code for every page, as when the scan
+   fails; and the keys the examples' codes are made with, or None *)
+pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] := Module[
+    {whole, context = paclet["PrimaryContext"], dirs, scan, keys},
+    whole = <|
+        "Codes" -> AssociationMap[digest[{exampleCode[dir, opts["Dependencies"], opts["Excluded"], opts["Versioned"]], opts["Converter"]}] &, Lookup[tasks, "Page", {}]],
+        "Keys" -> None
+    |>;
+    If[ ! StringQ[context] || mode === "Code" || (mode === Automatic && opts["EvaluationKernel"] =!= None), Return[whole, Module]];
+    dirs = DeleteDuplicates[Append[pacletDirectories[], dir]];
+    scan = definitionScan[
+        dirs, context,
+        digest[{codeHash[exampleDirectories[dir, opts["Dependencies"]], {}, True], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
+        opts["Cache"], opts["Work"]
+    ];
+    If[ FailureQ[scan],
+        Which[
+            mode === "Definitions", Message[BuildPacletDocumentation::scan, scan["Message"]],
+            TrueQ[opts["Monitor"]], Print["definitions not scanned: ", scan["Message"], "; every page's key has all of the code"]
+        ];
+        Return[whole, Module]
+    ];
+    keys = definitionKeys[scan, sharedCode[dir, scan, opts["Dependencies"], opts["Excluded"], opts["Versioned"], opts["Converter"]]];
+    <|"Codes" -> Association[#Page -> pageCode[keys, #File] & /@ tasks], "Keys" -> keys|>
+];
+
+(* The converter caches each example's result by the example's code alone, the code of the cells
+   before it that it runs after among it, as a PersistentSymbol. With the definitions scanned, the
+   build keeps that cache true to the paclet's code, example by example: it records the code each
+   example's result was evaluated against, what the names of the cells it runs after reach, and
+   before a page is converted it deletes the results whose code is another, so that only a page
+   with such an example evaluates its examples again. The cells, the chains of cells they run
+   after and the cache's names are the converter's own, from its parsing and its cache's
+   functions, which a converter that has none of them leaves to the page's code. *)
+$converterInternals = {
+    "resolveSource", "litParse", "resolveIncludes", "executableQ", "resetBoundaryQ", "$setupHeadingQ",
+    "cumulativeHashes", "exampleCacheName", "evaluatorTag", "stableHash", "mdSep", "$narrativeTemplates", "$cacheLocation"
+};
+converterInternals[spec_Association] := Module[{symbol, context},
+    symbol = Replace[spec["Function"], rf_ResourceFunction :> ResourceFunction[rf, "Function"]];
+    If[ Head[symbol] =!= Symbol, Return[None, Module]];
+    context = With[{s = symbol}, Context[s]];
+    If[ ! AllTrue[$converterInternals, NameQ[context <> #] && ToExpression[context <> #, InputForm, Function[s, OwnValues[s] =!= {} || DownValues[s] =!= {}, HoldAllComplete]] &],
+        Return[None, Module]];
+    If[ NameQ[context <> "ensureParser"], Symbol[context <> "ensureParser"][]];
+    AssociationMap[Symbol[context <> #] &, $converterInternals]
+];
+
+(* the cells each executable cell runs after, itself last, as the converter's chain of codes: from
+   the last reset, after the setup section's cells *)
+exampleChains[internals_Association, mode_, items_List] := Module[
+    {chain = {}, base = {}, setup = AnyTrue[items, internals["$setupHeadingQ"]], level = None, chains = {}},
+    Scan[
+        Function[item,
+            If[ setup && IntegerQ[level] && item["Type"] === "Heading" && ! internals["$setupHeadingQ"][item] && item["Level"] <= level, setup = False];
+            If[ internals["$setupHeadingQ"][item], level = item["Level"]];
+            If[ internals["resetBoundaryQ"][mode, item], chain = base];
+            If[ internals["executableQ"][item],
+                chain = Append[chain, item["Code"]];
+                If[ setup, base = Append[base, item["Code"]]];
+                AppendTo[chains, chain]
+            ]
+        ],
+        items
+    ];
+    chains
+];
+
+(* a page's examples: each one's name in the converter's cache and its code. An example whose
+   chain does not give the converter's hash has every code cell of the page as its chain. *)
+pageExamples[internals_Association, keys_Association, task_Association] := Module[
+    {src, parsed, meta, template, blocks, mode, items, hashes, chains, doc, all},
+    If[ Lookup[task["Options"], "Evaluate", True] =!= True, Return[{}, Module]];
+    src = internals["resolveSource"][task["File"]];
+    parsed = internals["litParse"][src["Text"]];
+    meta = parsed["Metadata"];
+    template = Lookup[meta, "Template", "Default"];
+    If[ template === "NotebookTemplate", Return[{}, Module]];
+    blocks = internals["resolveIncludes"][parsed["Blocks"], src["Base"]];
+    mode = Replace[Lookup[task["Options"], "EvaluateSeparator", Automatic], Automatic :> If[MemberQ[internals["$narrativeTemplates"], template], None, Automatic]];
+    items = Cases[blocks, b_ /; (internals["executableQ"][b] || MatchQ[b["Type"], "Separator" | "Heading"]), Infinity];
+    hashes = internals["cumulativeHashes"][mode, items];
+    chains = exampleChains[internals, mode, items];
+    doc = Replace[Lookup[meta, "Name", ""], "" :> src["Name"]] <> internals["evaluatorTag"][Automatic];
+    all = Select[items, internals["executableQ"]][[All, "Code"]];
+    MapThread[
+        Function[{hash, chain, index}, <|
+            "Name" -> internals["exampleCacheName"][doc, index, hash],
+            "Code" -> namesCode[keys, textNames[StringRiffle[If[internals["stableHash"][StringJoin[internals["mdSep"] <> # & /@ chain]] === hash, chain, all], "\n"]]]
+        |>],
+        {hashes, chains, Range[Length[hashes]]}
+    ]
+];
+
+(* the names of a page's examples the converter's cache holds *)
+cachedExamples[internals_Association, examples_List] := With[
+    {folders = DeleteDuplicates[StringReplace[Lookup[examples, "Name", {}], RegularExpression["/[^/]*$"] -> "/*"]]},
+    Intersection[
+        Lookup[examples, "Name", {}],
+        Cases[Catenate[PersistentObjects[#, internals["$cacheLocation"]] & /@ folders], PersistentObject[name_String, ___] :> name]
+    ]
 ];
 
 (* the TeX parser the converter loads, which a parallel kernel loads from where this kernel found
@@ -557,6 +743,7 @@ Options[BuildPacletDocumentation] = {
     "Dependencies" -> Automatic,
     "CacheExcludedFiles" -> {},
     "CacheVersion" -> True,
+    "CacheKey" -> Automatic,
     "EvaluationKernel" -> None,
     "Monitor" -> False
 };
@@ -569,7 +756,7 @@ BuildPacletDocumentation::nodefinition = "No markdown definition was found, as R
 
 BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     {
-        paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, code, useCache, separator,
+        paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, useCache, separator,
         all, files, metas, guides, definitionSource, tasks, misses, kernelsBefore, kernels, setup, results, outcomes,
         ok, failed, pruned, pageFiles, skipped, unevaluated, flagged
     },
@@ -602,8 +789,6 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     manifestFile = FileNameJoin[{cache, "evaluated.wl"}];
     evaluated = Replace[If[FileExistsQ[manifestFile], Get[manifestFile], <||>], Except[_Association] -> <||>];
     useCache = OptionValue["UseCache"] =!= False;
-    (* the code the examples run against: the paclet's, its dependencies' and the converter's *)
-    code = digest[{exampleCode[dir, OptionValue["Dependencies"], Flatten[{OptionValue["CacheExcludedFiles"]}], OptionValue["CacheVersion"]], spec["ID"]}];
     separator[template_] := Replace[OptionValue["EvaluateSeparator"], {
         Automatic :> Lookup[$separatorByTemplate, template, Automatic],
         byTemplate_Association :> Lookup[byTemplate, template, Lookup[$separatorByTemplate, template, Automatic]]
@@ -652,16 +837,49 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
             "Evaluation" -> evaluationSpec[OptionValue["EvaluationKernel"], "Paclet", dir, paclet["PrimaryContext"]]
         |>]
     ];
+    (* the code each page's examples run against: what the page uses of the paclet's code, or all
+       of it, its dependencies' and the converter's *)
+    keyed = pageCodes[OptionValue["CacheKey"], dir, paclet, tasks, <|
+        "Dependencies" -> OptionValue["Dependencies"], "Excluded" -> Flatten[{OptionValue["CacheExcludedFiles"]}],
+        "Versioned" -> OptionValue["CacheVersion"], "Converter" -> spec["ID"], "EvaluationKernel" -> OptionValue["EvaluationKernel"],
+        "Cache" -> cache, "Work" -> workDir, "Monitor" -> TrueQ[OptionValue["Monitor"]]
+    |>];
+    codes = keyed["Codes"];
+    (* with the definitions scanned, the code each example of the converter's cache was evaluated
+       against *)
+    internals = If[keyed["Keys"] === None, None, converterInternals[spec]];
+    examplesFile = FileNameJoin[{cache, "examples.wxf"}];
+    examples = Replace[If[FileExistsQ[examplesFile], Import[examplesFile, "WXF"], <||>], Except[_Association] -> <||>];
     tasks = Map[
-        Function[task, With[{key = pageKey[task, spec["ID"], code, guides]},
+        Function[task, With[{code = codes[task["Page"]]}, With[{key = pageKey[task, spec["ID"], code, guides]},
             Join[task, <|
+                "Code" -> code,
                 "Entry" -> FileNameJoin[{pagesDir, key <> ".nb"}],
                 "Work" -> FileNameJoin[{workDir, key <> ".nb"}],
                 "Cached" -> useCache && FileExistsQ[FileNameJoin[{pagesDir, key <> ".nb"}]],
                 "UseCache" -> useCache && Lookup[evaluated, task["Page"], None] === code
             |>]
-        ]],
+        ]]],
         tasks
+    ];
+    (* a page to convert whose examples have codes has the results of the ones whose code changed
+       deleted from the converter's cache, and uses the rest *)
+    If[ internals =!= None,
+        tasks = Map[
+            Function[task, If[ Lookup[task, "Evaluation", None] =!= None, task,
+                With[{cells = pageExamples[internals, keyed["Keys"], task]},
+                    If[ task["Cached"] || ! useCache, Append[task, "Examples" -> cells],
+                        With[{held = cachedExamples[internals, cells]},
+                            With[{stale = Select[cells, MemberQ[held, #Name] && Lookup[examples, #Name, None] =!= #Code &]},
+                                Scan[DeleteObject[PersistentObject[#Name, internals["$cacheLocation"]]] &, stale];
+                                Join[task, <|"Examples" -> cells, "UseCache" -> True, "Fresh" -> Length[held] - Length[stale] < Length[cells]|>]
+                            ]
+                        ]
+                    ]
+                ]
+            ]],
+            tasks
+        ]
     ];
     misses = Select[tasks, ! #Cached &];
     If[ TrueQ[OptionValue["Monitor"]],
@@ -703,15 +921,25 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
         {}
     ];
     Scan[If[KeyExistsQ[unevaluated, #["File"]] && FileExistsQ[#["Entry"]], DeleteFile[#["Entry"]]] &, Pick[tasks, outcomes, "Converted"]];
-    evaluated = Join[evaluated, AssociationMap[code &, Lookup[ok, "Page", {}]]];
+    evaluated = Join[evaluated, Association[#Page -> #Code & /@ ok]];
+    (* the converter's cache holds the results of a converted page's examples that evaluated
+       cleanly, under the code they were evaluated against *)
+    If[ internals =!= None,
+        examples = Join[examples, Association @ Catenate @ Map[
+            Function[task, With[{held = cachedExamples[internals, task["Examples"]]}, #Name -> #Code & /@ Select[task["Examples"], MemberQ[held, #Name] &]]],
+            Select[Pick[tasks, outcomes, "Converted"], KeyExistsQ[#, "Examples"] &]
+        ]]
+    ];
     failed = Lookup[Pick[tasks, outcomes, "Failed"], "File", {}];
     DeleteDirectory[workDir, DeleteContents -> True];
     (* after a build of every page, the cache keeps what this build used *)
     If[ OptionValue["Files"] === All,
         Scan[DeleteFile, Complement[FileNames["*.nb", pagesDir], Lookup[tasks, "Entry"]]];
-        evaluated = KeyTake[evaluated, Lookup[tasks, "Page"]]
+        evaluated = KeyTake[evaluated, Lookup[tasks, "Page"]];
+        If[ internals =!= None, examples = KeyTake[examples, Lookup[Catenate[Lookup[tasks, "Examples", {}]], "Name", {}]]]
     ];
     Put[evaluated, manifestFile];
+    If[ internals =!= None, Export[examplesFile, examples, "WXF"]];
     (* the notebooks of pages whose markdown is gone: only after a whole build with no failure,
        since a page that did not convert keeps its last notebook *)
     pruned = If[ TrueQ[OptionValue["Prune"]] && OptionValue["Files"] === All && failed === {},
@@ -728,7 +956,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
         "Flagged" -> flagged,
         "Converted" -> Lookup[Pick[tasks, outcomes, "Converted"], "File", {}],
         "Cached" -> Lookup[Pick[tasks, outcomes, "Cached"], "File", {}],
-        "Evaluated" -> Lookup[Select[Pick[tasks, outcomes, "Converted"], ! #UseCache &], "File", {}],
+        "Evaluated" -> Lookup[Select[Pick[tasks, outcomes, "Converted"], Lookup[#, "Fresh", ! #UseCache] &], "File", {}],
         "Skipped" -> skipped,
         "Pruned" -> pruned,
         "Kernels" -> Length[kernels],
@@ -1950,7 +2178,10 @@ runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
     If[ kernel === None, Return[AssociationMap["NoKernel" &, Lookup[runs, "Script", {}]], Module]];
     While[ queue =!= {} || running =!= {},
         While[ Length[running] < n && queue =!= {},
-            AppendTo[running, Append[First[queue], {"Process" -> StartProcess[{kernel, "-noprompt", "-script", First[queue]["Script"]}], "Start" -> AbsoluteTime[]}]];
+            AppendTo[running, Append[First[queue], {
+                "Process" -> StartProcess[Join[{kernel, "-noprompt", "-script", First[queue]["Script"]}, Lookup[First[queue], "Arguments", {}]]],
+                "Start" -> AbsoluteTime[]
+            }]];
             queue = Rest[queue]
         ];
         (* what a process or its front end writes is read and dropped, so that no pipe fills *)

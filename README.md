@@ -34,8 +34,8 @@ paclet with a documentation site, without a front end and without scripts of the
   to the publishing account; `"Account"` refuses any other.
 - Documentation from markdown: the pages under `docs/` and `ResourceDefinition.md` become notebooks
   through MarkdownToNotebook, with their examples evaluated. Unchanged pages come from a cache that a
-  build server can keep, the others convert on parallel kernels when asked, and examples run again
-  when the code they run changes. A paclet that loads only on another kernel has its examples
+  build server can keep, the others convert on parallel kernels when asked, and an example runs
+  again when a definition its cells reach changes. A paclet that loads only on another kernel has its examples
   evaluated there.
 - Checked releases: nothing is published unless the archive holds every documentation page and
   loads alone in a fresh kernel, or on the kernel its examples run on. A version already published from another commit, a link leading
@@ -150,5 +150,7 @@ default the Wolfram Institute's; any other connected account is refused). Its tu
 a Documentation Site* evaluates every cell, so building it publishes PacletPage's own site from the
 resource already deployed; a first release into an account therefore runs `deploy.wls` before
 `release.wls`. The build caches each page's notebook under a key of everything it depends on, in
-`build/cache`, and converts a page with the converter's example cache off whenever the code its
-examples last ran against has changed.
+`build/cache`: the definitions the page's names reach, which a fresh kernel scans from the loaded
+paclet, so a change to one function converts again only the pages that reach it. It keeps the
+converter's example cache true to that code, deleting the results of the examples whose cells reach
+a changed definition.

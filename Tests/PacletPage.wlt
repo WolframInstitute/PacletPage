@@ -757,6 +757,113 @@ VerificationTest[
     TestID -> "Build: another converter converts every page again and evaluates its examples afresh"
 ]
 
+(* === building with the paclet's definitions scanned: a paclet of three functions, foo calling a
+   private helper, the public ones read-protected, and pages whose code names them === *)
+
+definitionFixture[pages_Association] := Module[{dir = CreateDirectory[], name = "Fx" <> IntegerString[RandomInteger[10^12], 36]},
+    Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/" <> name <> "\", \"Version\" -> \"1.0.0\", \"PrimaryContext\" -> \"" <> name <> "`\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"" <> name <> "`\"}}|>]", "Text"];
+    CreateDirectory[FileNameJoin[{dir, "Kernel"}]];
+    CreateDirectory[FileNameJoin[{dir, "docs", "Symbols"}], CreateIntermediateDirectories -> True];
+    KeyValueMap[Export[FileNameJoin[{dir, "docs", "Symbols", #1 <> ".md"}], "---\nTemplate: Symbol\nURI: Pub/" <> name <> "/ref/" <> #1 <> "\n---\n\n" <> #2, "Text"] &, pages];
+    <|"Directory" -> dir, "Code" -> FileNameJoin[{dir, "Kernel", name <> ".wl"}], "Context" -> name <> "`"|>
+];
+definitionCode[fixture_, helper_String, bar_String] := Export[fixture["Code"], StringRiffle[{
+    "BeginPackage[\"" <> fixture["Context"] <> "\"]", "foo::usage = \"foo[x]\";", "bar::usage = \"bar[x]\";", "Begin[\"`Private`\"]",
+    "foo[x_] := helper[x]", "helper[x_] := " <> helper, "bar[x_] := " <> bar, "End[]", "SetAttributes[{foo, bar}, {Protected, ReadProtected}]", "EndPackage[]"
+}, "\n"], "Text"];
+withDefinitionFixture[pages_, body_] := Module[{fixture = definitionFixture[pages], result},
+    definitionCode[fixture, "x + 1", "2 x"];
+    result = body[fixture];
+    PacletDirectoryUnload[fixture["Directory"]];
+    DeleteDirectory[fixture["Directory"], DeleteContents -> True];
+    result
+];
+
+VerificationTest[
+    withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n", "bar" -> "```wl\nbar[1]\n```\n"|>, Function[fixture, Module[{build, runs = {}},
+        build[] := BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False];
+        AppendTo[runs, build[]];
+        AppendTo[runs, build[]];
+        definitionCode[fixture, "x + 2", "2 x"];
+        AppendTo[runs, build[]];
+        definitionCode[fixture, "x + 2", "3 x"];
+        AppendTo[runs, build[]];
+        Export[FileNameJoin[{fixture["Directory"], "Assets", "table.txt"}], "1", "Text"];
+        AppendTo[runs, build[]];
+        {
+            Sort[FileBaseName /@ #["Converted"]] & /@ runs,
+            FileExistsQ[FileNameJoin[{fixture["Directory"], "build", "cache", "definitions.wxf"}]]
+        }
+    ]]],
+    {{{"bar", "foo"}, {}, {"foo"}, {"bar"}, {"bar", "foo"}}, True},
+    TestID -> "Build: with the definitions scanned, a change to one function converts again only the pages whose code reaches it; a file the loading does not read, every page"
+]
+
+VerificationTest[
+    withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{build},
+        build[mode_] := FileBaseName /@ BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False, "CacheKey" -> mode]["Converted"];
+        {build["Code"], build["Code"], definitionCode[fixture, "x + 3", "2 x"]; build["Code"], build["Definitions"], definitionCode[fixture, "x + 3", "5 x"]; build["Code"]}
+    ]]],
+    {{"foo"}, {}, {"foo"}, {"foo"}, {"foo"}},
+    TestID -> "Build: \"CacheKey\" -> \"Code\" keys every page by all of the paclet's code"
+]
+
+(* a converter with the converter's parsing and cache functions, in a context of their own: its
+   pages' code blocks and headings, and a cache whose entries are named by page, cell and the
+   code of the cells since the last heading. It evaluates every cell when one has no entry, and
+   writes how many of them had one. *)
+PPFakeConverter`mdSep = "\n\n";
+PPFakeConverter`resolveSource[file_String] := <|"Text" -> ByteArrayToString[ReadByteArray[file], "UTF-8"], "Base" -> DirectoryName[file], "Name" -> FileBaseName[file]|>;
+PPFakeConverter`litParse[text_String] := <|"Metadata" -> <|"Template" -> "Symbol"|>, "Blocks" -> StringCases[text, {
+    "## " ~~ heading : Except["\n"] .. :> <|"Type" -> "Heading", "Level" -> 2, "Text" -> heading|>,
+    "```wl\n" ~~ code : Shortest[___] ~~ "\n```" :> <|"Type" -> "Code", "Code" -> code|>
+}]|>;
+PPFakeConverter`resolveIncludes[blocks_, _] := blocks;
+PPFakeConverter`executableQ[b_Association] := b["Type"] === "Code";
+PPFakeConverter`executableQ[_] := False;
+PPFakeConverter`resetBoundaryQ[_, item_] := item["Type"] === "Heading";
+PPFakeConverter`$setupHeadingQ = False &;
+PPFakeConverter`stableHash[s_String] := Hash[s, "SHA256"];
+PPFakeConverter`cumulativeHashes[mode_, items_List] := Module[{acc = "", hashes = {}},
+    Scan[(If[PPFakeConverter`resetBoundaryQ[mode, #], acc = ""]; If[PPFakeConverter`executableQ[#], acc = acc <> PPFakeConverter`mdSep <> #["Code"]; AppendTo[hashes, PPFakeConverter`stableHash[acc]]]) &, items];
+    hashes
+];
+PPFakeConverter`exampleCacheName[doc_String, index_Integer, hash_Integer] := "PPFake/" <> doc <> "/" <> IntegerString[index, 10, 3] <> "-" <> IntegerString[hash, 36];
+PPFakeConverter`evaluatorTag[_] := "";
+PPFakeConverter`$narrativeTemplates = {};
+PPFakeConverter`convert[file_String, out_String, opts : OptionsPattern[]] := Module[{blocks, names, held},
+    blocks = PPFakeConverter`litParse[PPFakeConverter`resolveSource[file]["Text"]]["Blocks"];
+    names = MapIndexed[PPFakeConverter`exampleCacheName[FileBaseName[file], First[#2], #1] &, PPFakeConverter`cumulativeHashes[Automatic, blocks]];
+    held = Select[names, ! MissingQ[PersistentSymbol[#, PPFakeConverter`$cacheLocation]] &];
+    If[ ! TrueQ[Lookup[{opts}, "UseCache", True]] || Length[held] < Length[names], Scan[(PersistentSymbol[#, PPFakeConverter`$cacheLocation] = "result") &, names]];
+    Put[Notebook[{Cell[ToString[{Length[held], Length[names]}], "Text"]}], out];
+    out
+];
+
+VerificationTest[
+    withDefinitionFixture[
+        <|"foo" -> "## A\n\n```wl\nfoo[1]\n```\n\n## B\n\n```wl\nbar[1]\n```\n", "bar" -> "Unlike foo:\n\n```wl\nbar[2]\n```\n"|>,
+        Function[fixture, Module[{store = CreateDirectory[], build, held, runs = {}},
+            PPFakeConverter`$cacheLocation = PersistenceLocation["Local", store];
+            build[] := BuildPacletDocumentation[fixture["Directory"], "Converter" -> PPFakeConverter`convert, "Definition" -> None, "Parallel" -> False];
+            held[] := First /@ (notebookText[FileNameJoin[{fixture["Directory"], "Documentation", "English", "ReferencePages", "Symbols", # <> ".nb"}]] & /@ {"foo", "bar"});
+            AppendTo[runs, {build[], held[]}];
+            definitionCode[fixture, "x + 1", "4 x"];
+            AppendTo[runs, {build[], held[]}];
+            definitionCode[fixture, "x + 5", "4 x"];
+            AppendTo[runs, {build[], held[]}];
+            DeleteDirectory[store, DeleteContents -> True];
+            {Sort[FileBaseName /@ #[[1, "Converted"]]], Sort[FileBaseName /@ #[[1, "Evaluated"]]], #[[2]]} & /@ runs
+        ]]
+    ],
+    {
+        {{"bar", "foo"}, {"bar", "foo"}, {"{0, 2}", "{0, 1}"}},
+        {{"bar", "foo"}, {"bar", "foo"}, {"{1, 2}", "{0, 1}"}},
+        {{"bar", "foo"}, {"foo"}, {"{1, 2}", "{1, 1}"}}
+    },
+    TestID -> "Build: with the definitions scanned, only the cached results of the examples whose cells reach a changed function are deleted, so a page whose code does not evaluates nothing"
+]
+
 VerificationTest[
     Module[{dir = CreateDirectory[], converter, package, before = Names["Global`*"], off = offGeneralMessages[], result},
         converter = FileNameJoin[{dir, "MarkdownToNotebook.wl"}];

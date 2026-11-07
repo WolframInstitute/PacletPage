@@ -20,8 +20,10 @@ RelatedTutorials: [PublishingADocumentationSite]
 - The definition notebook is built from `ResourceDefinition.md` beside `PacletInfo.wl`, else in the markdown directory, else from the markdown directory's `Template: Paclet` page. When there is none and a `ResourceDefinition.nb` is there already, a message says it was not rebuilt.
 - The paclet is loaded first, so the examples on its pages evaluate against it; with `"EvaluationKernel"`, it is loaded on that kernel instead, and not here.
 - MarkdownToNotebook converts the pages: the one already loaded, else the copy beside PacletPage in its source repository, else the published function. A converter file, that copy or one given as `"Converter"`, is read into a context of its own, on no context path, so its helpers never shadow, or are shadowed by, the symbols of a package that a page's examples load.
-- Each page's notebook is cached, under a key of everything it depends on: its markdown and options, the converter, the titles of the paclet's guides, which its links show, and the code its examples run, the files under `Kernel/` and `Assets/` of the paclet and of its dependencies. A page whose key is cached is copied from the cache, without converting it.
-- The converter caches each example's result by the example's code alone, so a page whose examples last ran against other code is converted with that cache off: its examples are evaluated afresh. That code is the paclet's, its dependencies' and the converter's, so another converter, or a redeploy of the published one, evaluates every example afresh.
+- Each page's notebook is cached, under a key of everything it depends on: its markdown and options, the converter, the titles of the paclet's guides, which its links show, and the code its examples run. A page whose key is cached is copied from the cache, without converting it.
+- The code a page's examples run is what the page uses of the paclet's definitions. A fresh kernel loads the paclet and gives each symbol of the contexts the paclet and its loading make, its dependencies' among them, the hash of its whole definition, `` Language`ExtendedDefinition ``, and the symbols its definition names, as code or in a string. A page uses the symbols its markdown names, in full or by their own name, and every symbol their definitions reach. Its key has their hashes, and what no definition shows: the `PacletInfo.wl`, the files under `Kernel/` and `Assets/` that the loading did not read, such as data a function reads when it runs, the definitions of ``System` `` and ``Global` `` symbols that the loading made, the dependencies' files and the converter. So a change to one function converts again only the pages that reach it. The scan is kept in the cache, and done again when the code changes.
+- The converter caches each example's result by the code of its cell and of the cells before it that it runs after. The build keeps that cache true to the paclet's code, example by example: it records the code each result was evaluated against, what those cells' names reach, and before a page is converted, deletes the results whose code has changed. A page whose examples all keep their results evaluates none of them; the converter evaluates every example of a page that has one without a result.
+- With `"CacheKey" -> "Code"`, or when the paclet has no primary context, its examples run on another kernel or the scan fails, the code is the paclet's whole code, the files under `Kernel/` and `Assets/` of the paclet and of its dependencies, and the converter. A page whose examples last ran against other code is then converted with the converter's cache off: its examples are evaluated afresh. Another converter, or a redeploy of the published one, evaluates every example afresh.
 - With `"Parallel" -> True` or a number of kernels, the pages are converted on parallel kernels, launched for the build and closed after it; with `Automatic`, on the parallel kernels already running, if any. This kernel converts the first page, so that anything the converter installs is in place first, and tries again any page that failed on a parallel kernel.
 - The parallel kernels a page's examples launch are closed once the page is converted, so that none of them is left to the examples of the pages after it.
 - The ``Global` `` symbols a page gives definitions to are cleared once the page is converted, so that a page whose examples put ``Global` `` on their context path, and so read and assign names there, leaves no value to the pages after it. A symbol defined before the page keeps its definitions.
@@ -53,6 +55,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Dependencies"` | `Automatic` | the paclets whose code the examples run besides the paclet's own, as directories, which are loaded, or names; by default the ones its `PacletInfo.wl` declares |
 | `"CacheExcludedFiles"` | `{}` | files of the paclet and its dependencies, as paths relative to each paclet's directory with `*` for any characters, whose changes leave the cached results of the examples as they are, such as `"Kernel/Usage.wl"` of usage messages |
 | `"CacheVersion"` | `True` | whether the version in a `PacletInfo.wl` is part of the key of the cached results; with `False` a new version alone keeps them, for pages whose examples do not show it |
+| `"CacheKey"` | `Automatic` | what a page's key has of the paclet's code: `"Definitions"`, the definitions the page reaches, `"Code"`, all of it; `Automatic` is `"Definitions"` for a paclet with a primary context whose examples run here |
 | `"EvaluationKernel"` | `None` | the kernel the examples are evaluated on: a command, an association, or an association of templates to them; `None` evaluates them here |
 | `"Monitor"` | `False` | whether to print how many pages there are, cached and to convert, then each page as it is converted |
 
@@ -147,6 +150,38 @@ Nothing has changed, but without the cache every page is converted and every exa
 
 ```wl
 BuildPacletDocumentation[dir, "UseCache" -> False]
+```
+
+```wl
+DeleteDirectory[dir, DeleteContents -> True]
+```
+
+### CacheKey
+
+A copy of the example paclet, built once:
+
+```wl
+dir = CopyDirectory[PacletObject["WolframInstitute/PacletPage"]["AssetLocation", "Example"], FileNameJoin[{$TemporaryDirectory, CreateUUID["Greetings-"]}]];
+BuildPacletDocumentation[dir];
+```
+
+Add a function that no page names to the paclet's code:
+
+```wl
+file = FileNameJoin[{dir, "Kernel", "Greetings.wl"}];
+Export[file, ByteArrayToString[ReadByteArray[file], "UTF-8"] <> "\nDemo`Greetings`Private`unused[x_] := x\n", "Text"]
+```
+
+No page reaches it, so every page is copied from the cache:
+
+```wl
+BuildPacletDocumentation[dir]
+```
+
+With the paclet's whole code in the key, the pages are converted again and their examples evaluated afresh:
+
+```wl
+BuildPacletDocumentation[dir, "CacheKey" -> "Code"]
 ```
 
 ```wl
