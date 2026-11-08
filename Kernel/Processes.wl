@@ -4,6 +4,16 @@
    Read into the package's private context, and into a script that builds or renders pages, which
    ends with endScript[]: nothing here uses the rest of the package. *)
 
+(* Wolfram 15.1 has a System`SelectPositions, which is Protected. The documentation build's
+   Transmogrify and the resource page's copy of it, written before it, define SelectPositions rules
+   of their own from their package contexts, where the name now reads as the System symbol: the
+   rules are refused (SetDelayed::write) and the resource page's walk of a definition notebook
+   recurses past $RecursionLimit. A symbol of that name in each package's own context, made before
+   the package loads, is the one its code reads, and the System symbol is left as it is. *)
+If[ NameQ["System`SelectPositions"],
+    Scan[Symbol[# <> "SelectPositions"] &, {"Transmogrify`", "ResourceShingleTransmogrify`"}]
+];
+
 (* the processes, by id: each one's parent's id, its command and its state, but for ps itself;
    none where there is no ps *)
 processTable[] := If[ $OperatingSystem === "Windows", <||>,
