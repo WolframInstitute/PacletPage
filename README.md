@@ -152,5 +152,5 @@ resource already deployed; a first release into an account therefore runs `deplo
 `release.wls`. The build caches each page's notebook under a key of everything it depends on, in
 `build/cache`: the definitions the page's names reach, which a fresh kernel scans from the loaded
 paclet, so a change to one function converts again only the pages that reach it. It keeps the
-converter's example cache true to that code, deleting the results of the examples whose cells reach
-a changed definition.
+converter's example results there too, true to that code: it deletes the results of the examples
+whose cells reach a changed definition.

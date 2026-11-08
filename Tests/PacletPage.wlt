@@ -863,16 +863,22 @@ VerificationTest[
             AppendTo[runs, {build[], held[]}];
             definitionCode[fixture, "x + 5", "4 x"];
             AppendTo[runs, {build[], held[]}];
+            Export[FileNameJoin[{fixture["Directory"], "docs", "Symbols", "foo.md"}], "---\nTemplate: Symbol\n---\n\n## A\n\n```wl\nfoo[1]\n```\n\n## B\n\n```wl\nbar[3]\n```\n", "Text"];
+            build[];
+            With[{names = {"PPFake/foo/x", "PPFake/bar/x"}, kept = PersistenceLocation["Local", FileNameJoin[{fixture["Directory"], "build", "cache", "examples"}]]},
+                AppendTo[runs, {Length[storedNames[kept, names]], Length[storedNames[PPFakeConverter`$cacheLocation, names]]}]
+            ];
             DeleteDirectory[store, DeleteContents -> True];
-            {Sort[FileBaseName /@ #[[1, "Converted"]]], Sort[FileBaseName /@ #[[1, "Evaluated"]]], #[[2]]} & /@ runs
+            Append[{Sort[FileBaseName /@ #[[1, "Converted"]]], Sort[FileBaseName /@ #[[1, "Evaluated"]]], #[[2]]} & /@ Most[runs], Last[runs]]
         ]]
     ],
     {
         {{"bar", "foo"}, {"bar", "foo"}, {"{0, 2}", "{0, 1}"}},
         {{"bar", "foo"}, {"bar", "foo"}, {"{1, 2}", "{0, 1}"}},
-        {{"bar", "foo"}, {"foo"}, {"{1, 2}", "{1, 1}"}}
+        {{"bar", "foo"}, {"foo"}, {"{1, 2}", "{1, 1}"}},
+        {3, 0}
     },
-    TestID -> "Build: with the definitions scanned, only the cached results of the examples whose cells reach a changed function are deleted, so a page whose code does not evaluates nothing"
+    TestID -> "Build: with the definitions scanned, only the cached results of the examples whose cells reach a changed function are deleted, so a page whose code does not evaluates nothing; the results are kept in the cache directory, and a whole build keeps only its pages' examples"
 ]
 
 VerificationTest[

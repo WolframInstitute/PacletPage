@@ -302,6 +302,26 @@ converterInternals[spec_Association] := Module[{symbol, context},
     AssociationMap[Symbol[context <> #] &, $converterInternals]
 ];
 
+(* The converter keeps each example's result as a PersistentSymbol at its $cacheLocation, by default
+   "Local", in the user's base directory, which a build server's fresh container loses. A build
+   keeps them in its cache directory instead, under examples/, beside the pages: a page is converted
+   with the converter's $cacheLocation bound to that store, in whichever kernel converts it. *)
+converterCacheSymbol[spec_Association] := Module[{symbol},
+    symbol = Replace[spec["Function"], rf_ResourceFunction :> ResourceFunction[rf, "Function"]];
+    If[ Head[symbol] =!= Symbol, Return[None, Module]];
+    With[{name = With[{s = symbol}, Context[s]] <> "$cacheLocation"},
+        If[ NameQ[name] && ToExpression[name, InputForm, Function[s, OwnValues[s] =!= {}, HoldAllComplete]], name, None]
+    ]
+];
+
+SetAttributes[withExampleStore, HoldRest];
+withExampleStore[task_Association, expr_] := With[{name = Lookup[task, "CacheSymbol", None], store = Lookup[task, "ExampleStore", None]},
+    If[ StringQ[name] && NameQ[name] && store =!= None,
+        ToExpression[name, InputForm, Function[cacheSymbol, Block[{cacheSymbol = store}, expr], HoldAllComplete]],
+        expr
+    ]
+];
+
 (* the cells each executable cell runs after, itself last, as the converter's chain of codes: from
    the last reset, after the setup section's cells *)
 exampleChains[internals_Association, mode_, items_List] := Module[
@@ -348,14 +368,12 @@ pageExamples[internals_Association, keys_Association, task_Association] := Modul
     ]
 ];
 
-(* the names of a page's examples the converter's cache holds *)
-cachedExamples[internals_Association, examples_List] := With[
-    {folders = DeleteDuplicates[StringReplace[Lookup[examples, "Name", {}], RegularExpression["/[^/]*$"] -> "/*"]]},
-    Intersection[
-        Lookup[examples, "Name", {}],
-        Cases[Catenate[PersistentObjects[#, internals["$cacheLocation"]] & /@ folders], PersistentObject[name_String, ___] :> name]
-    ]
+(* the names the store holds in the folders of the names given, and those of a page's examples *)
+storedNames[store_, names_List] := Cases[
+    Catenate[PersistentObjects[#, store] & /@ DeleteDuplicates[StringReplace[names, RegularExpression["/[^/]*$"] -> "/*"]]],
+    PersistentObject[name_String, ___] :> name
 ];
+cachedExamples[internals_Association, examples_List] := Intersection[Lookup[examples, "Name", {}], storedNames[internals["$cacheLocation"], Lookup[examples, "Name", {}]]];
 
 (* the TeX parser the converter loads, which a parallel kernel loads from where this kernel found
    it: a parallel kernel's paclet catalog predates an install this kernel made *)
@@ -593,14 +611,14 @@ convertPage[convert_, task_Association, limit_] := globalsClearedAfter[globalSta
     {work = task["Work"], run, result, evaluation = Lookup[task, "Evaluation", None], kernel = None},
     If[ FileExistsQ[work], DeleteFile[work]];
     run = EvaluationData[TimeConstrained[
-        If[ AssociationQ[evaluation],
+        withExampleStore[task, If[ AssociationQ[evaluation],
             Catch[
                 kernel = pageEvaluationKernel[evaluation];
                 convert[task["File"], work, "UseCache" -> task["UseCache"], "Evaluator" -> linkEvaluator[kernel["Link"], evaluation], Sequence @@ task["Options"]],
                 $evaluationKernelTag
             ],
             convert[task["File"], work, "UseCache" -> task["UseCache"], Sequence @@ task["Options"]]
-        ],
+        ]],
         limit, $TimedOut
     ]
 ];
@@ -688,7 +706,7 @@ tasksConverted[tasks_List, spec_, setup_, {}] := Map[convertHere[spec, setup], t
 tasksConverted[{task_}, spec_, setup_, _] := {convertHere[spec, setup][task]};
 tasksConverted[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest},
     first = convertHere[spec, setup][First[tasks]];
-    DistributeDefinitions[convertPage, matchGeneralMessages, closeEvaluationKernels];
+    DistributeDefinitions[convertPage, withExampleStore, matchGeneralMessages, closeEvaluationKernels];
     If[ MatchQ[spec["Distribute"], _Hold], DistributeDefinitions @@ spec["Distribute"]];
     rest = ParallelMap[
         workerFunction[Join[setup, <|"Directories" -> DeleteDuplicates[Join[setup["Directories"], parserDirectories[]]], "Off" -> offGeneralMessages[]|>]],
@@ -758,7 +776,7 @@ BuildPacletDocumentation::nodefinition = "No markdown definition was found, as R
 
 BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     {
-        paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, useCache, separator,
+        paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, store, cacheSymbol, useCache, separator,
         all, files, metas, guides, definitionSource, tasks, misses, kernelsBefore, kernels, setup, results, outcomes,
         ok, failed, pruned, pageFiles, skipped, unevaluated, flagged
     },
@@ -850,6 +868,11 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     (* with the definitions scanned, the code each example of the converter's cache was evaluated
        against *)
     internals = If[keyed["Keys"] === None, None, converterInternals[spec]];
+    (* the converter's example results, in the cache directory *)
+    store = PersistenceLocation["Local", FileNameJoin[{cache, "examples"}]];
+    If[ ! DirectoryQ[FileNameJoin[{cache, "examples"}]], CreateDirectory[FileNameJoin[{cache, "examples"}], CreateIntermediateDirectories -> True]];
+    cacheSymbol = converterCacheSymbol[spec];
+    If[ internals =!= None, internals = Append[internals, "$cacheLocation" -> store]];
     examplesFile = FileNameJoin[{cache, "examples.wxf"}];
     examples = Replace[If[FileExistsQ[examplesFile], Import[examplesFile, "WXF"], <||>], Except[_Association] -> <||>];
     tasks = Map[
@@ -864,6 +887,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
         ]]],
         tasks
     ];
+    tasks = Map[Join[#, <|"CacheSymbol" -> cacheSymbol, "ExampleStore" -> store|>] &, tasks];
     (* a page to convert whose examples have codes has the results of the ones whose code changed
        deleted from the converter's cache, and uses the rest *)
     If[ internals =!= None,
@@ -938,7 +962,13 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
     If[ OptionValue["Files"] === All,
         Scan[DeleteFile, Complement[FileNames["*.nb", pagesDir], Lookup[tasks, "Entry"]]];
         evaluated = KeyTake[evaluated, Lookup[tasks, "Page"]];
-        If[ internals =!= None, examples = KeyTake[examples, Lookup[Catenate[Lookup[tasks, "Examples", {}]], "Name", {}]]]
+        (* and the store, the results of the examples its pages have *)
+        If[ internals =!= None,
+            With[{current = Lookup[Catenate[Lookup[tasks, "Examples", {}]], "Name", {}]},
+                examples = KeyTake[examples, current];
+                Scan[DeleteObject[PersistentObject[#, store]] &, Complement[storedNames[store, current], current]]
+            ]
+        ]
     ];
     Put[evaluated, manifestFile];
     If[ internals =!= None, Export[examplesFile, examples, "WXF"]];
