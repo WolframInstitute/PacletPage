@@ -809,6 +809,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    withFixtureDocs[Function[dir, Module[{calls = 0, counting = False},
+        Internal`InheritedBlock[{exampleCode},
+            DownValues[exampleCode] = Prepend[DownValues[exampleCode], HoldPattern[exampleCode[arguments___]] /; ! counting :> Block[{counting = True}, calls++; exampleCode[arguments]]];
+            BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False]
+        ];
+        calls
+    ]]],
+    1,
+    TestID -> "Build: the paclet's whole code is hashed once for every page, not once a page"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{printed = {}},
         Block[{$deployMonitor = True, Print = Function[Null, AppendTo[printed, {##}]; Null]},
             BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False]

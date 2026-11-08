@@ -277,11 +277,11 @@ pageCode[keys_Association, file_String] := namesCode[keys, Prepend[textNames[Byt
    fails; and the keys the examples' codes are made with, or None *)
 pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] := Module[
     {whole, context = paclet["PrimaryContext"], dirs, scan, keys},
-    whole = <|
-        "Codes" -> AssociationMap[digest[{exampleCode[dir, opts["Dependencies"], opts["Excluded"], opts["Versioned"]], opts["Converter"]}] &, Lookup[tasks, "Page", {}]],
-        "Keys" -> None
-    |>;
-    If[ ! StringQ[context] || mode === "Code" || (mode === Automatic && opts["EvaluationKernel"] =!= None), Return[whole, Module]];
+    (* the whole code, hashed once, for every page *)
+    whole[] := With[{code = digest[{exampleCode[dir, opts["Dependencies"], opts["Excluded"], opts["Versioned"]], opts["Converter"]}]},
+        <|"Codes" -> AssociationMap[code &, Lookup[tasks, "Page", {}]], "Keys" -> None|>
+    ];
+    If[ ! StringQ[context] || mode === "Code" || (mode === Automatic && opts["EvaluationKernel"] =!= None), Return[whole[], Module]];
     dirs = DeleteDuplicates[Append[pacletDirectories[], dir]];
     scan = definitionScan[
         dirs, context,
@@ -293,7 +293,7 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
             mode === "Definitions", Message[BuildPacletDocumentation::scan, scan["Message"]],
             TrueQ[opts["Monitor"]], Print["definitions not scanned: ", scan["Message"], "; every page's key has all of the code"]
         ];
-        Return[whole, Module]
+        Return[whole[], Module]
     ];
     keys = definitionKeys[scan, sharedCode[dir, scan, opts["Dependencies"], opts["Excluded"], opts["Versioned"], opts["Converter"]]];
     <|"Codes" -> Association[#Page -> pageCode[keys, #File] & /@ tasks], "Keys" -> keys|>
@@ -438,11 +438,19 @@ evaluationSpec[spec_Association /; MatchQ[spec["Command"], {__String}], template
             "Command" -> spec["Command"], "Directory" -> Lookup[spec, "Directory", None], "Initialization" -> Lookup[spec, "Initialization", None],
             "Scope" -> Lookup[spec, "Scope", "Page"], "Paclet" -> dir, "Context" -> context, "Template" -> template,
             "Identity" -> Lookup[spec, "Identity", StringRiffle[spec["Command"]] <>
-                If[FileExistsQ[First[spec["Command"]]], " " <> FileHash[First[spec["Command"]], "SHA256", "HexString"], ""]]
+                If[FileExistsQ[First[spec["Command"]]], " " <> programHash[First[spec["Command"]]], ""]]
         |>},
     Append[full, "Key" -> Lookup[full, {"Identity", "Scope", "Initialization", "Directory"}]]
 ];
 evaluationSpec[_, _, _, _] := None;
+
+(* a program's hash, once for every page of a build: $programHashes is an association inside
+   BuildPacletDocumentation, so that a program rebuilt between builds is hashed again *)
+$programHashes = None;
+programHash[file_String] := If[ AssociationQ[$programHashes],
+    If[ KeyExistsQ[$programHashes, file], $programHashes[file], $programHashes[file] = FileHash[file, "SHA256", "HexString"]],
+    FileHash[file, "SHA256", "HexString"]
+];
 
 (* the command as the one line LinkLaunch runs, each part quoted *)
 launchLine[command_List] := StringRiffle[Map["\"" <> StringReplace[#, "\"" -> "\\\""] <> "\"" &, command], " "];
@@ -805,7 +813,8 @@ BuildPacletDocumentation::page = "`1` did not become a notebook: `2`.";
 BuildPacletDocumentation::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, from a Flag frontmatter key, a flag cell or the palette's flag buttons: `2`.";
 BuildPacletDocumentation::nodefinition = "No markdown definition was found, as ResourceDefinition.md in `1` or a Template: Paclet page under `2`, so `3` was not rebuilt; a deploy would publish it as it is. Give \"Definition\", or \"Definition\" -> None to build without one.";
 
-BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Module[
+BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Block[{$programHashes = <||>}, buildPacletDocumentation[dir, opts]];
+buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentation]] := Module[
     {
         paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, store, cacheSymbol, useCache, separator,
         all, files, metas, guides, definitionSource, tasks, misses, kernelsBefore, kernels, setup, results, outcomes,
