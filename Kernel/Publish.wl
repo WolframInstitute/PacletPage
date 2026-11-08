@@ -192,7 +192,9 @@ definitionScan[dirs_List, context_String, key_String, cache_String, work_String]
     old = If[FileExistsQ[saved], Import[saved, "WXF"], None];
     If[ AssociationQ[old] && Lookup[old, "Key", None] === key, Return[old["Scan"], Module]];
     Export[in, <|"Directories" -> dirs, "Context" -> context|>, "WXF"];
-    runKernelScripts[{<|"Script" -> $definitionScan, "Arguments" -> {in, out}, "Deadline" -> 3600, "Label" -> "definitions"|>}, 1, "definitions"];
+    (* silent, also in a monitored deploy: a page's example may build documentation, and a line
+       here would be one of its outputs *)
+    Block[{$deployMonitor = False}, runKernelScripts[{<|"Script" -> $definitionScan, "Arguments" -> {in, out}, "Deadline" -> 3600|>}, 1, "definitions"]];
     data = If[FileExistsQ[out], Import[out, "WXF"], <|"Failure" -> "the scan wrote nothing"|>];
     If[ AssociationQ[data] && KeyExistsQ[data, "Symbols"],
         Export[saved, <|"Key" -> key, "Scan" -> data|>, "WXF"]; data,

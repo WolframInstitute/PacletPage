@@ -808,6 +808,17 @@ VerificationTest[
     TestID -> "Build: \"CacheKey\" -> \"Code\" keys every page by all of the paclet's code"
 ]
 
+VerificationTest[
+    withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{printed = {}},
+        Block[{$deployMonitor = True, Print = Function[Null, AppendTo[printed, {##}]; Null]},
+            BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False]
+        ];
+        printed
+    ]]],
+    {},
+    TestID -> "Build: the definitions scan prints nothing, also in a monitored deploy, where a page's example may build documentation"
+]
+
 (* a converter with the converter's parsing and cache functions, in a context of their own: its
    pages' code blocks and headings, and a cache whose entries are named by page, cell and the
    code of the cells since the last heading. It evaluates every cell when one has no entry, and
