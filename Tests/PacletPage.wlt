@@ -809,6 +809,20 @@ VerificationTest[
 ]
 
 VerificationTest[
+    withDefinitionFixture[<|"counter" -> "```wl\ncounter[]\n```\n", "notes" -> "Its growth is $x/\\log x$.\n"|>, Function[fixture, Module[{code, build},
+        code[start_String] := Export[fixture["Code"], StringRiffle[{
+            "BeginPackage[\"" <> fixture["Context"] <> "\"]", "counter::usage = \"counter[]\";", "Begin[\"`Private`\"]",
+            "Module[{x = " <> start <> "}, counter[] := (x = x + 1)]", "Module[{y = 1}, y + 1]", "End[]", "EndPackage[]"
+        }, "\n"], "Text"];
+        build[] := Sort[FileBaseName /@ BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False]["Converted"]];
+        code["0"];
+        {build[], code["5"]; build[], DeleteFile[FileNameJoin[{fixture["Directory"], "build", "cache", "definitions.wxf"}]]; build[]}
+    ]]],
+    {{"counter", "notes"}, {"counter"}, {}},
+    TestID -> "Build: a closure's state is in the cone of the function that names it, and never in that of a page whose math ends a name with $"
+]
+
+VerificationTest[
     withFixtureDocs[Function[dir, Module[{calls = 0, counting = False},
         Internal`InheritedBlock[{exampleCode},
             DownValues[exampleCode] = Prepend[DownValues[exampleCode], HoldPattern[exampleCode[arguments___]] /; ! counting :> Block[{counting = True}, calls++; exampleCode[arguments]]];

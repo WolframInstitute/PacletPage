@@ -250,7 +250,9 @@ textNames[text_String] := DeleteDuplicates[StringCases[text, $identifier]];
 (* what the codes of pages and examples are made of: the scan's cone digests and the shared part *)
 definitionKeys[scan_Association, shared_String] := <|
     "Cones" -> scan["Cones"], "Shared" -> shared,
-    "ByOwnName" -> GroupBy[Keys[scan["Cones"]], Last[StringSplit[#, "`"]] &],
+    (* a name without its context, such as the x$ that inline math $...x$ ends with, is never a
+       Module's local *)
+    "ByOwnName" -> GroupBy[Complement[Keys[scan["Cones"]], Lookup[scan, "Temporaries", {}]], Last[StringSplit[#, "`"]] &],
     "System" -> AssociationThread[StringReplace[Names["System`*"], StartOfString ~~ "System`" -> ""] -> True]
 |>;
 

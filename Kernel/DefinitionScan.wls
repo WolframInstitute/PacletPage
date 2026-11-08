@@ -15,6 +15,8 @@ Begin["DefinitionScan`"]
                    a System` symbol's, and of every symbol those use, and so on;
      "Uses", "Components", "Largest" -> the number of uses, of components of symbols that reach
                    each other, and the size of the largest;
+     "Temporaries" -> the Module locals among the symbols, x$, which no name without its context
+                   is;
      "Read"     -> the files the loading read;
      "Foreign"  -> the hash of the definitions of System` and Global` symbols the loading made
                    or changed, such as a MakeBoxes rule or SetOptions of a system function;
@@ -139,6 +141,19 @@ If[ ! loaded,
        gains a definition joins them, and the cones of the symbols that name it change. *)
     kept = Pick[names, scanned[[All, 4]], False];
     keptParts = Pick[scanned, scanned[[All, 4]], False];
+    (* A Module's local that a definition's code names, a closure's state, lives as long as that
+       definition; one that none names is left over from the loading, there in one run and gone in
+       the next, and is no symbol of the cones. *)
+    temporary = AssociationThread[kept -> (temporaryQ /@ kept)];
+    codeNames = AssociationThread[kept -> keptParts[[All, 2]]];
+    namedTemporaries = FixedPoint[
+        Function[found, Union[found, Select[DeleteDuplicates[Catenate[Lookup[codeNames, found]]], TrueQ[Lookup[temporary, #, False]] &]]],
+        Select[DeleteDuplicates[Catenate[Values[KeySelect[codeNames, ! temporary[#] &]]]], TrueQ[Lookup[temporary, #, False]] &]
+    ];
+    named = AssociationThread[namedTemporaries -> True];
+    keep = (! temporary[#] || KeyExistsQ[named, #]) & /@ kept;
+    kept = Pick[kept, keep];
+    keptParts = Pick[keptParts, keep];
     keyOf = If[temporaryQ[#], StringReplace[#, RegularExpression["\\$[0-9]+$"] -> "$"], #] & /@ kept;
     keys = DeleteDuplicates[keyOf];
     n = Length[keys];
@@ -146,7 +161,8 @@ If[ ! loaded,
     keyIndex = Lookup[index, keyOf];
     known = AssociationThread[kept -> keyIndex];
     system = AssociationThread[StringReplace[Names["System`*"], StartOfString ~~ "System`" -> ""] -> True];
-    byOwnName = GroupBy[kept, ownName];
+    (* a name without its context is never a Module's local *)
+    byOwnName = GroupBy[Select[kept, ! temporaryQ[#] &], ownName];
     progress[IntegerString[Length[names]], " definitions read: ", IntegerString[n], " symbols with definitions in ", IntegerString[Length[contexts]], " contexts; ", IntegerString[Length[changed]], " System` and Global` symbols changed"];
     (* a name in a string: a symbol of the cones in full or by its own name, unless that is a
        System` symbol's *)
@@ -197,6 +213,7 @@ If[ ! loaded,
         "Cones" -> AssociationThread[keys -> Lookup[digests, component]],
         "Uses" -> Length[pairs],
         "Components" -> m,
+        "Temporaries" -> DeleteDuplicates[Pick[keyOf, temporaryQ /@ kept]],
         "Largest" -> Max[Length /@ components],
         "Read" -> Union[read],
         "Foreign" -> Hash[BinarySerialize[KeyTake[after, changed]], "SHA256", "HexString"],
