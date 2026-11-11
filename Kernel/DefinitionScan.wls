@@ -123,6 +123,14 @@ foreignHash[new_Association, names_List] := fingerprint[StringRiffle[# <> " " <>
    was made, a default RandomGraph[...], and holds the same in every scan. *)
 loadedQ[context_String] := (SeedRandom[1]; Needs[context] =!= $Failed && Contexts[context <> "*"] =!= {});
 
+(* A build server's kernel has no cloud session, and a dependency that reaches the cloud as it
+   loads would wait for a sign-in at a terminal that is not there. Where the environment names an
+   account, and this is no Mac, whose kernels start as the user's saved login, the kernel connects
+   as that account, as the build's own kernels do there. *)
+If[ $OperatingSystem =!= "MacOSX" && StringQ[Environment["WOLFRAM_CLOUD_USER"]] && StringQ[Environment["WOLFRAM_CLOUD_PASSWORD"]],
+    progress[If[StringQ[CloudConnect[Environment["WOLFRAM_CLOUD_USER"], Environment["WOLFRAM_CLOUD_PASSWORD"]]], "connected to the cloud", "no cloud connection"]]
+];
+
 before = snapshot[];
 progress[IntegerString[Length[before]], " System` and Global` definitions hashed"];
 contextsBefore = AssociationThread[Contexts[] -> True];
@@ -138,10 +146,17 @@ Internal`AddHandler["GetFileEvent", recordRead];
 unloaded = {};
 dependencyForeign = <||>;
 dependencyChanged = <||>;
+outranked = {};
 Scan[
     Function[dependency, With[{context = First[pacletContexts[dependency], None]},
         If[ StringQ[context],
+            progress["loading ", context];
             If[ ! loadedQ[context], AppendTo[unloaded, context]];
+            (* a newer version installed outranks the directory given: what loaded is not it *)
+            With[{found = PacletObject[PacletObject[File[dependency]]["Name"]]},
+                If[ PacletObjectQ[found] && ExpandFileName[found["Location"]] =!= ExpandFileName[dependency],
+                    AppendTo[outranked, context -> found["Version"]]; unloaded = Union[unloaded, {context}]]
+            ];
             With[{now = snapshot[]},
                 With[{names = changedBetween[before, now]},
                     dependencyChanged[dependency] = AssociationMap[now[#][[1]] &, names];
@@ -280,30 +295,66 @@ If[ ! loaded,
     (* by symbol: its fingerprint, or that of its locals' sorted fingerprints, and what they use *)
     grouped = GroupBy[Transpose[{keyIndex, keptParts[[All, 1]], uses}], First -> Rest];
     hashes = Table[With[{members = grouped[i]}, If[Length[members] === 1, members[[1, 1]], fingerprint[StringRiffle[Sort[members[[All, 1]]], "\n"]]]], {i, n}];
-    (* A dependency's files under Kernel/ and Assets/ that the loading did not read, and its
-       PacletInfo without its version, are part of each of its symbols: what no definition shows
-       of a dependency is in the cones that reach it, and in no other. *)
+    (* What no definition shows of a paclet is the files its loading did not read. Such a file
+       is part of the symbols whose code names it, as code that finds a file does: by a string
+       that is a directory on its path below the paclet's, its name, its name without extension
+       or its name among the paclet's assets. A dependency's file that no code names, and its
+       PacletInfo without its version, are part of each of its symbols; the paclet's own that no
+       code names is left to every page's key ("Attached" lists the others). *)
     wasRead = AssociationThread[read -> True];
+    mainDirectory = ownerOf[input["Context"], "Context"];
+    owned = GroupBy[Transpose[{ownerOf /@ kept, keyIndex, keptParts[[All, 3]]}], First -> Rest];
+    assetNames[dir_String] := With[{paclet = PacletObject[File[dir]]},
+        If[ ! PacletObjectQ[paclet], <||>,
+            Association @ Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Asset", rules___} :> With[{options = Association[Cases[{rules}, _Rule]]},
+                Cases[Flatten[{Lookup[options, "Assets", {}]}], ((name_String -> path_String) | {name_String, path_String}) :>
+                    (ExpandFileName[FileNameJoin[{dir, Lookup[options, "Root", "."], path}]] -> name)]], Infinity]]];
+    extra = <||>;
+    attached = {};
+    unnamed = <||>;
+    Scan[
+        Function[dir, Module[{files, byString, assets = assetNames[dir]},
+            files = Select[
+                Lookup[Lookup[input, "Files", <||>], dir, Sort @ Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &]],
+                ! KeyExistsQ[wasRead, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], Lookup[input, "Excluded", {}]] &];
+            byString = GroupBy[Catenate[Function[{index, strings}, {#, index} & /@ strings] @@@ Lookup[owned, dir, {}]], First -> Last, DeleteDuplicates];
+            unnamed[dir] = {};
+            Scan[
+                Function[file, With[
+                    {tokens = DeleteDuplicates @ DeleteCases[Join[
+                        Most[FileNameSplit[StringTrim[StringDrop[file, StringLength[dir]], "/" | "\\"]]],
+                        {FileNameTake[file], FileBaseName[file]}, Lookup[assets, {ExpandFileName[file]}, Nothing]], "Kernel" | "Assets" | ""],
+                     line = StringDrop[file, StringLength[dir]] <> " " <> FileHash[file, "SHA256", "HexString"]},
+                    With[{namers = DeleteDuplicates[Catenate[Lookup[byString, tokens, {}]]]},
+                        If[ namers === {},
+                            AppendTo[unnamed[dir], line],
+                            AppendTo[attached, file]; Scan[(extra[#] = Append[Lookup[extra, #, {}], line]) &, namers]
+                        ]
+                    ]
+                ]],
+                files
+            ]
+        ]],
+        DeleteDuplicates[Prepend[Lookup[input, "DependencyDirectories", {}], mainDirectory]]
+    ];
     dependencyParts = Map[
-        Function[dependency, With[{paclet = PacletObject[File[dependency]]},
+        Function[dependency,
             {
                 pacletContexts[dependency],
                 fingerprint[StringRiffle[Join[
                     StringDelete[ByteArrayToString[ReadByteArray[#], "UTF-8"], RegularExpression["\"Version\"\\s*->\\s*\"[^\"]*\"\\s*,?"]] & /@
                         Select[FileNameJoin[{dependency, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
                     {Lookup[dependencyForeign, dependency, ""]},
-                    StringDrop[#, StringLength[dependency]] <> " " <> FileHash[#, "SHA256", "HexString"] & /@ Select[
-                        Lookup[Lookup[input, "Files", <||>], dependency, Sort @ Select[FileNames["*", Select[FileNameJoin[{dependency, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &]],
-                        ! KeyExistsQ[wasRead, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dependency]], "/" | "\\"], Lookup[input, "Excluded", {}]] &
-                    ]
+                    Lookup[unnamed, dependency, {}]
                 ], "\n"]]
             }
-        ]],
+        ],
         Lookup[input, "DependencyDirectories", {}]
     ];
     hashes = MapThread[
-        Function[{key, hash}, With[{own = Select[dependencyParts, StringStartsQ[key, #[[1]]] &]}, If[own === {}, hash, fingerprint[hash <> " " <> StringRiffle[own[[All, 2]], " "]]]]],
-        {keys, hashes}
+        Function[{key, hash, index}, With[{own = Select[dependencyParts, StringStartsQ[key, #[[1]]] &], files = Sort[Lookup[extra, index, {}]]},
+            If[own === {} && files === {}, hash, fingerprint[hash <> " " <> StringRiffle[Join[own[[All, 2]], files], " "]]]]],
+        {keys, hashes, Range[n]}
     ];
     pairs = Catenate[Table[Thread[{i, DeleteDuplicates[Catenate[grouped[i][[All, 2]]]]}], {i, n}]];
     progress[IntegerString[Length[pairs]], " uses"];
@@ -342,6 +393,8 @@ If[ ! loaded,
         "Largest" -> Max[Length /@ components],
         "Read" -> read,
         "Unloaded" -> unloaded,
+        "Outranked" -> outranked,
+        "Attached" -> attached,
         "Foreign" -> foreignHash[after, changed],
         "Changed" -> changed,
         "ChangedHashes" -> AssociationMap[after[#][[1]] &, changed],

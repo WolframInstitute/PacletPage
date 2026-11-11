@@ -814,7 +814,7 @@ VerificationTest[
         CreateDirectory[FileNameJoin[{dep, "Kernel"}]];
         depCode[version_String, f_String, g_String] := (
             Export[FileNameJoin[{dep, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/" <> name <> "\", \"Version\" -> \"" <> version <> "\", \"PrimaryContext\" -> \"" <> name <> "`\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"" <> name <> "`\"}}|>]", "Text"];
-            Export[FileNameJoin[{dep, "Kernel", name <> ".wl"}], StringRiffle[{"BeginPackage[\"" <> name <> "`\"]", "depf", "depg", "Begin[\"`Private`\"]", "depf[x_] := " <> f, "depg[x_] := " <> g, "End[]", "EndPackage[]"}, "\n"], "Text"]
+            Export[FileNameJoin[{dep, "Kernel", name <> ".wl"}], StringRiffle[{"BeginPackage[\"" <> name <> "`\"]", "depf", "depg", "Begin[\"`Private`\"]", "depf[x_] := " <> f, "depg[x_] := {" <> g <> ", \"table.txt\"}", "End[]", "EndPackage[]"}, "\n"], "Text"]
         );
         depCode["1.0.0", "x + 1", "x + 2"];
         (* foo reaches the dependency only when it runs, by a name it passes to code that joins the
@@ -822,7 +822,7 @@ VerificationTest[
            nothing *)
         Export[fixture["Code"], StringRiffle[{
             "BeginPackage[\"" <> fixture["Context"] <> "\"]", "foo", "bar", "Begin[\"`Private`\"]",
-            "foo[x_] := (Needs[\"" <> name <> "`\"]; named[\"depf\"][x])", "named[n_String] := Symbol[\"" <> name <> "`\" <> n]", "bar[x_] := {2 x, \"depg\"}", "End[]", "EndPackage[]"
+            "foo[x_] := (Needs[\"" <> name <> "`\"]; named[\"depf\"][x])", "named[n_String] := Symbol[\"" <> name <> "`\" <> n]", "bar[x_] := {2 x, \"depg\", \"own.txt\"}", "End[]", "EndPackage[]"
         }, "\n"], "Text"];
         build[] := Sort[FileBaseName /@ BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False, "Dependencies" -> {dep}]["Converted"]];
         AppendTo[runs, build[]];
@@ -830,11 +830,15 @@ VerificationTest[
         depCode["1.0.0", "x + 10", "x + 20"]; AppendTo[runs, build[]];
         depCode["1.1.0", "x + 10", "x + 20"]; AppendTo[runs, build[]];
         Export[FileNameJoin[{dep, "Kernel", "Later.wl"}], "1", "Text"]; AppendTo[runs, build[]];
+        (* a file the dependency's depg names, which no page reaches, and one of the paclet's own
+           that its bar names *)
+        Export[FileNameJoin[{dep, "Kernel", "table.txt"}], "1", "Text"]; AppendTo[runs, build[]];
+        Export[FileNameJoin[{fixture["Directory"], "Kernel", "own.txt"}], "1", "Text"]; AppendTo[runs, build[]];
         PacletDirectoryUnload[dep];
         DeleteDirectory[dep, DeleteContents -> True];
         runs
     ]]],
-    {{"bar", "foo"}, {"foo"}, {}, {}, {"foo"}},
+    {{"bar", "foo"}, {"foo"}, {}, {}, {"foo"}, {}, {"bar"}},
     TestID -> "Build: a dependency's symbols are in the cones, also one loaded on first use: a change to it converts only the pages that reach it, its new version alone none, and a file its loading does not read the pages that reach any of it"
 ]
 

@@ -204,6 +204,7 @@ pacletContext[dir_String] := With[{paclet = PacletObject[File[dir]]},
    converter. So a change to one function converts again only the pages whose markdown reaches it. *)
 $definitionScan := FileNameJoin[{$packageDirectory, "DefinitionScan.wls"}];
 
+BuildPacletDocumentation::outranked = "The dependency `1` loads from an installed version `2`, which outranks the directory given: its pages are evaluated with that version, and every page's key has the directory's code whole.";
 BuildPacletDocumentation::scan = "The paclet's definitions were not scanned (`1`), so every page's key has all of its code.";
 
 (* the scan, kept in the cache under the paclet's and its dependencies' whole code, the Wolfram
@@ -213,7 +214,7 @@ definitionScan[dirs_List, context_String, key_String, cache_String, work_String,
     old = If[FileExistsQ[saved], Import[saved, "WXF"], None];
     If[ AssociationQ[old] && Lookup[old, "Key", None] === key, Return[old["Scan"], Module]];
     Export[in, Join[<|"Directories" -> dirs, "Context" -> context, "Dependencies" -> dependencies|>, more], "WXF"];
-    runScan[{in, out}, TrueQ[monitored], 3600];
+    runScan[{in, out}, TrueQ[monitored], 1800];
     data = If[FileExistsQ[out], Import[out, "WXF"], <|"Failure" -> "the scan wrote nothing"|>];
     If[ AssociationQ[data] && KeyExistsQ[data, "Cones"],
         Export[saved, <|"Key" -> key, "Scan" -> data|>, "WXF"]; data,
@@ -228,6 +229,8 @@ runScan[arguments_List, monitored_, deadline_] := Module[{kernel = kernelExecuta
     If[ kernel === None, Return[$Failed, Module]];
     process = StartProcess[Join[{kernel, "-noprompt", "-script", $definitionScan}, arguments]];
     If[ ! MatchQ[process, _ProcessObject], Return[$Failed, Module]];
+    (* nothing answers a prompt: with its input closed, code that asks for one fails at once *)
+    Close[ProcessConnection[process, "StandardInput"]];
     end = AbsoluteTime[] + deadline;
     lines[text_] := If[ StringQ[text],
         pending = pending <> text;
@@ -249,7 +252,7 @@ runScan[arguments_List, monitored_, deadline_] := Module[{kernel = kernelExecuta
 
 (* the part of the code every page's key shares *)
 sharedCode[dir_String, scan_Association, dependencies_List, excluded_List, versioned_, converterID_] := With[
-    {read = AssociationThread[ExpandFileName /@ scan["Read"] -> True], unloaded = Lookup[scan, "Unloaded", {}]},
+    {read = AssociationThread[ExpandFileName /@ Join[scan["Read"], Lookup[scan, "Attached", {}]] -> True], unloaded = Lookup[scan, "Unloaded", {}]},
     digest[{
         fileKey[#, versioned] & /@ Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
         unreadFiles[dir, read, excluded],
@@ -344,7 +347,7 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
         digest[{codeHash[Prepend[closure, dir], {}, True], {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} & /@ pacletFiles[dir],
             Function[d, {FileNameTake[#], FileHash[#, "SHA256"]} & /@ pacletFiles[d]] /@ closure, opts["Excluded"], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
         opts["Cache"], opts["Work"], opts["Monitor"], DeleteDuplicates[Select[pacletContext /@ closure, StringQ]],
-        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"], "Files" -> AssociationMap[pacletFiles, closure]|>
+        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"], "Files" -> AssociationMap[pacletFiles, Prepend[closure, dir]]|>
     ];
     If[ FailureQ[scan],
         Which[
@@ -353,6 +356,7 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
         ];
         Return[whole[], Module]
     ];
+    Scan[Message[BuildPacletDocumentation::outranked, First[#], Last[#]] &, Lookup[scan, "Outranked", {}]];
     keys = definitionKeys[scan, sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], opts["Converter"]]];
     <|"Codes" -> Association[#Page -> pageCode[keys, #File] & /@ tasks], "Keys" -> keys|>
 ];
