@@ -170,6 +170,28 @@ exampleDirectories[dir_String, dependencies_] := DeleteDuplicates @ Prepend[
     dir
 ];
 
+(* the paclet's dependencies all the way down, as directories: its own, theirs, and so on *)
+dependencyClosure[dir_String, dependencies_] := Module[{seen = {dir}, queue = Rest[exampleDirectories[dir, dependencies]]},
+    While[ queue =!= {},
+        With[{next = First[queue]},
+            queue = Rest[queue];
+            If[ ! MemberQ[seen, next],
+                AppendTo[seen, next];
+                queue = Join[queue, Rest[exampleDirectories[next, Automatic]]]
+            ]
+        ]
+    ];
+    Rest[seen]
+];
+(* the context that loads a paclet: its primary context, else its Kernel extension's *)
+pacletContext[dir_String] := With[{paclet = PacletObject[File[dir]]},
+    If[ ! PacletObjectQ[paclet], None,
+        Replace[paclet["PrimaryContext"], Except[_String] :> FirstCase[
+            Replace[paclet["Extensions"], Except[_List] -> {}],
+            {"Kernel", rules___} :> First[Flatten[{Lookup[Cases[{rules}, _Rule], "Context", None]}], None], None]]
+    ]
+];
+
 (* The code a page's examples run, by what the page uses ("CacheKey" -> "Definitions"): the cones
    of the paclet's symbols its markdown names, and what no definition shows. DefinitionScan.wls
    loads the paclet in a fresh kernel and reads each symbol of the contexts the loaded paclets
@@ -186,11 +208,11 @@ BuildPacletDocumentation::scan = "The paclet's definitions were not scanned (`1`
 
 (* the scan, kept in the cache under the paclet's and its dependencies' whole code, the Wolfram
    version and the scan's own code, and done again when one of them changes *)
-definitionScan[dirs_List, context_String, key_String, cache_String, work_String, monitored_ : False] := Module[
+definitionScan[dirs_List, context_String, key_String, cache_String, work_String, monitored_ : False, dependencies_List : {}, more_Association : <||>] := Module[
     {saved = FileNameJoin[{cache, "definitions.wxf"}], in = FileNameJoin[{work, "definitions-in.wxf"}], out = FileNameJoin[{work, "definitions.wxf"}], old, data},
     old = If[FileExistsQ[saved], Import[saved, "WXF"], None];
     If[ AssociationQ[old] && Lookup[old, "Key", None] === key, Return[old["Scan"], Module]];
-    Export[in, <|"Directories" -> dirs, "Context" -> context|>, "WXF"];
+    Export[in, Join[<|"Directories" -> dirs, "Context" -> context, "Dependencies" -> dependencies|>, more], "WXF"];
     runScan[{in, out}, TrueQ[monitored], 3600];
     data = If[FileExistsQ[out], Import[out, "WXF"], <|"Failure" -> "the scan wrote nothing"|>];
     If[ AssociationQ[data] && KeyExistsQ[data, "Cones"],
@@ -226,21 +248,25 @@ runScan[arguments_List, monitored_, deadline_] := Module[{kernel = kernelExecuta
 ];
 
 (* the part of the code every page's key shares *)
-sharedCode[dir_String, scan_Association, dependencies_, excluded_List, versioned_, converterID_] := With[
-    {read = AssociationThread[ExpandFileName /@ scan["Read"] -> True]},
+sharedCode[dir_String, scan_Association, dependencies_List, excluded_List, versioned_, converterID_] := With[
+    {read = AssociationThread[ExpandFileName /@ scan["Read"] -> True], unloaded = Lookup[scan, "Unloaded", {}]},
     digest[{
         fileKey[#, versioned] & /@ Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
-        Map[
-            {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &,
-            Select[
-                Sort @ Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &],
-                ! KeyExistsQ[read, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], excluded] &
-            ]
-        ],
+        unreadFiles[dir, read, excluded],
         scan["Foreign"],
-        codeHash[#, excluded, versioned] & /@ Rest[exampleDirectories[dir, dependencies]],
+        (* a dependency's definitions, and what no definition shows of it, are in the cones that
+           reach it; one that did not load is here whole *)
+        codeHash[#, excluded, versioned] & /@ Select[dependencies, MemberQ[unloaded, pacletContext[#]] || ! StringQ[pacletContext[#]] &],
         converterID
     }]
+];
+(* a paclet's files under Kernel/ and Assets/ that the loading did not read, with their hashes *)
+unreadFiles[dir_String, read_Association, excluded_List] := Map[
+    {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &,
+    Select[
+        Sort @ Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &],
+        ! KeyExistsQ[read, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], excluded] &
+    ]
 ];
 
 (* the names a text holds *)
@@ -278,17 +304,19 @@ pageCode[keys_Association, file_String] := namesCode[keys, Prepend[textNames[Byt
    whose examples run here, or "Code", the paclet's whole code for every page, as when the scan
    fails; and the keys the examples' codes are made with, or None *)
 pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] := Module[
-    {whole, context = paclet["PrimaryContext"], dirs, scan, keys},
+    {whole, context = paclet["PrimaryContext"], dirs, scan, keys, closure},
     (* the whole code, hashed once, for every page *)
     whole[] := With[{code = digest[{exampleCode[dir, opts["Dependencies"], opts["Excluded"], opts["Versioned"]], opts["Converter"]}]},
         <|"Codes" -> AssociationMap[code &, Lookup[tasks, "Page", {}]], "Keys" -> None|>
     ];
     If[ ! StringQ[context] || mode === "Code" || (mode === Automatic && opts["EvaluationKernel"] =!= None), Return[whole[], Module]];
-    dirs = DeleteDuplicates[Append[pacletDirectories[], dir]];
+    closure = dependencyClosure[dir, opts["Dependencies"]];
+    dirs = DeleteDuplicates[Join[pacletDirectories[], {dir}, closure]];
     scan = definitionScan[
         dirs, context,
-        digest[{codeHash[exampleDirectories[dir, opts["Dependencies"]], {}, True], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
-        opts["Cache"], opts["Work"], opts["Monitor"]
+        digest[{codeHash[Prepend[closure, dir], {}, True], opts["Excluded"], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
+        opts["Cache"], opts["Work"], opts["Monitor"], DeleteDuplicates[Select[pacletContext /@ closure, StringQ]],
+        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"]|>
     ];
     If[ FailureQ[scan],
         Which[
@@ -297,7 +325,7 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
         ];
         Return[whole[], Module]
     ];
-    keys = definitionKeys[scan, sharedCode[dir, scan, opts["Dependencies"], opts["Excluded"], opts["Versioned"], opts["Converter"]]];
+    keys = definitionKeys[scan, sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], opts["Converter"]]];
     <|"Codes" -> Association[#Page -> pageCode[keys, #File] & /@ tasks], "Keys" -> keys|>
 ];
 

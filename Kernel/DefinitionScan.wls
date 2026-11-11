@@ -3,7 +3,9 @@ Begin["DefinitionScan`"]
 (* Run by BuildPacletDocumentation in a fresh kernel, and never read into PacletPage itself: loads a
    paclet and writes, as WXF, what the page cache's keys need of it.
        WolframKernel -noprompt -script DefinitionScan.wls in.wxf out.wxf
-   in.wxf: <|"Directories" -> the paclet directories to load, "Context" -> the context to load|>.
+   in.wxf: <|"Directories" -> the paclet directories to load, "Context" -> the context to load,
+   "Dependencies" -> the contexts of the paclet's dependencies, loaded after it,
+   "DependencyDirectories" -> their directories, "Excluded" -> patterns of files left out|>.
    out.wxf:
      "Symbols"  -> each symbol of the contexts the loading made, by its full name, the hash of its
                    Language`ExtendedDefinition: its own, down, sub, up, N, format and default
@@ -67,7 +69,7 @@ pacletParts[name_String, unreadable_String] := With[{definition = pacletDefiniti
             {
                 fingerprint[Block[{$ContextPath = {"System`"}, $Context = "DefinitionScan`"}, StringReplace[ToString[definition, InputForm], RegularExpression["([A-Za-z][A-Za-z0-9]*)\\$[0-9]+"] -> "$1$"]]],
                 DeleteDuplicates @ Cases[code, s_Symbol /; AtomQ[Unevaluated[s]] :> Context[Unevaluated[s]] <> SymbolName[Unevaluated[s]], {0, Infinity}, Heads -> True],
-                DeleteDuplicates @ Cases[code, text_String /; StringFreeQ[text, WhitespaceCharacter] :> text, {0, Infinity}],
+                DeleteDuplicates @ Cases[code, text_String /; StringFreeQ[text, WhitespaceCharacter] :> text, {0, Infinity}, Heads -> True],
                 MatchQ[definition, HoldComplete[{}, Language`DefinitionList[] | Language`DefinitionList[_ -> {(_ -> {}) ...}]]]
             }
         ]
@@ -92,7 +94,15 @@ read = {};
 recordRead = Function[Null, read = Join[read, Cases[{##}, name_String :> Replace[FindFile[name], {file_String :> ExpandFileName[file], _ -> Nothing}], Infinity]]];
 Internal`AddHandler["GetFileEvent", recordRead];
 loaded = Needs[input["Context"]] =!= $Failed && MemberQ[Contexts[], input["Context"]];
+(* the dependencies, all the way down, loaded too, also one the paclet loads only on first use:
+   their symbols are symbols of the cones. One that does not load is named in "Unloaded". *)
+unloaded = If[ loaded,
+    Select[Lookup[input, "Dependencies", {}], Function[context, ! (Needs[context] =!= $Failed && MemberQ[Contexts[], context])]],
+    {}
+];
 Internal`RemoveHandler["GetFileEvent", recordRead];
+If[ Lookup[input, "Dependencies", {}] =!= {},
+    progress[IntegerString[Length[Lookup[input, "Dependencies", {}]] - Length[unloaded]], " dependencies loaded", If[unloaded === {}, "", ", not " <> StringRiffle[unloaded, ", "]]]];
 progress[input["Context"], If[loaded, " loaded, ", " did not load, "], IntegerString[Length[Union[read]]], " files read"];
 
 identifier = (LetterCharacter | "$") ~~ ((WordCharacter | "$") ...) ~~ (("`" ~~ (LetterCharacter | "$") ~~ ((WordCharacter | "$") ...)) ...);
@@ -181,6 +191,30 @@ If[ ! loaded,
     (* by symbol: its fingerprint, or that of its locals' sorted fingerprints, and what they use *)
     grouped = GroupBy[Transpose[{keyIndex, keptParts[[All, 1]], uses}], First -> Rest];
     hashes = Table[With[{members = grouped[i]}, If[Length[members] === 1, members[[1, 1]], fingerprint[StringRiffle[Sort[members[[All, 1]]], "\n"]]]], {i, n}];
+    (* A dependency's files under Kernel/ and Assets/ that the loading did not read, and its
+       PacletInfo without its version, are part of each of its symbols: what no definition shows
+       of a dependency is in the cones that reach it, and in no other. *)
+    wasRead = AssociationThread[Union[read] -> True];
+    dependencyParts = Map[
+        Function[dependency, With[{paclet = PacletObject[File[dependency]]},
+            {
+                Select[Flatten[{paclet["PrimaryContext"], Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Kernel", rules___} :> Lookup[Cases[{rules}, _Rule], "Context", {}]]}], StringQ],
+                fingerprint[StringRiffle[Join[
+                    StringDelete[ByteArrayToString[ReadByteArray[#], "UTF-8"], RegularExpression["\"Version\"\\s*->\\s*\"[^\"]*\"\\s*,?"]] & /@
+                        Select[FileNameJoin[{dependency, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
+                    StringDrop[#, StringLength[dependency]] <> " " <> FileHash[#, "SHA256", "HexString"] & /@ Select[
+                        Sort @ Select[FileNames["*", Select[FileNameJoin[{dependency, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &],
+                        ! KeyExistsQ[wasRead, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dependency]], "/" | "\\"], Lookup[input, "Excluded", {}]] &
+                    ]
+                ], "\n"]]
+            }
+        ]],
+        Lookup[input, "DependencyDirectories", {}]
+    ];
+    hashes = MapThread[
+        Function[{key, hash}, With[{own = Select[dependencyParts, StringStartsQ[key, #[[1]]] &]}, If[own === {}, hash, fingerprint[hash <> " " <> StringRiffle[own[[All, 2]], " "]]]]],
+        {keys, hashes}
+    ];
     pairs = Catenate[Table[Thread[{i, DeleteDuplicates[Catenate[grouped[i][[All, 2]]]]}], {i, n}]];
     progress[IntegerString[Length[pairs]], " uses"];
     (* Each symbol's cone, as a digest: the symbols that reach each other are one component, and a
@@ -216,6 +250,7 @@ If[ ! loaded,
         "Temporaries" -> DeleteDuplicates[Pick[keyOf, temporaryQ /@ kept]],
         "Largest" -> Max[Length /@ components],
         "Read" -> Union[read],
+        "Unloaded" -> unloaded,
         "Foreign" -> Hash[BinarySerialize[KeyTake[after, changed]], "SHA256", "HexString"],
         "Changed" -> changed,
         "Contexts" -> contexts

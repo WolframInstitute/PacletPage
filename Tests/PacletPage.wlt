@@ -809,6 +809,34 @@ VerificationTest[
 ]
 
 VerificationTest[
+    withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n", "bar" -> "```wl\nbar[1]\n```\n"|>, Function[fixture, Module[
+        {dep = CreateDirectory[], name = "Dp" <> IntegerString[RandomInteger[10^12], 36], depCode, build, runs = {}},
+        CreateDirectory[FileNameJoin[{dep, "Kernel"}]];
+        depCode[version_String, f_String, g_String] := (
+            Export[FileNameJoin[{dep, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/" <> name <> "\", \"Version\" -> \"" <> version <> "\", \"PrimaryContext\" -> \"" <> name <> "`\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"" <> name <> "`\"}}|>]", "Text"];
+            Export[FileNameJoin[{dep, "Kernel", name <> ".wl"}], StringRiffle[{"BeginPackage[\"" <> name <> "`\"]", "depf", "depg", "Begin[\"`Private`\"]", "depf[x_] := " <> f, "depg[x_] := " <> g, "End[]", "EndPackage[]"}, "\n"], "Text"]
+        );
+        depCode["1.0.0", "x + 1", "x + 2"];
+        (* foo reaches the dependency only when it runs, by a name in a string *)
+        Export[fixture["Code"], StringRiffle[{
+            "BeginPackage[\"" <> fixture["Context"] <> "\"]", "foo", "bar", "Begin[\"`Private`\"]",
+            "foo[x_] := (Needs[\"" <> name <> "`\"]; Symbol[\"" <> name <> "`depf\"][x])", "bar[x_] := 2 x", "End[]", "EndPackage[]"
+        }, "\n"], "Text"];
+        build[] := Sort[FileBaseName /@ BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False, "Dependencies" -> {dep}]["Converted"]];
+        AppendTo[runs, build[]];
+        depCode["1.0.0", "x + 10", "x + 2"]; AppendTo[runs, build[]];
+        depCode["1.0.0", "x + 10", "x + 20"]; AppendTo[runs, build[]];
+        depCode["1.1.0", "x + 10", "x + 20"]; AppendTo[runs, build[]];
+        Export[FileNameJoin[{dep, "Kernel", "Later.wl"}], "1", "Text"]; AppendTo[runs, build[]];
+        PacletDirectoryUnload[dep];
+        DeleteDirectory[dep, DeleteContents -> True];
+        runs
+    ]]],
+    {{"bar", "foo"}, {"foo"}, {}, {}, {"foo"}},
+    TestID -> "Build: a dependency's symbols are in the cones, also one loaded on first use: a change to it converts only the pages that reach it, its new version alone none, and a file its loading does not read the pages that reach any of it"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"counter" -> "```wl\ncounter[]\n```\n", "notes" -> "Its growth is $x/\\log x$.\n"|>, Function[fixture, Module[{code, build},
         code[start_String] := Export[fixture["Code"], StringRiffle[{
             "BeginPackage[\"" <> fixture["Context"] <> "\"]", "counter::usage = \"counter[]\";", "Begin[\"`Private`\"]",
