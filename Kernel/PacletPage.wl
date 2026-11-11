@@ -50,6 +50,13 @@ it deletes them, and the Databin too with \"DeleteDatabin\" -> True.";
 CheckPacletPage::usage = "CheckPacletPage[catalog, name] checks that the site name, the pages it frames and its \
 feedback form are reachable, and gives a report.";
 
+PacletDefinitionScan::usage = "PacletDefinitionScan[dir] loads the paclet in dir and its dependencies in a fresh kernel and \
+gives what the documentation cache is keyed by: each symbol's fingerprint, the digest of everything it uses, and the \
+graph of the uses.";
+
+PacletPageDependencies::usage = "PacletPageDependencies[dir, file] gives what a markdown page of the paclet in dir depends \
+on: the symbols it names, every symbol those reach, and the code its cache key holds.";
+
 BuildPacletDocumentation::usage = "BuildPacletDocumentation[dir] converts the markdown documentation of the paclet in \
 dir into documentation notebooks under Documentation/English, and its ResourceDefinition.md into the definition \
 notebook its resource is deployed from.";

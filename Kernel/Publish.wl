@@ -314,21 +314,91 @@ definitionKeys[scan_Association, shared_String] := <|
 
 (* the code names reach: the shared part and the digests of the cones of the paclet's symbols
    they name, a name in full or by its own name, unless that is a System` symbol's *)
-namesCode[keys_Association, names_List] := digest[{
-    keys["Shared"],
-    Union @ Lookup[keys["Cones"], DeleteDuplicates @ Catenate @ Map[
-        Which[
-            KeyExistsQ[keys["Cones"], #], {#},
-            KeyExistsQ[keys["System"], Last[StringSplit[#, "`"]]], {},
-            True, Lookup[keys["ByOwnName"], Last[StringSplit[#, "`"]], {}]
-        ] &,
-        names
-    ]]
-}];
+namesCode[keys_Association, names_List] := digest[{keys["Shared"], Union @ Lookup[keys["Cones"], namedSymbols[keys, names]]}];
+(* the paclet's symbols that names name *)
+namedSymbols[keys_Association, names_List] := DeleteDuplicates @ Catenate @ Map[
+    Which[
+        KeyExistsQ[keys["Cones"], #], {#},
+        KeyExistsQ[keys["System"], Last[StringSplit[#, "`"]]], {},
+        True, Lookup[keys["ByOwnName"], Last[StringSplit[#, "`"]], {}]
+    ] &,
+    names
+];
+(* the names of a page: those of its markdown, and its own *)
+pageTextNames[file_String] := Prepend[textNames[ByteArrayToString[ReadByteArray[file], "UTF-8"]], FileBaseName[file]];
 
 (* a page's code: what the names of its markdown reach, its code and its front matter among them,
    and its own name *)
-pageCode[keys_Association, file_String] := namesCode[keys, Prepend[textNames[ByteArrayToString[ReadByteArray[file], "UTF-8"]], FileBaseName[file]]];
+pageCode[keys_Association, file_String] := namesCode[keys, pageTextNames[file]];
+
+(* the scan of a paclet with its dependencies, from the cache or made anew, or a Failure *)
+scanPaclet[dir_String, context_String, closure_List, opts_Association] := With[{dirs = DeleteDuplicates[Join[pacletDirectories[], {dir}, closure]]},
+    definitionScan[
+        dirs, context,
+        digest[{codeHash[Prepend[closure, dir], {}, True], {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} & /@ pacletFiles[dir],
+            Function[d, {FileNameTake[#], FileHash[#, "SHA256"]} & /@ pacletFiles[d]] /@ closure, opts["Excluded"], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
+        opts["Cache"], opts["Work"], opts["Monitor"], DeleteDuplicates[Select[pacletContext /@ closure, StringQ]],
+        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"], "Files" -> AssociationMap[pacletFiles, Prepend[closure, dir]]|>
+    ]
+];
+
+(* ==================== the scan and a page's dependencies, for a reader ==================== *)
+
+PacletDefinitionScan::dir = PacletPageDependencies::dir = "`1` is not a paclet directory with a primary context.";
+PacletDefinitionScan::scan = PacletPageDependencies::scan = "The paclet's definitions were not scanned: `1`.";
+PacletPageDependencies::file = "`1` is not a file.";
+
+Options[PacletDefinitionScan] = {"Dependencies" -> Automatic, "CacheDirectory" -> Automatic, "CacheExcludedFiles" -> {}, "Monitor" -> False};
+Options[PacletPageDependencies] = Join[Options[PacletDefinitionScan], {"CacheVersion" -> True, "Converter" -> Automatic}];
+
+(* the scan, with what it was made of: {scan, closure, excluded}, or $Failed after a message *)
+readerScan[head_, dir_String, options_List] := Module[{paclet, context, closure, cache, work, scan, excluded},
+    paclet = If[FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] || FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]], PacletObject[File[dir]], None];
+    context = If[PacletObjectQ[paclet], paclet["PrimaryContext"], None];
+    If[ ! StringQ[context], With[{h = head}, Message[MessageName[h, "dir"], dir]]; Return[$Failed, Module]];
+    PacletDirectoryLoad[dir];
+    excluded = Flatten[{OptionValue[head, options, "CacheExcludedFiles"]}];
+    closure = dependencyClosure[dir, OptionValue[head, options, "Dependencies"]];
+    cache = Replace[OptionValue[head, options, "CacheDirectory"], Automatic -> FileNameJoin[{dir, "build", "cache"}]];
+    If[ ! DirectoryQ[cache], CreateDirectory[cache, CreateIntermediateDirectories -> True]];
+    work = CreateDirectory[];
+    scan = scanPaclet[dir, context, closure, <|"Excluded" -> excluded, "Cache" -> cache, "Work" -> work, "Monitor" -> TrueQ[OptionValue[head, options, "Monitor"]]|>];
+    DeleteDirectory[work, DeleteContents -> True];
+    If[ FailureQ[scan], With[{h = head}, Message[MessageName[h, "scan"], scan["Message"]]]; Return[$Failed, Module]];
+    {scan, closure, excluded}
+];
+scanGraph[scan_Association] := With[{names = Keys[scan["Symbols"]]},
+    Graph[names, Catenate[MapThread[Function[{from, to}, DirectedEdge[from, #] & /@ DeleteCases[names[[to]], from]], {names, Lookup[scan, "Edges", ConstantArray[{}, Length[names]]]}]]]
+];
+
+PacletDefinitionScan[dir_String, opts : OptionsPattern[]] := Module[{result = readerScan[PacletDefinitionScan, dir, {opts}]},
+    If[ result === $Failed, Return[$Failed, Module]];
+    With[{scan = First[result]},
+        <|
+            "Symbols" -> scan["Symbols"], "Cones" -> scan["Cones"], "Graph" -> scanGraph[scan],
+            "Contexts" -> scan["Contexts"], "Dependencies" -> result[[2]], "FilesRead" -> scan["Read"],
+            "FilesNamed" -> Lookup[scan, "Attached", {}], "SystemChanged" -> scan["Changed"],
+            "Unloaded" -> Lookup[scan, "Unloaded", {}], "Outranked" -> Lookup[scan, "Outranked", {}]
+        |>
+    ]
+];
+
+PacletPageDependencies[dir_String, file_String, opts : OptionsPattern[]] := Module[{result, scan, keys, named, graph},
+    If[ ! FileExistsQ[file], Message[PacletPageDependencies::file, file]; Return[$Failed, Module]];
+    result = readerScan[PacletPageDependencies, dir, {opts}];
+    If[ result === $Failed, Return[$Failed, Module]];
+    scan = First[result];
+    keys = definitionKeys[scan, sharedCode[dir, scan, result[[2]], result[[3]], OptionValue["CacheVersion"], converterSpec[OptionValue["Converter"]]["ID"]]];
+    named = Sort[namedSymbols[keys, pageTextNames[file]]];
+    graph = scanGraph[scan];
+    <|
+        "Named" -> named,
+        "Reached" -> If[named === {}, {}, Sort[VertexOutComponent[graph, named]]],
+        "Graph" -> If[named === {}, Graph[{}], Subgraph[graph, VertexOutComponent[graph, named]]],
+        "Code" -> namesCode[keys, pageTextNames[file]],
+        "Shared" -> keys["Shared"]
+    |>
+];
 
 (* each page's code, by "CacheKey": "Definitions", Automatic for a paclet with a primary context
    whose examples run here, or "Code", the paclet's whole code for every page, as when the scan
@@ -341,14 +411,7 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
     ];
     If[ ! StringQ[context] || mode === "Code" || (mode === Automatic && opts["EvaluationKernel"] =!= None), Return[whole[], Module]];
     closure = dependencyClosure[dir, opts["Dependencies"]];
-    dirs = DeleteDuplicates[Join[pacletDirectories[], {dir}, closure]];
-    scan = definitionScan[
-        dirs, context,
-        digest[{codeHash[Prepend[closure, dir], {}, True], {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} & /@ pacletFiles[dir],
-            Function[d, {FileNameTake[#], FileHash[#, "SHA256"]} & /@ pacletFiles[d]] /@ closure, opts["Excluded"], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
-        opts["Cache"], opts["Work"], opts["Monitor"], DeleteDuplicates[Select[pacletContext /@ closure, StringQ]],
-        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"], "Files" -> AssociationMap[pacletFiles, Prepend[closure, dir]]|>
-    ];
+    scan = scanPaclet[dir, context, closure, opts];
     If[ FailureQ[scan],
         Which[
             mode === "Definitions", Message[BuildPacletDocumentation::scan, scan["Message"]],

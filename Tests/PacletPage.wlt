@@ -810,6 +810,26 @@ VerificationTest[
 
 VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n", "bar" -> "```wl\nbar[1]\n```\n"|>, Function[fixture, Module[
+        {scan, context = fixture["Context"], page, before, after},
+        page[name_] := PacletPageDependencies[fixture["Directory"], FileNameJoin[{fixture["Directory"], "docs", "Symbols", name <> ".md"}], "Converter" -> fakeConvert];
+        scan = PacletDefinitionScan[fixture["Directory"]];
+        before = page /@ {"foo", "bar"};
+        definitionCode[fixture, "x + 7", "2 x"];
+        after = page /@ {"foo", "bar"};
+        {
+            Sort[StringDelete[Keys[scan["Symbols"]], context]],
+            Sort[StringDelete[#, context] & /@ List @@@ EdgeList[scan["Graph"]]],
+            StringDelete[#["Reached"], context] & /@ before,
+            MapThread[#1["Code"] === #2["Code"] &, {before, after}],
+            Quiet[PacletDefinitionScan[$TemporaryDirectory], PacletDefinitionScan::dir]
+        }
+    ]]],
+    {{"bar", "foo", "Private`helper"}, {{"foo", "Private`helper"}}, {{"foo", "Private`helper"}, {"bar"}}, {False, True}, $Failed},
+    TestID -> "Scan: the symbols with definitions, the graph of their uses, and what a page names and reaches; its code changes with a definition it reaches"
+]
+
+VerificationTest[
+    withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n", "bar" -> "```wl\nbar[1]\n```\n"|>, Function[fixture, Module[
         {dep = CreateDirectory[], name = "Dp" <> IntegerString[RandomInteger[10^12], 36], depCode, build, runs = {}},
         CreateDirectory[FileNameJoin[{dep, "Kernel"}]];
         depCode[version_String, f_String, g_String] := (

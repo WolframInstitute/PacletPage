@@ -15,6 +15,8 @@ Begin["DefinitionScan`"]
                    symbol of those contexts its definition uses, a symbol of its code or a name in
                    a string of its code with no space, in full or by its own name unless that is
                    a System` symbol's, and of every symbol those use, and so on;
+     "Edges"    -> for each symbol, in the order of "Symbols", the positions there of the symbols
+                   it uses;
      "Uses", "Components", "Largest" -> the number of uses, of components of symbols that reach
                    each other, and the size of the largest;
      "Temporaries" -> the Module locals among the symbols, x$, which no name without its context
@@ -387,6 +389,7 @@ If[ ! loaded,
         "Symbols" -> AssociationThread[keys -> hashes],
         "Cones" -> AssociationThread[keys -> Lookup[digests, component]],
         "Uses" -> Length[pairs],
+        "Edges" -> Table[DeleteDuplicates[Catenate[grouped[i][[All, 2]]]], {i, n}],
         "Components" -> m,
         "Temporaries" -> DeleteDuplicates[Pick[keyOf, temporaryQ /@ kept]],
         "Seeds" -> seeds,

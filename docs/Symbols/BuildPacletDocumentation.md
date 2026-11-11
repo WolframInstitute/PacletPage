@@ -5,9 +5,9 @@ Context: WolframInstitute`PacletPage`
 Paclet: WolframInstitute/PacletPage
 URI: WolframInstitute/PacletPage/ref/BuildPacletDocumentation
 Keywords: [markdown, documentation, notebooks, build, MarkdownToNotebook]
-SeeAlso: [DeployPacletResource, SubmitPacletResource, PublishPacletPage]
+SeeAlso: [DeployPacletResource, SubmitPacletResource, PublishPacletPage, PacletDefinitionScan, PacletPageDependencies]
 RelatedGuides: [PacletPage]
-RelatedTutorials: [PublishingADocumentationSite]
+RelatedTutorials: [PublishingADocumentationSite, CachingADocumentationBuild]
 ---
 
 ## Usage

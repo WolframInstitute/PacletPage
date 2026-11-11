@@ -7,7 +7,7 @@ Paclet: WolframInstitute/PacletPage
 URI: WolframInstitute/PacletPage/guide/PacletPage
 Description: Build, publish and maintain a paclet's documentation, from markdown to a site around its published pages.
 Keywords: [paclet, documentation, website, Paclet Repository, cloud, feedback, permissions, markdown, submission]
-RelatedTutorials: [PublishingADocumentationSite]
+RelatedTutorials: [PublishingADocumentationSite, CachingADocumentationBuild]
 ---
 
 ## Abstract
@@ -21,6 +21,10 @@ PacletPage takes a paclet from the markdown in its `docs/` folder to a published
 - `DeployPacletResource` build the paclet afresh and deploy its resource to the cloud
 - `SubmitPacletResource` submit the paclet to the Paclet Repository
 - `PublishPacletPage` all of it, and the site, in one call
+
+### The documentation cache
+- `PacletDefinitionScan` each symbol's fingerprint, and the graph of what uses what
+- `PacletPageDependencies` the symbols a page names and reaches, and the code in its cache key
 
 ### The site
 - `PacletPageCatalog` the pages of a published paclet, the notebook behind each, and the guide tree
