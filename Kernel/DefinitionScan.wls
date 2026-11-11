@@ -34,12 +34,14 @@ arguments = Replace[$CommandLine, {{___, "-script", _, rest___} :> {rest}, _ -> 
 {in, out} = Take[arguments, -2];
 input = Import[in, "WXF"];
 
-(* a symbol's whole definition as text, every symbol in it with its context, the names a Module
-   made, x$123, without their numbers, so that two loadings of the same code give the same text *)
+(* a System` or Global` symbol's definition as text, every symbol in it with its context, the names
+   a Module made, x$123, without their numbers, so that two loadings of the same code give the same
+   text; without its messages, since the kernel gives a symbol a message's text the first time the
+   message is issued, which depends on files and timing no paclet's code decides *)
 definitionText[name_String] := Replace[ToExpression[name, InputForm, Hold], Hold[s_] :>
     Block[{$ContextPath = {"System`"}, $Context = "DefinitionScan`"},
         StringReplace[
-            ToString[Language`ExtendedDefinition[s, ExcludedContexts -> {}], InputForm],
+            ToString[Language`ExtendedDefinition[s, ExcludedContexts -> {}] /. HoldPattern[Messages -> _] :> Nothing, InputForm],
             RegularExpression["([A-Za-z][A-Za-z0-9]*)\\$[0-9]+"] -> "$1$"
         ]
     ]
@@ -102,7 +104,7 @@ declared = DeleteDuplicates[Catenate[pacletContexts /@ input["Directories"]]];
    Wolfram's defines on first use has until then. *)
 foreignNames[] := Join[Names["System`*"], Names["Global`*"]];
 bareQ[name_String] := ToExpression[name, InputForm, Function[s, MatchQ[Language`ExtendedDefinition[s, ExcludedContexts -> {}],
-    Language`DefinitionList[] | Language`DefinitionList[_ -> {((Attributes -> _) | (_ -> {})) ...}]], HoldAllComplete]];
+    Language`DefinitionList[] | Language`DefinitionList[_ -> {((Attributes -> _) | (Messages -> _) | (_ -> {})) ...}]], HoldAllComplete]];
 snapshot[] := AssociationMap[{definitionHash[#], bareQ[#]} &, foreignNames[]];
 (* What a loading changed, between two snapshots. Left out: the count of Module's names, the
    file being read and the state of the random generator, which change with any code, and what
@@ -135,12 +137,16 @@ Internal`AddHandler["GetFileEvent", recordRead];
    and Global` is part of its own symbols. One that does not load is named in "Unloaded". *)
 unloaded = {};
 dependencyForeign = <||>;
+dependencyChanged = <||>;
 Scan[
     Function[dependency, With[{context = First[pacletContexts[dependency], None]},
         If[ StringQ[context],
             If[ ! loadedQ[context], AppendTo[unloaded, context]];
             With[{now = snapshot[]},
-                dependencyForeign[dependency] = foreignHash[now, changedBetween[before, now]];
+                With[{names = changedBetween[before, now]},
+                    dependencyChanged[dependency] = AssociationMap[now[#][[1]] &, names];
+                    dependencyForeign[dependency] = foreignHash[now, names]
+                ];
                 before = now
             ]
         ]
@@ -295,6 +301,7 @@ If[ ! loaded,
         "Foreign" -> foreignHash[after, changed],
         "Changed" -> changed,
         "ChangedHashes" -> AssociationMap[after[#][[1]] &, changed],
+        "DependencyChanged" -> dependencyChanged,
         "Contexts" -> contexts
     |>, "WXF"]
 ];
