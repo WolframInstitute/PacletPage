@@ -57,7 +57,8 @@ pacletDefinition[name_String] := Replace[ToExpression[name, InputForm, Hold], Ho
     ]
 ]];
 
-(* its fingerprint, the names it uses, and whether it has no definition at all. The names: every
+(* its fingerprint, the names it uses, and whether it has no definition at all, a Temporary
+   attribute aside, which the name a scoping construct renamed, head$, is left with. The names: every
    symbol of its code, and every name in a string of its code that has no space, as a name given to
    Symbol or ToExpression is. Its messages, usage among them, are in its fingerprint but name
    nothing: no evaluation reads them as code. A Locked symbol stands for every file the loading
@@ -67,24 +68,60 @@ pacletParts[name_String, unreadable_String] := With[{definition = pacletDefiniti
         {fingerprint[name <> " " <> unreadable], {}, {}, False},
         With[{code = definition /. HoldPattern[Messages -> _] :> Nothing},
             {
-                fingerprint[Block[{$ContextPath = {"System`"}, $Context = "DefinitionScan`"}, StringReplace[ToString[definition, InputForm], RegularExpression["([A-Za-z][A-Za-z0-9]*)\\$[0-9]+"] -> "$1$"]]],
+                fingerprint[Block[{$ContextPath = {"System`"}, $Context = "DefinitionScan`"}, StringReplace[ToString[canonical[definition], InputForm], RegularExpression["([A-Za-z][A-Za-z0-9]*)\\$[0-9]+"] -> "$1$"]]],
                 DeleteDuplicates @ Cases[code, s_Symbol /; AtomQ[Unevaluated[s]] :> Context[Unevaluated[s]] <> SymbolName[Unevaluated[s]], {0, Infinity}, Heads -> True],
                 DeleteDuplicates @ Cases[code, text_String /; StringFreeQ[text, WhitespaceCharacter] :> text, {0, Infinity}, Heads -> True],
-                MatchQ[definition, HoldComplete[{}, Language`DefinitionList[] | Language`DefinitionList[_ -> {(_ -> {}) ...}]]]
+                MatchQ[definition, HoldComplete[{} | {Temporary}, Language`DefinitionList[] | Language`DefinitionList[_ -> {((Attributes -> {} | {Temporary}) | (_ -> {})) ...}]]]
             }
         ]
     ]
 ];
 
+(* A definition with the objects whose text differs from one loading to the next in a form that
+   does not: a Graph's text shows its adjacency matrix in the order it was built, and a sparse
+   array its entries in theirs. Only an object itself is one, never the code that makes one. *)
+canonical[definition_] := definition /.
+    g_Graph /; AtomQ[Unevaluated[g]] :> RuleCondition[{"Graph", VertexList[g], Sort[EdgeList[g]], Sort[Options[g]]}] /.
+    s_SparseArray /; AtomQ[Unevaluated[s]] :> RuleCondition[{"SparseArray", Dimensions[s], Sort[ArrayRules[s]]}];
+
 (* a text's fingerprint: 64 bits of CRC32 and Adler32, which cost a microsecond where SHA256 costs
    a quarter of a millisecond, whatever the text's length *)
 fingerprint[text_String] := IntegerString[Hash[text, "CRC32"], 16, 8] <> IntegerString[Hash[text, "Adler32"], 16, 8];
 
-(* the paclet's contexts are the ones its directories and its loading make, those of the symbols
-   its PacletInfo declares among them; a definition it makes elsewhere is one of System` or
-   Global` symbols *)
+(* the contexts a paclet directory declares: its primary context and its Kernel extensions' *)
+pacletContexts[dir_String] := With[{paclet = PacletObject[File[dir]]},
+    If[ ! PacletObjectQ[paclet], {},
+        DeleteDuplicates @ Select[Flatten[{paclet["PrimaryContext"], Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Kernel", rules___} :> Lookup[Cases[{rules}, _Rule], "Context", {}]]}], StringQ]
+    ]
+];
+declared = DeleteDuplicates[Catenate[pacletContexts /@ input["Directories"]]];
+
+(* The paclets' contexts are those under a declared one that the loading makes; a definition a
+   loading makes elsewhere is one of System` or Global` symbols. A snapshot has, by name, each
+   one's fingerprint and whether it has no definition to see, as a symbol that a package of
+   Wolfram's defines on first use has until then. *)
 foreignNames[] := Join[Names["System`*"], Names["Global`*"]];
-before = AssociationMap[definitionHash, foreignNames[]];
+bareQ[name_String] := ToExpression[name, InputForm, Function[s, MatchQ[Language`ExtendedDefinition[s, ExcludedContexts -> {}],
+    Language`DefinitionList[] | Language`DefinitionList[_ -> {((Attributes -> _) | (_ -> {})) ...}]], HoldAllComplete]];
+snapshot[] := AssociationMap[{definitionHash[#], bareQ[#]} &, foreignNames[]];
+(* What a loading changed, between two snapshots. Left out: the count of Module's names, the
+   file being read and the state of the random generator, which change with any code, and what
+   names the session; and a symbol with nothing to see before whose
+   definition now names nothing of the paclets, which is Wolfram's own package loaded on its first
+   use, by whichever code used it first. *)
+changedBetween[old_Association, new_Association] := Sort @ Select[
+    DeleteCases[Keys[new], "$ModuleNumber" | "$InputFileName" | "$RandomGeneratorState" | "$SessionID" | "$ProcessID" | "$CommandLine" | "$ScriptCommandLine"],
+    Function[name, Lookup[old, name, {None, False}][[1]] =!= new[name][[1]] &&
+        ! (KeyExistsQ[old, name] && old[name][[2]] && (declared === {} || StringFreeQ[definitionText[name], declared]))]
+];
+foreignHash[new_Association, names_List] := fingerprint[StringRiffle[# <> " " <> new[#][[1]] & /@ names, "\n"]];
+
+(* a context loaded: Needs gives no failure, and the context, or one under it, is there. The
+   random generator is seeded first: a definition may hold what a random function gave when it
+   was made, a default RandomGraph[...], and holds the same in every scan. *)
+loadedQ[context_String] := (SeedRandom[1]; Needs[context] =!= $Failed && Contexts[context <> "*"] =!= {});
+
+before = snapshot[];
 progress[IntegerString[Length[before]], " System` and Global` definitions hashed"];
 contextsBefore = AssociationThread[Contexts[] -> True];
 Scan[PacletDirectoryLoad, input["Directories"]];
@@ -93,17 +130,30 @@ read = {};
 (* an event holds what Get was given, a file or a context, which FindFile resolves as Get does *)
 recordRead = Function[Null, read = Join[read, Cases[{##}, name_String :> Replace[FindFile[name], {file_String :> ExpandFileName[file], _ -> Nothing}], Infinity]]];
 Internal`AddHandler["GetFileEvent", recordRead];
-loaded = Needs[input["Context"]] =!= $Failed && MemberQ[Contexts[], input["Context"]];
-(* the dependencies, all the way down, loaded too, also one the paclet loads only on first use:
-   their symbols are symbols of the cones. One that does not load is named in "Unloaded". *)
-unloaded = If[ loaded,
-    Select[Lookup[input, "Dependencies", {}], Function[context, ! (Needs[context] =!= $Failed && MemberQ[Contexts[], context])]],
-    {}
+(* The dependencies, all the way down, are loaded first, also one the paclet loads only on first
+   use: their symbols are symbols of the cones, and what each one's loading changes of System`
+   and Global` is part of its own symbols. One that does not load is named in "Unloaded". *)
+unloaded = {};
+dependencyForeign = <||>;
+Scan[
+    Function[dependency, With[{context = First[pacletContexts[dependency], None]},
+        If[ StringQ[context],
+            If[ ! loadedQ[context], AppendTo[unloaded, context]];
+            With[{now = snapshot[]},
+                dependencyForeign[dependency] = foreignHash[now, changedBetween[before, now]];
+                before = now
+            ]
+        ]
+    ]],
+    Lookup[input, "DependencyDirectories", {}]
 ];
+If[ Lookup[input, "DependencyDirectories", {}] =!= {},
+    progress[IntegerString[Length[dependencyForeign] - Length[unloaded]], " dependencies loaded", If[unloaded === {}, "", ", not " <> StringRiffle[unloaded, ", "]]]];
+loaded = loadedQ[input["Context"]];
 Internal`RemoveHandler["GetFileEvent", recordRead];
-If[ Lookup[input, "Dependencies", {}] =!= {},
-    progress[IntegerString[Length[Lookup[input, "Dependencies", {}]] - Length[unloaded]], " dependencies loaded", If[unloaded === {}, "", ", not " <> StringRiffle[unloaded, ", "]]]];
-progress[input["Context"], If[loaded, " loaded, ", " did not load, "], IntegerString[Length[Union[read]]], " files read"];
+(* the files read that are a paclet's: a loading also reads files of Wolfram's and temporary ones *)
+read = With[{roots = ExpandFileName /@ input["Directories"]}, Select[Union[read], StringStartsQ[#, roots] && FileExistsQ[#] &]];
+progress[input["Context"], If[loaded, " loaded, ", " did not load, "], IntegerString[Length[read]], " files read"];
 
 identifier = (LetterCharacter | "$") ~~ ((WordCharacter | "$") ...) ~~ (("`" ~~ (LetterCharacter | "$") ~~ ((WordCharacter | "$") ...)) ...);
 ownName[name_String] := Last[StringSplit[name, "`"]];
@@ -111,21 +161,11 @@ contextOf[name_String] := StringReplace[name, RegularExpression["[^`]*$"] -> ""]
 
 If[ ! loaded,
     Export[out, <|"Failure" -> "Needs[\"" <> input["Context"] <> "\"] did not load it"|>, "WXF"],
-    after = AssociationMap[definitionHash, foreignNames[]];
-    (* the count of Module's names and the file being read change with any code *)
-    changed = Sort[Select[DeleteCases[Keys[after], "$ModuleNumber" | "$InputFileName"], Lookup[before, #, None] =!= after[#] &]];
+    after = snapshot[];
+    changed = changedBetween[before, after];
     contexts = Sort[Complement[Contexts[], Keys[contextsBefore]]];
-    (* the paclets' own contexts: those under a primary context or a Kernel extension's context of
-       a paclet the directories hold, not those of the Wolfram packages the loading autoloads; all
-       the loading made where the paclets name none *)
-    declared = DeleteDuplicates @ Select[Flatten @ Map[
-        Function[dir, With[{paclet = PacletObject[File[dir]]},
-            If[ ! PacletObjectQ[paclet], {},
-                {paclet["PrimaryContext"], Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Kernel", rules___} :> Lookup[Cases[{rules}, _Rule], "Context", {}]]}
-            ]
-        ]],
-        input["Directories"]
-    ], StringQ];
+    (* the paclets' own contexts, not those of the Wolfram packages the loading autoloads; all the
+       loading made where the paclets declare none *)
     contexts = If[ declared === {}, contexts, Select[contexts, StringStartsQ[#, declared] &]];
     inContexts = AssociationThread[contexts -> True];
     (* with no context on the path, Names gives every name in full; one call lists them all *)
@@ -135,7 +175,7 @@ If[ ! loaded,
     temporaryQ[name_String] := StringMatchQ[ownName[name], RegularExpression["[A-Za-z][A-Za-z0-9]*\\$[0-9]+"]];
     definedQ[name_String] := ToExpression[name, InputForm, Function[s, OwnValues[s] =!= {} || DownValues[s] =!= {} || UpValues[s] =!= {} || SubValues[s] =!= {}, HoldAllComplete]];
     names = Select[all, ! temporaryQ[#] || definedQ[#] &];
-    unreadable = fingerprint[StringRiffle[# <> " " <> FileHash[#, "SHA256", "HexString"] & /@ Union[read], "\n"]];
+    unreadable = fingerprint[StringRiffle[# <> " " <> FileHash[#, "SHA256", "HexString"] & /@ read, "\n"]];
     (* one symbol at a time, so that only its fingerprint and the names it uses are kept, with a
        line every 15 s *)
     done = 0; next = AbsoluteTime[] + 15;
@@ -194,14 +234,15 @@ If[ ! loaded,
     (* A dependency's files under Kernel/ and Assets/ that the loading did not read, and its
        PacletInfo without its version, are part of each of its symbols: what no definition shows
        of a dependency is in the cones that reach it, and in no other. *)
-    wasRead = AssociationThread[Union[read] -> True];
+    wasRead = AssociationThread[read -> True];
     dependencyParts = Map[
         Function[dependency, With[{paclet = PacletObject[File[dependency]]},
             {
-                Select[Flatten[{paclet["PrimaryContext"], Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Kernel", rules___} :> Lookup[Cases[{rules}, _Rule], "Context", {}]]}], StringQ],
+                pacletContexts[dependency],
                 fingerprint[StringRiffle[Join[
                     StringDelete[ByteArrayToString[ReadByteArray[#], "UTF-8"], RegularExpression["\"Version\"\\s*->\\s*\"[^\"]*\"\\s*,?"]] & /@
                         Select[FileNameJoin[{dependency, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
+                    {Lookup[dependencyForeign, dependency, ""]},
                     StringDrop[#, StringLength[dependency]] <> " " <> FileHash[#, "SHA256", "HexString"] & /@ Select[
                         Sort @ Select[FileNames["*", Select[FileNameJoin[{dependency, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &],
                         ! KeyExistsQ[wasRead, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dependency]], "/" | "\\"], Lookup[input, "Excluded", {}]] &
@@ -249,10 +290,11 @@ If[ ! loaded,
         "Components" -> m,
         "Temporaries" -> DeleteDuplicates[Pick[keyOf, temporaryQ /@ kept]],
         "Largest" -> Max[Length /@ components],
-        "Read" -> Union[read],
+        "Read" -> read,
         "Unloaded" -> unloaded,
-        "Foreign" -> Hash[BinarySerialize[KeyTake[after, changed]], "SHA256", "HexString"],
+        "Foreign" -> foreignHash[after, changed],
         "Changed" -> changed,
+        "ChangedHashes" -> AssociationMap[after[#][[1]] &, changed],
         "Contexts" -> contexts
     |>, "WXF"]
 ];
