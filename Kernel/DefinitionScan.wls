@@ -220,20 +220,63 @@ If[ ! loaded,
     (* a name without its context is never a Module's local *)
     byOwnName = GroupBy[Select[kept, ! temporaryQ[#] &], ownName];
     progress[IntegerString[Length[names]], " definitions read: ", IntegerString[n], " symbols with definitions in ", IntegerString[Length[contexts]], " contexts; ", IntegerString[Length[changed]], " System` and Global` symbols changed"];
-    (* a name in a string: a symbol of the cones in full or by its own name, unless that is a
-       System` symbol's *)
-    stringReferences[token_String] := Which[
+    (* Whose a symbol is: the paclet directory with the longest declared context its context is
+       under. *)
+    owners = Catenate[Function[dir, # -> dir & /@ pacletContexts[dir]] /@ input["Directories"]];
+    ownerOf[name_String] := ownerOf[contextOf[name], "Context"];
+    ownerOf[context_String, "Context"] := ownerOf[context, "Context"] = Replace[
+        MaximalBy[Select[owners, StringStartsQ[context, First[#]] &], StringLength[First[#]] &, 1], {{_ -> dir_} :> dir, _ -> None}];
+    pacletNames = Association[Function[dir, With[{paclet = PacletObject[File[dir]]}, If[PacletObjectQ[paclet], paclet["Name"] -> dir, Nothing]]] /@ input["Directories"]];
+    direct[dir_] := direct[dir] = With[{paclet = PacletObject[File[dir]]},
+        If[ ! PacletObjectQ[paclet], {},
+            DeleteMissing[Lookup[pacletNames, Replace[Replace[paclet["Dependencies"], Except[_List] -> {}], {(name_String -> _) :> name, {name_String, ___} :> name}, {1}]]]]];
+    reach[dir_] := reach[dir] = FixedPoint[Union[#, Catenate[direct /@ #]] &, {dir}];
+    hiddenQ[name_String] := StringContainsQ[contextOf[name], "Private`" | "PackageScope`"];
+    (* the paclet itself depends on every dependency it was given, declared in its PacletInfo or not *)
+    main = ownerOf[input["Context"], "Context"];
+    mayName[from_, name_String] := With[{to = ownerOf[name]},
+        to === from || ((MemberQ[reach[from], to] || (from === main && MemberQ[Lookup[input, "DependencyDirectories", {}], to])) && ! hiddenQ[name])];
+    (* The contexts a symbol's code gives a name: a context among its strings, the one it joins to
+       a name for Symbol or NameQ, compares with Context[...] or puts on $ContextPath, and those of
+       every symbol its code reaches, since a name passed on is given its context there. *)
+    codeUses = Lookup[known, Select[#, Function[name, KeyExistsQ[known, name]]]] & /@ keptParts[[All, 2]];
+    literals = Select[#, Function[text, KeyExistsQ[inContexts, text]]] & /@ keptParts[[All, 3]];
+    codeAt = Lookup[GroupBy[Transpose[{keyIndex, codeUses}], First -> Last, DeleteDuplicates @* Catenate], Range[n], {}];
+    literalAt = Lookup[GroupBy[Transpose[{keyIndex, literals}], First -> Last, DeleteDuplicates @* Catenate], Range[n], {}];
+    codePairs = Catenate[MapThread[Thread[{#1, #2}] &, {Range[n], codeAt}]];
+    codeComponents = ConnectedComponents[AdjacencyGraph[Range[n], SparseArray[If[codePairs === {}, {}, codePairs -> 1], {n, n}]]];
+    codeComponent = ConstantArray[0, n];
+    MapIndexed[(codeComponent[[#1]] = First[#2]) &, codeComponents];
+    codeLinks = If[ codePairs === {}, {},
+        With[{from = codeComponent[[codePairs[[All, 1]]]], to = codeComponent[[codePairs[[All, 2]]]]},
+            DeleteDuplicates[Pick[Transpose[{from, to}], Unitize[from - to], 1]]
+        ]
+    ];
+    codeReaches = Lookup[GroupBy[codeLinks, First -> Last], Range[Length[codeComponents]], {}];
+    given = <||>;
+    Scan[
+        Function[c, given[c] = Union[Catenate[literalAt[[codeComponents[[c]]]]], Catenate[Lookup[given, codeReaches[[c]]]]]],
+        Reverse[TopologicalSort[AdjacencyGraph[Range[Length[codeComponents]], SparseArray[If[codeLinks === {}, {}, codeLinks -> 1], {Length[codeComponents], Length[codeComponents]}]]]]
+    ];
+    (* A name in a string: a symbol of the cones in full; or by its own name, a symbol of the
+       string's own paclet, or one in a context its code gives a name. A word that is also the name
+       of another paclet's symbol, a property's key or a command's text, names nothing there.
+       Never a System` symbol's name. *)
+    stringReferences[from_, contextsGiven_List, token_String] := Which[
         KeyExistsQ[known, token], {known[token]},
         KeyExistsQ[system, ownName[token]], {},
-        True, Lookup[known, Lookup[byOwnName, ownName[token], {}]]
+        True, Lookup[known, Select[Lookup[byOwnName, ownName[token], {}], ownerOf[#] === from || MemberQ[contextsGiven, contextOf[#]] &]]
     ];
-    uses = Map[
-        Function[parts, DeleteDuplicates[Join[
+    uses = MapThread[
+        Function[{name, parts, index}, With[{from = ownerOf[name], contextsGiven = given[codeComponent[[index]]]}, DeleteDuplicates[Join[
             Lookup[known, Select[parts[[2]], KeyExistsQ[known, #] &]],
-            Catenate[stringReferences /@ DeleteDuplicates[Catenate[StringCases[parts[[3]], identifier]]]]
-        ]]],
-        keptParts
+            Catenate[stringReferences[from, contextsGiven, #] & /@ DeleteDuplicates[Catenate[StringCases[parts[[3]], identifier]]]]
+        ]]]],
+        {kept, keptParts, keyIndex}
     ];
+    (* what the paclet's own pages may name without a context: its own symbols, and those of the
+       paclets it depends on that are in no Private or PackageScope context *)
+    seeds = DeleteDuplicates[Pick[keyOf, (! temporaryQ[#] && mayName[main, #]) & /@ kept]];
     (* by symbol: its fingerprint, or that of its locals' sorted fingerprints, and what they use *)
     grouped = GroupBy[Transpose[{keyIndex, keptParts[[All, 1]], uses}], First -> Rest];
     hashes = Table[With[{members = grouped[i]}, If[Length[members] === 1, members[[1, 1]], fingerprint[StringRiffle[Sort[members[[All, 1]]], "\n"]]]], {i, n}];
@@ -250,7 +293,7 @@ If[ ! loaded,
                         Select[FileNameJoin[{dependency, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
                     {Lookup[dependencyForeign, dependency, ""]},
                     StringDrop[#, StringLength[dependency]] <> " " <> FileHash[#, "SHA256", "HexString"] & /@ Select[
-                        Sort @ Select[FileNames["*", Select[FileNameJoin[{dependency, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &],
+                        Lookup[Lookup[input, "Files", <||>], dependency, Sort @ Select[FileNames["*", Select[FileNameJoin[{dependency, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &]],
                         ! KeyExistsQ[wasRead, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dependency]], "/" | "\\"], Lookup[input, "Excluded", {}]] &
                     ]
                 ], "\n"]]
@@ -295,6 +338,7 @@ If[ ! loaded,
         "Uses" -> Length[pairs],
         "Components" -> m,
         "Temporaries" -> DeleteDuplicates[Pick[keyOf, temporaryQ /@ kept]],
+        "Seeds" -> seeds,
         "Largest" -> Max[Length /@ components],
         "Read" -> read,
         "Unloaded" -> unloaded,

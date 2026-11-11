@@ -260,13 +260,39 @@ sharedCode[dir_String, scan_Association, dependencies_List, excluded_List, versi
         converterID
     }]
 ];
-(* a paclet's files under Kernel/ and Assets/ that the loading did not read, with their hashes *)
+(* A paclet's files that its code may use: those under Kernel/ and Assets/, and under what its
+   PacletInfo declares besides, the roots of its Kernel, LibraryLink and AutoCompletionData
+   extensions and the files and directories of its Asset extensions; not its documentation. *)
+pacletFiles[dir_String] := Module[{paclet = PacletObject[File[dir]], extensions, places},
+    extensions = If[PacletObjectQ[paclet], Replace[paclet["Extensions"], Except[_List] -> {}], {}];
+    places = Join[
+        {"Kernel", "Assets"},
+        Catenate @ Cases[extensions, {kind : "Kernel" | "LibraryLink" | "AutoCompletionData" | "Asset", rules___} :> With[
+            {options = Association[Cases[{rules}, _Rule]]},
+            With[{root = Lookup[options, "Root", Switch[kind, "Kernel", "Kernel", "LibraryLink", "LibraryResources", "AutoCompletionData", "AutoCompletionData", _, "."]]},
+                If[ kind === "Asset",
+                    With[{assets = Cases[Flatten[{Lookup[options, "Assets", {}]}], (_ -> path_String) | {_, path_String} :> path]},
+                        If[assets === {}, If[MemberQ[{".", ""}, root], {}, {root}], FileNameJoin[{root, #}] & /@ assets]],
+                    {root}
+                ]
+            ]
+        ]]
+    ];
+    Sort @ DeleteDuplicates @ Catenate @ Map[
+        Function[place, With[{path = FileNameJoin[{dir, place}]},
+            Which[
+                StringQ[place] && DirectoryQ[path] && ExpandFileName[path] =!= ExpandFileName[dir], Select[FileNames["*", path, Infinity], FileType[#] === File &],
+                FileExistsQ[path] && FileType[path] === File, {path},
+                True, {}
+            ]
+        ]],
+        Select[places, StringQ]
+    ]
+];
+(* those of them that the loading did not read, with their hashes *)
 unreadFiles[dir_String, read_Association, excluded_List] := Map[
     {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &,
-    Select[
-        Sort @ Select[FileNames["*", Select[FileNameJoin[{dir, #}] & /@ {"Kernel", "Assets"}, DirectoryQ], Infinity], FileType[#] === File &],
-        ! KeyExistsQ[read, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], excluded] &
-    ]
+    Select[pacletFiles[dir], ! KeyExistsQ[read, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], excluded] &]
 ];
 
 (* the names a text holds *)
@@ -276,9 +302,10 @@ textNames[text_String] := DeleteDuplicates[StringCases[text, $identifier]];
 (* what the codes of pages and examples are made of: the scan's cone digests and the shared part *)
 definitionKeys[scan_Association, shared_String] := <|
     "Cones" -> scan["Cones"], "Shared" -> shared,
-    (* a name without its context, such as the x$ that inline math $...x$ ends with, is never a
-       Module's local *)
-    "ByOwnName" -> GroupBy[Complement[Keys[scan["Cones"]], Lookup[scan, "Temporaries", {}]], Last[StringSplit[#, "`"]] &],
+    (* a name without its context is one the paclet may name so: a symbol of its own, or one of
+       a paclet it depends on that is in no Private or PackageScope context; never a Module's
+       local, such as the x$ that inline math $...x$ ends with *)
+    "ByOwnName" -> GroupBy[Lookup[scan, "Seeds", Complement[Keys[scan["Cones"]], Lookup[scan, "Temporaries", {}]]], Last[StringSplit[#, "`"]] &],
     "System" -> AssociationThread[StringReplace[Names["System`*"], StartOfString ~~ "System`" -> ""] -> True]
 |>;
 
@@ -314,9 +341,10 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
     dirs = DeleteDuplicates[Join[pacletDirectories[], {dir}, closure]];
     scan = definitionScan[
         dirs, context,
-        digest[{codeHash[Prepend[closure, dir], {}, True], opts["Excluded"], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
+        digest[{codeHash[Prepend[closure, dir], {}, True], {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} & /@ pacletFiles[dir],
+            Function[d, {FileNameTake[#], FileHash[#, "SHA256"]} & /@ pacletFiles[d]] /@ closure, opts["Excluded"], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
         opts["Cache"], opts["Work"], opts["Monitor"], DeleteDuplicates[Select[pacletContext /@ closure, StringQ]],
-        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"]|>
+        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"], "Files" -> AssociationMap[pacletFiles, closure]|>
     ];
     If[ FailureQ[scan],
         Which[

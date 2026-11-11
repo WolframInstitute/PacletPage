@@ -817,10 +817,12 @@ VerificationTest[
             Export[FileNameJoin[{dep, "Kernel", name <> ".wl"}], StringRiffle[{"BeginPackage[\"" <> name <> "`\"]", "depf", "depg", "Begin[\"`Private`\"]", "depf[x_] := " <> f, "depg[x_] := " <> g, "End[]", "EndPackage[]"}, "\n"], "Text"]
         );
         depCode["1.0.0", "x + 1", "x + 2"];
-        (* foo reaches the dependency only when it runs, by a name in a string *)
+        (* foo reaches the dependency only when it runs, by a name it passes to code that joins the
+           dependency's context to it; bar holds a word that is a dependency's name too, and names
+           nothing *)
         Export[fixture["Code"], StringRiffle[{
             "BeginPackage[\"" <> fixture["Context"] <> "\"]", "foo", "bar", "Begin[\"`Private`\"]",
-            "foo[x_] := (Needs[\"" <> name <> "`\"]; Symbol[\"" <> name <> "`depf\"][x])", "bar[x_] := 2 x", "End[]", "EndPackage[]"
+            "foo[x_] := (Needs[\"" <> name <> "`\"]; named[\"depf\"][x])", "named[n_String] := Symbol[\"" <> name <> "`\" <> n]", "bar[x_] := {2 x, \"depg\"}", "End[]", "EndPackage[]"
         }, "\n"], "Text"];
         build[] := Sort[FileBaseName /@ BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False, "Dependencies" -> {dep}]["Converted"]];
         AppendTo[runs, build[]];
