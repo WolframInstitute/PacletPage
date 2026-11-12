@@ -314,7 +314,7 @@ definitionKeys[scan_Association, shared_String] := <|
 
 (* the code names reach: the shared part and the digests of the cones of the paclet's symbols
    they name, a name in full or by its own name, unless that is a System` symbol's *)
-namesCode[keys_Association, names_List] := digest[{keys["Shared"], Union @ Lookup[keys["Cones"], namedSymbols[keys, names]]}];
+namesCode[keys_Association, names_List, shared_String : "Shared"] := digest[{keys[shared], Union @ Lookup[keys["Cones"], namedSymbols[keys, names]]}];
 (* the paclet's symbols that names name *)
 namedSymbols[keys_Association, names_List] := DeleteDuplicates @ Catenate @ Map[
     Which[
@@ -421,6 +421,10 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
     ];
     Scan[Message[BuildPacletDocumentation::outranked, First[#], Last[#]] &, Lookup[scan, "Outranked", {}]];
     keys = definitionKeys[scan, sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], opts["Converter"]]];
+    (* An example's result is what its code evaluates to, which the paclet's code decides and the
+       converter does not: its code has the shared part without the converter, so that another
+       converter converts every page again and evaluates none of its examples again. *)
+    keys["ExampleShared"] = sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], None];
     <|"Codes" -> Association[#Page -> pageCode[keys, #File] & /@ tasks], "Keys" -> keys|>
 ];
 
@@ -509,7 +513,7 @@ pageExamples[internals_Association, keys_Association, task_Association] := Modul
     MapThread[
         Function[{hash, chain, index}, <|
             "Name" -> internals["exampleCacheName"][doc, index, hash],
-            "Code" -> namesCode[keys, textNames[StringRiffle[If[internals["stableHash"][salt <> StringJoin[internals["mdSep"] <> # & /@ chain]] === hash, chain, all], "\n"]]]
+            "Code" -> namesCode[keys, textNames[StringRiffle[If[internals["stableHash"][salt <> StringJoin[internals["mdSep"] <> # & /@ chain]] === hash, chain, all], "\n"]], "ExampleShared"]
         |>],
         {hashes, chains, Range[Length[hashes]]}
     ]

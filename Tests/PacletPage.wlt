@@ -948,6 +948,10 @@ VerificationTest[
             With[{names = {"PPFake/foo/x", "PPFake/bar/x"}, kept = PersistenceLocation["Local", FileNameJoin[{fixture["Directory"], "build", "cache", "examples"}]]},
                 AppendTo[runs, {Length[storedNames[kept, names]], Length[storedNames[PPFakeConverter`$cacheLocation, names]]}]
             ];
+            (* another converter with the same cache: every page again, no example *)
+            PPFakeConverter`convertTwin[file_String, out_String, opts : OptionsPattern[]] := PPFakeConverter`convert[file, out, opts];
+            With[{twin = BuildPacletDocumentation[fixture["Directory"], "Converter" -> PPFakeConverter`convertTwin, "Definition" -> None, "Parallel" -> False]},
+                runs = Insert[runs, {twin, {}}, -2]];
             DeleteDirectory[store, DeleteContents -> True];
             Append[{Sort[FileBaseName /@ #[[1, "Converted"]]], Sort[FileBaseName /@ #[[1, "Evaluated"]]], #[[2]]} & /@ Most[runs], Last[runs]]
         ]]
@@ -956,6 +960,7 @@ VerificationTest[
         {{"bar", "foo"}, {"bar", "foo"}, {"{0, 2}", "{0, 1}"}},
         {{"bar", "foo"}, {"bar", "foo"}, {"{1, 2}", "{0, 1}"}},
         {{"bar", "foo"}, {"foo"}, {"{1, 2}", "{1, 1}"}},
+        {{"bar", "foo"}, {}, {}},
         {3, 0}
     },
     TestID -> "Build: with the definitions scanned, only the cached results of the examples whose cells reach a changed function are deleted, so a page whose code does not evaluates nothing; the results are kept in the cache directory, and a whole build keeps only its pages' examples"
