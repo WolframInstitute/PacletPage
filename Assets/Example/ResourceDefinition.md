@@ -15,7 +15,7 @@ Categories: [Strings & Text]
 
 ## Details & Options
 
-- One function, [Greet](), with its reference page and a guide.
+- Two functions, [Greet]() and [Wave](), with their reference pages and a guide.
 
 ## Usage
 

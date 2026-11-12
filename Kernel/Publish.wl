@@ -443,7 +443,9 @@ converterInternals[spec_Association] := Module[{symbol, context},
     If[ ! AllTrue[$converterInternals, NameQ[context <> #] && ToExpression[context <> #, InputForm, Function[s, OwnValues[s] =!= {} || DownValues[s] =!= {}, HoldAllComplete]] &],
         Return[None, Module]];
     If[ NameQ[context <> "ensureParser"], Symbol[context <> "ensureParser"][]];
-    AssociationMap[Symbol[context <> #] &, $converterInternals]
+    (* a converter with rules for its outputs' forms has them in its cache's keys, as a salt *)
+    Join[AssociationMap[Symbol[context <> #] &, $converterInternals],
+        If[NameQ[context <> "outputSalt"], <|"outputSalt" -> Symbol[context <> "outputSalt"]|>, <||>]]
 ];
 
 (* The converter keeps each example's result as a PersistentSymbol at its $cacheLocation, by default
@@ -489,7 +491,7 @@ exampleChains[internals_Association, mode_, items_List] := Module[
 (* a page's examples: each one's name in the converter's cache and its code. An example whose
    chain does not give the converter's hash has every code cell of the page as its chain. *)
 pageExamples[internals_Association, keys_Association, task_Association] := Module[
-    {src, parsed, meta, template, blocks, mode, items, hashes, chains, doc, all},
+    {src, parsed, meta, template, blocks, mode, items, hashes, chains, doc, all, salt},
     If[ Lookup[task["Options"], "Evaluate", True] =!= True, Return[{}, Module]];
     src = internals["resolveSource"][task["File"]];
     parsed = internals["litParse"][src["Text"]];
@@ -499,14 +501,15 @@ pageExamples[internals_Association, keys_Association, task_Association] := Modul
     blocks = internals["resolveIncludes"][parsed["Blocks"], src["Base"]];
     mode = Replace[Lookup[task["Options"], "EvaluateSeparator", Automatic], Automatic :> If[MemberQ[internals["$narrativeTemplates"], template], None, Automatic]];
     items = Cases[blocks, b_ /; (internals["executableQ"][b] || MatchQ[b["Type"], "Separator" | "Heading"]), Infinity];
-    hashes = internals["cumulativeHashes"][mode, items];
+    salt = If[KeyExistsQ[internals, "outputSalt"], Replace[internals["outputSalt"][meta], Except[_String] -> ""], ""];
+    hashes = If[salt === "", internals["cumulativeHashes"][mode, items], internals["cumulativeHashes"][mode, items, salt]];
     chains = exampleChains[internals, mode, items];
     doc = Replace[Lookup[meta, "Name", ""], "" :> src["Name"]] <> internals["evaluatorTag"][Automatic];
     all = Select[items, internals["executableQ"]][[All, "Code"]];
     MapThread[
         Function[{hash, chain, index}, <|
             "Name" -> internals["exampleCacheName"][doc, index, hash],
-            "Code" -> namesCode[keys, textNames[StringRiffle[If[internals["stableHash"][StringJoin[internals["mdSep"] <> # & /@ chain]] === hash, chain, all], "\n"]]]
+            "Code" -> namesCode[keys, textNames[StringRiffle[If[internals["stableHash"][salt <> StringJoin[internals["mdSep"] <> # & /@ chain]] === hash, chain, all], "\n"]]]
         |>],
         {hashes, chains, Range[Length[hashes]]}
     ]

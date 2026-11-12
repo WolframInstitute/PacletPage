@@ -15,6 +15,18 @@ RelatedGuides: [PacletPage]
 
 A page depends on its own markdown, on the converter, and on the code its examples run. The build does not take that code to be the whole paclet. It reads the paclet's definitions and works out, for each page, which of them the page can reach.
 
+What decides whether a page is converted again:
+
+```mermaid
+flowchart TD
+    M[Page markdown] --> N[Symbols it names]
+    N --> C[Their cones]
+    C --> K{Key in the cache?}
+    S[Shared part] --> K
+    K -->|yes| Copy([Copy the notebook])
+    K -->|no| Convert([Convert the page])
+```
+
 ## A paclet with two functions
 
 A copy of the small example paclet that comes with PacletPage:
@@ -23,31 +35,22 @@ A copy of the small example paclet that comes with PacletPage:
 dir = CopyDirectory[PacletObject["WolframInstitute/PacletPage"]["AssetLocation", "Example"], FileNameJoin[{$TemporaryDirectory, CreateUUID["Greetings-"]}]]
 ```
 
-Its one function, `Greet`, gets a private helper, and a second function, `Wave`, joins it:
+Its code has two functions. `Greet` calls a private helper, `mark`, and `Wave` stands alone:
 
 ```wl
-code[wave_String] := StringRiffle[{
-    "BeginPackage[\"Demo`Greetings`\"]",
-    "Greet::usage = \"Greet[name] greets name.\";",
-    "Wave::usage = \"Wave[name] waves at name.\";",
-    "Begin[\"`Private`\"]",
-    "Greet[name_String] := \"Hello, \" <> name <> mark[]",
-    "mark[] := \"!\"",
-    "Wave[name_String] := " <> wave,
-    "End[]",
-    "EndPackage[]"
-}, "\n"];
-Export[FileNameJoin[{dir, "Kernel", "Greetings.wl"}], code["\"*waves at \" <> name"], "Text"]
+ReadString[FileNameJoin[{dir, "Kernel", "Greetings.wl"}]]
 ```
 
-A page for `Wave`, with one example:
+Each function has a page, and a guide lists them:
 
 ```wl
-Export[FileNameJoin[{dir, "docs", "Symbols", "Wave.md"}], StringRiffle[{
-    "---", "Template: Symbol", "Name: Wave", "Context: Demo`Greetings`", "Paclet: Demo/Greetings", "URI: Demo/Greetings/ref/Wave", "---", "",
-    "## Usage", "", "`Wave[name]` waves at *name*.", "",
-    "## Basic Examples", "", "```wl", "Wave[\"Ann\"]", "```", ""
-}, "\n"], "Text"]
+FileNameTake[#, -2] & /@ FileNames["*.md", FileNameJoin[{dir, "docs"}], Infinity]
+```
+
+The page of `Wave`, with one example:
+
+```wl
+ReadString[FileNameJoin[{dir, "docs", "Symbols", "Wave.md"}]]
 ```
 
 ## The first build and the next
@@ -76,13 +79,20 @@ FileBaseName /@ second["Cached"]
 
 ## A change to one function
 
-`Wave` gets a new definition:
+`Wave` gets a new definition: it waves to a name, where it waved at one.
 
 ```wl
-Export[FileNameJoin[{dir, "Kernel", "Greetings.wl"}], code["\"*waves to \" <> name"], "Text"]
+file = FileNameJoin[{dir, "Kernel", "Greetings.wl"}];
+Export[file, StringReplace[ReadString[file], "waves at \"" -> "waves to \""], "Text"]
 ```
 
-The build converts the page that uses `Wave` and leaves the pages that only use `Greet`:
+The code now:
+
+```wl
+ReadString[file]
+```
+
+The build converts the page that uses `Wave` and leaves the page of `Greet` as it is. The guide and the definition page name `Wave` too, so they are converted with it:
 
 ```wl
 third = BuildPacletDocumentation[dir, "Parallel" -> False]

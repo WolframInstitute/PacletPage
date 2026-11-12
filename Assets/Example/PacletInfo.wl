@@ -10,7 +10,7 @@ PacletObject[<|
     "WolframVersion" -> "14.3+",
     "PrimaryContext" -> "Demo`Greetings`",
     "Extensions" -> {
-        {"Kernel", "Root" -> "Kernel", "Context" -> "Demo`Greetings`", "Symbols" -> {"Demo`Greetings`Greet"}},
+        {"Kernel", "Root" -> "Kernel", "Context" -> "Demo`Greetings`", "Symbols" -> {"Demo`Greetings`Greet", "Demo`Greetings`Wave"}},
         {"Documentation", "Language" -> "English"}
     }
 |>]

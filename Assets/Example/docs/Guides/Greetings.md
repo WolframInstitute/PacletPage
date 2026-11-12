@@ -10,8 +10,9 @@ Keywords: [greeting]
 
 ## Abstract
 
-A small paclet to try PacletPage on: one function, its page and this guide.
+A small paclet to try PacletPage on: two functions, their pages and this guide.
 
 ## Functions
 
 - `Greet` greets a name
+- `Wave` waves at a name
