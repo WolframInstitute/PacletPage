@@ -1987,6 +1987,54 @@ VerificationTest[
     TestID -> "Archive: the last lines of a process's log, for one that did not record its pages"
 ]
 
+VerificationTest[
+    Module[{a, b, c},
+        a = HoldComplete[Notebook[{Cell[BoxData[InterpretationBox["env", Pub`Private`store$12143[Pub`Private`k$12144], "x"]], "Output"], Cell[BoxData["store$12143"], "Output"]}]];
+        b = HoldComplete[Notebook[{Cell[BoxData[InterpretationBox["env", Pub`Private`store$9876[Pub`Private`k$9877], "x"]], "Output"], Cell[BoxData["store$9876"], "Output"]}]];
+        c = HoldComplete[Notebook[{Cell[BoxData[InterpretationBox["env", Pub`Private`store$9876[Pub`Private`store$9876], "x"]], "Output"], Cell[BoxData["store$9876"], "Output"]}]];
+        {
+            withoutNoise[a] === withoutNoise[b], withoutNoise[a] === withoutNoise[c],
+            withoutNoise[HoldComplete[Cell["a x$1 b$22", "Text"], f[Print[1]; y$7]]]
+        }
+    ],
+    {True, False, HoldComplete[Cell["a x$1 b$22", "Text"], f[Print[1]; local[1]]]},
+    TestID -> "Deploy: a page evaluated again, its Module locals numbered by another session, keys as before; held, and text left as it is"
+]
+
+VerificationTest[
+    {transformCode[] === transformCode[], Internal`InheritedBlock[{pacletLinks}, pacletLinks[_] := 1; transformCode[]] =!= transformCode[],
+        FreeQ[transformContext[{}, {}], PacletObject["WolframInstitute/PacletPage"]["Version"]]},
+    {True, True, True},
+    TestID -> "Deploy: a page's transform is keyed on the transform's own code, not on PacletPage's version"
+]
+
+VerificationTest[
+    With[{pinned = pinRules["Pub/Sym", {"PubSym`f", "PubSym`g"}],
+          plain = HoldComplete[Notebook[{Cell[BoxData[RowBox[{"Plus", "[", "1", "]"}]], "Input"]}]],
+          showing = HoldComplete[Notebook[{Cell[BoxData[RowBox[{"f", "[", "1", "]"}]], "Input"]}]]},
+        Map[
+            Function[held, SameQ @@ Map[
+                Function[version, Block[{$transform = newTransform["/no/cache", transformContext[{version}, pinned], {version}, pinned, {}]}, pageContext[held]]],
+                {"1.0.0", "2.0.0"}
+            ]],
+            {plain, showing}
+        ]
+    ],
+    {True, False},
+    TestID -> "Deploy: a page that shows none of the paclet's symbols keeps its transform when the symbols' rules change"
+]
+
+VerificationTest[
+    Module[{calls = 0, result},
+        result = Block[{$cloudCopyPauses = {0, 0}, $cloudCopyTime = {1, 0},
+                CopyFile = Function[{from, to, opt}, calls++; If[calls === 1, Pause[10]]; CloudObject["https://c.example/obj/u/x"]]},
+            cloudCopy["/no/such/file", CloudObject["https://c.example/obj/u/x"]]];
+        {calls, result}
+    ],
+    {2, CloudObject["https://c.example/obj/u/x"]},
+    TestID -> "Deploy: a cloud upload that stalls is cut at its time limit and sent again"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},

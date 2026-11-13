@@ -1263,15 +1263,20 @@ cloudWriteFailureObject[what_String, name_String] := Failure["CloudWrite", <|
    seconds and then fifteen: the cloud now and then fails a write, with CopyFile::cloudunknown, that
    succeeds when sent again. An attempt that is tried again keeps its messages off the output, the
    one purpose of this Quiet, and does not stop the deploy; the last attempt's messages show, and
-   stop it as any failed write does. *)
+   stop it as any failed write does. Each attempt has a time limit, two minutes and ten seconds a
+   megabyte of the file: an upload can stall without failing, as full-size packets die on some
+   VPNs, and a stalled attempt is cut and sent again rather than waited on. *)
 $cloudWriteRetry = False;
 $cloudCopyPauses = {5, 15};
+$cloudCopyTime = {120, 10};
+cloudCopyLimit[from_] := First[$cloudCopyTime] + Last[$cloudCopyTime] * If[StringQ[from] && FileType[from] === File, FileByteCount[from] / 10.^6, 0];
 (* the archive and the files the stock deploy copies, sent the same way *)
 $cloudCopyRule = HoldPattern[CopyFile[from_, to_, OverwriteTarget -> True]] :> cloudCopy[from, to];
 cloudCopy[from_, to_] := cloudCopy[from, to, $cloudCopyPauses];
-cloudCopy[from_, to_, {}] := CopyFile[from, to, OverwriteTarget -> True];
+cloudCopy[from_, to_, {}] := TimeConstrained[CopyFile[from, to, OverwriteTarget -> True], cloudCopyLimit[from],
+    Message[DeployPacletResource::stalled, from, Round[cloudCopyLimit[from]]]; $Failed];
 cloudCopy[from_, to_, {pause_, rest___}] := Replace[
-    Block[{$cloudWriteRetry = True}, Quiet[CopyFile[from, to, OverwriteTarget -> True]]],
+    Block[{$cloudWriteRetry = True}, Quiet[TimeConstrained[CopyFile[from, to, OverwriteTarget -> True], cloudCopyLimit[from], $TimedOut]]],
     Except[_CloudObject] :> (Pause[pause]; cloudCopy[from, to, {rest}])
 ];
 
@@ -1296,8 +1301,30 @@ $frontEndNoise = ("WorkflowDockedCell" | "SearchTextTranslated") -> "";
 $buildNoise = ((ExpressionUUID | CellID | CellChangeTimes) -> _) | ("built" -> _) | $frontEndNoise;
 
 (* an expression without its build noise, removed outright at every level, as a held notebook
-   would keep the Sequence[] a replacement leaves *)
-withoutNoise[expr_] := DeleteCases[expr, $buildNoise, Infinity];
+   would keep the Sequence[] a replacement leaves, and with the Module locals its outputs hold
+   numbered by where they first appear: a page evaluated again names them by another session's
+   numbers, store$12143 for store$9876, and says the same *)
+withoutNoise[expr_] := withoutLocalNumbers[DeleteCases[expr, $buildNoise, Infinity]];
+
+(* each Module local, a symbol whose name ends in $ and digits, or a string that is such a name with
+   three digits or more, as a box shows it, replaced by local[n], n its place among the distinct
+   names in order of first appearance, held; a name in two contexts is one local *)
+withoutLocalNumbers[expr_] := Module[{found, names, rules},
+    found = Cases[expr, s : (_Symbol | _String) /; localQ[s] :> {HoldPattern[s], localKey[s]}, {0, Infinity}, Heads -> True];
+    If[ found === {}, Return[expr, Module]];
+    names = AssociationThread[DeleteDuplicates[found[[All, 2]]] -> Range[Length[DeleteDuplicates[found[[All, 2]]]]]];
+    rules = Dispatch[DeleteDuplicates[Map[With[{n = names[#[[2]]]}, #[[1]] -> local[n]] &, found]]];
+    Replace[expr, rules, {0, Infinity}, Heads -> True]
+];
+
+SetAttributes[{localQ, localKey}, HoldAllComplete];
+localQ[s_Symbol] := StringMatchQ[SymbolName[Unevaluated[s]], $localNamePattern];
+localQ[s_String] := StringContainsQ[s, "$"] && StringMatchQ[localName[s], $localNamePattern] && StringMatchQ[localName[s], __ ~~ "$" ~~ Repeated[DigitCharacter, {3, Infinity}]];
+localQ[_] := False;
+localKey[s_Symbol] := SymbolName[Unevaluated[s]];
+localKey[s_String] := localName[s];
+localName[s_String] := Last[StringSplit[s, "`"], s];
+$localNamePattern = LetterCharacter ~~ (LetterCharacter | DigitCharacter) ... ~~ "$" ~~ DigitCharacter ..;
 
 (* what a deploy writes and makes again whatever the record says: "Documentation", "Pages" *)
 $rewrite = {};
@@ -1674,6 +1701,7 @@ $transform = None;
 
 newTransform[cache_String, context_, symbolRules_List, pinned_List, kernels_List] := <|
     "Cache" -> cache, "Context" -> context, "SymbolRules" -> symbolRules, "PinRules" -> pinned, "Kernels" -> kernels,
+    "SymbolNames" -> transformSymbolNames[pinned],
     "Used" -> {}, "Cached" -> 0, "Transformed" -> 0, "Again" -> 0
 |>;
 
@@ -1714,10 +1742,23 @@ transformKey[file_String, type_, options_List, valid_Association] := With[{held 
         pacletLinks[held, Lookup[options, "PacletName", None], valid],
         type,
         DeleteCases[options, ("PackageURIs" | "PacletInfo") -> _],
-        $transform["Context"],
+        pageContext[held],
         (* the link rule a page with a sub-guide heading is transformed by *)
         If[FreeQ[held, "OrangeLink"], None, orangeLinkRule[]]
     }]
+];
+
+(* what a page's transform is made with: the symbols' rules, which name the paclet's version, only for
+   a page that holds one of its symbols' names, as the transform makes boxes of those alone; a page
+   that holds none keeps its transform when the paclet's version changes *)
+pageContext[held_] := With[{context = $transform["Context"], names = Lookup[$transform, "SymbolNames", <||>]},
+    If[ Length[names] > 0 && MatchQ[held, _HoldComplete] && ! showsSymbolQ[held, names], Take[context, 3], context]
+];
+showsSymbolQ[held_, names_Association] := AnyTrue[Cases[held, s_String :> s, Infinity], KeyExistsQ[names, #] &];
+
+(* the names, full and short, of the symbols the pin rules declare *)
+transformSymbolNames[pinned_List] := With[{full = Union[Flatten[Cases[pinned, (Rule | RuleDelayed)[_, s : {___String}] :> s]]]},
+    AssociationThread[Union[full, Map[Last[StringSplit[#, "`"], #] &, full]] -> True]
 ];
 
 (* a page's links into the paclet, each with whether a page is there for it, which is all the
@@ -2863,14 +2904,22 @@ withDeployKernels[parallel_, f_] := Module[{before = Kernels[], kernels},
     WithCleanup[f[kernels], closeKernels[Complement[Kernels[], before]]]
 ];
 
-(* what every page's transform is made with: the versions of the stock transform and of
-   PacletPage, and the rules the symbols' boxes are made with *)
+(* what every page's transform is made with: the version of the stock transform, the definitions of
+   PacletPage's own part in it, and the rules the symbols' boxes are made with. A PacletPage release
+   that leaves the transform's code as it was keeps every page transformed before. *)
 transformContext[symbolRules_List, pinned_List] := {
     $VersionNumber,
     Replace[PacletFind["PacletResource"], {{paclet_, ___} :> paclet["Version"], _ -> None}],
-    Replace[PacletFind["WolframInstitute/PacletPage"], {{paclet_, ___} :> paclet["Version"], _ -> None}],
+    transformCode[],
     symbolRules, pinned
 };
+
+(* a digest of the definitions the transform of a page runs, and of those its key is made by *)
+transformCode[] := digest[List @@ Map[Function[s, {OwnValues[s], DownValues[s], SubValues[s]}, HoldAllComplete], Hold[
+    transformRule, transformPages, transformFiles, $pageTransform, transformKey, transformFile, pacletLinks, heldNotebook, pageContext, showsSymbolQ,
+    orangeLinkRule, installDeployFixes, withoutNoise, withoutLocalNumbers, localQ, localKey, localName, $localNamePattern,
+    $buildNoise, $frontEndNoise
+]]];
 
 Options[DeployPacletResource] = {
     "Account" -> Automatic,
@@ -2913,6 +2962,7 @@ DeployPacletResource::scrape = "Scraping the resource from `1` failed: `2`.";
 DeployPacletResource::packed = "The scrape packed `1`, not the fresh build `2`; nothing was deployed.";
 DeployPacletResource::deploy = "Deploying the resource failed: `1`.";
 DeployPacletResource::cloud = "Not connected to the Wolfram Cloud.";
+DeployPacletResource::stalled = "The upload of `1` did not end within `2` seconds, three times; on a network whose VPN drops full-size packets, send the deploy through a proxy that sets a smaller segment size.";
 DeployPacletResource::account = "Connected to the Wolfram Cloud as `1`, not as `2`; connect as `2` to publish this resource.";
 DeployPacletResource::archive = "The archive could not be published to `1`: `2`.";
 DeployPacletResource::load = "The built archive does not load cleanly in a fresh kernel: `1`; nothing was deployed.";
