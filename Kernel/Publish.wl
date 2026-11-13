@@ -227,7 +227,7 @@ definitionScan[dirs_List, context_String, key_String, cache_String, work_String,
    build documentation, and a line would be one of its outputs. *)
 runScan[arguments_List, monitored_, deadline_] := Module[{kernel = kernelExecutable[], process, end, pending = "", lines},
     If[ kernel === None, Return[$Failed, Module]];
-    process = StartProcess[Join[{kernel, "-noprompt", "-script", $definitionScan}, arguments]];
+    process = StartProcess[kernelScriptCommand[kernel, $definitionScan, arguments]];
     If[ ! MatchQ[process, _ProcessObject], Return[$Failed, Module]];
     (* nothing answers a prompt: with its input closed, code that asks for one fails at once *)
     Close[ProcessConnection[process, "StandardInput"]];
@@ -2142,6 +2142,23 @@ kernelExecutable[] := SelectFirst[
     FileNameJoin[Prepend[#, $InstallationDirectory]] & /@ {{"MacOS", "WolframKernel"}, {"Executables", "WolframKernel"}, {"Executables", "WolframKernel.exe"}},
     FileExistsQ, None];
 
+(* what licenses a kernel started here as this one is licensed: under on-demand licensing a kernel
+   takes its license manager and its entitlement from its command line, -pwfile !cloudlm.wolfram.com
+   -entitlement id, as wolframscript gives them from WOLFRAMSCRIPT_ENTITLEMENTID, and one started
+   without them finds no license. This kernel's own, or else those wolframscript would give. *)
+$onDemandLicenseManager = "!cloudlm.wolfram.com";
+kernelLicenseArguments[] := kernelLicenseArguments[$CommandLine, Environment["WOLFRAMSCRIPT_ENTITLEMENTID"]];
+kernelLicenseArguments[line_List, environment_] := With[
+    {entitlement = FirstCase[Partition[line, 2, 1], {"-entitlement", id_String} :> id,
+        If[StringQ[environment] && StringLength[StringTrim[environment]] > 0, StringTrim[environment], None]]},
+    If[ entitlement === None, {},
+        {"-pwfile", FirstCase[Partition[line, 2, 1], {"-pwfile", file_String} :> file, $onDemandLicenseManager], "-entitlement", entitlement}]
+];
+kernelLicenseArguments[_, _] := {};
+
+(* the command of a script run in a fresh kernel, with its arguments *)
+kernelScriptCommand[kernel_String, script_String, arguments_List : {}] := Join[{kernel, "-noprompt"}, kernelLicenseArguments[], {"-script", script}, arguments];
+
 (* The archive installed alone, in a fresh kernel: extracted to a temporary directory, its primary
    context loaded without a message, from there, and at the archive's version. The kernel that
    publishes has the source paclet loaded, so it cannot tell. *)
@@ -2170,7 +2187,7 @@ archiveLoadCheck[archive_String, version_String, context_String, dependencies_Li
     If[ kernel === None, Return[<|"OK" -> False, "Reason" -> "no kernel executable under " <> $InstallationDirectory|>, Module]];
     script = FileNameJoin[{$TemporaryDirectory, CreateUUID["pacletpage-load-"] <> ".wl"}];
     Export[script, archiveLoadScript[archive, context, dependencies], "Text"];
-    run = runWatched[{kernel, "-noprompt", "-script", script}, "archive: the archive loads alone in a fresh kernel"];
+    run = runWatched[kernelScriptCommand[kernel, script], "archive: the archive loads alone in a fresh kernel"];
     DeleteFile[script];
     line = If[AssociationQ[run], SelectFirst[StringSplit[run["StandardOutput"], "\n"], StringStartsQ[#, "PACLETPAGE-LOAD "] &, None], None];
     report = If[StringQ[line], ImportString[StringDrop[line, 16], "RawJSON"], <|"Reason" -> "the fresh kernel gave no report: " <> If[AssociationQ[run], StringTake[run["StandardError"] <> run["StandardOutput"], UpTo[500]], ToString[run]]|>];
@@ -2301,7 +2318,7 @@ freshKernelBuild[source_String, buildDir_String, dependencies_List : {}] := Modu
     If[ kernel === None, Return[<|"Failure" -> "no kernel executable under " <> $InstallationDirectory|>, Module]];
     script = FileNameJoin[{$TemporaryDirectory, CreateUUID["pacletpage-build-"] <> ".wl"}];
     Export[script, pacletBuildScript[source, buildDir, dependencies], "Text"];
-    run = runWatched[{kernel, "-noprompt", "-script", script}, "archive: PacletBuild builds what is left, the search index and the archive"];
+    run = runWatched[kernelScriptCommand[kernel, script], "archive: PacletBuild builds what is left, the search index and the archive"];
     DeleteFile[script];
     line = If[AssociationQ[run], SelectFirst[StringSplit[run["StandardOutput"], "\n"], StringStartsQ[#, "PACLETPAGE-BUILD "] &, None], None];
     Replace[If[StringQ[line], ImportString[StringDrop[line, 17], "RawJSON"], None], Except[_Association] :>
@@ -2427,7 +2444,7 @@ runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
     While[ queue =!= {} || running =!= {},
         While[ Length[running] < n && queue =!= {},
             AppendTo[running, Append[First[queue], {
-                "Process" -> StartProcess[Join[{kernel, "-noprompt", "-script", First[queue]["Script"]}, Lookup[First[queue], "Arguments", {}]]],
+                "Process" -> StartProcess[kernelScriptCommand[kernel, First[queue]["Script"], Lookup[First[queue], "Arguments", {}]]],
                 "Start" -> AbsoluteTime[]
             }]];
             queue = Rest[queue]

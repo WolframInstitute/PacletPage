@@ -1959,6 +1959,23 @@ VerificationTest[
     TestID -> "Archive: a process about to be stopped is reported with its share of a processor and its state"
 ]
 
+VerificationTest[
+    {
+        kernelLicenseArguments[{"WolframKernel", "-pwfile", "!lm.example", "-entitlement", "O-ABC", "-runfirst", "x"}, "O-ENV"],
+        kernelLicenseArguments[{"WolframKernel", "-entitlement", "O-ABC", "-script", "x.wl"}, "O-ENV"],
+        kernelLicenseArguments[{"WolframKernel", "-script", "x.wl"}, " O-ENV\n"],
+        kernelLicenseArguments[{"WolframKernel", "-pwfile", "mathpass"}, $Failed],
+        kernelLicenseArguments[{"WolframKernel"}, ""],
+        Block[{kernelLicenseArguments = Function[{}, {"-pwfile", "!lm", "-entitlement", "O-ABC"}]}, kernelScriptCommand["k", "s.wl", {"a"}]]
+    },
+    {
+        {"-pwfile", "!lm.example", "-entitlement", "O-ABC"}, {"-pwfile", "!cloudlm.wolfram.com", "-entitlement", "O-ABC"},
+        {"-pwfile", "!cloudlm.wolfram.com", "-entitlement", "O-ENV"}, {}, {},
+        {"k", "-noprompt", "-pwfile", "!lm", "-entitlement", "O-ABC", "-script", "s.wl", "a"}
+    },
+    TestID -> "Build: a kernel started here takes this kernel's on-demand license manager and entitlement, before its script"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},
