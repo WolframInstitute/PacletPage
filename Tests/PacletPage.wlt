@@ -1976,6 +1976,17 @@ VerificationTest[
     TestID -> "Build: a kernel started here takes this kernel's on-demand license manager and entitlement, before its script"
 ]
 
+VerificationTest[
+    Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["log-"] <> ".log"}], tail},
+        Export[file, "one\n\ntwo\nthree\n", "Text"];
+        tail = {logTail[file, 2], logTail[file, 9], logTail[file <> ".none", 2], logTail[None, 2]};
+        DeleteFile[file];
+        tail
+    ],
+    {"two | three", "one | two | three", "(no log)", "(no log)"},
+    TestID -> "Archive: the last lines of a process's log, for one that did not record its pages"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},

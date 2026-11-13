@@ -2545,13 +2545,14 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
     monitor["archive: " <> ToString[Length[changed]] <> " changed pages built in " <> ToString[n] <> " processes"];
     runs = pageShareRuns[source, docsDir, builtDocsDir, changed, n, limit, dependencies, work, "share"];
     runKernelScripts[runs, n, "archive: page shares"];
+    unrecordedLogs[runs];
     (* a share stopped before its end has recorded none of its pages, which get one more process *)
     again = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ runs];
     retries = If[ again === {}, {},
         monitor["archive: " <> ToString[Length[again]] <> " pages again, in new processes"];
         pageShareRuns[source, docsDir, builtDocsDir, again, n, limit, dependencies, work, "again"]
     ];
-    If[ retries =!= {}, runKernelScripts[retries, n, "archive: pages again"]];
+    If[ retries =!= {}, runKernelScripts[retries, n, "archive: pages again"]; unrecordedLogs[retries]];
     (* the pages of a process that stopped a second time are built one at a time, a process each
        and no other beside it: processes that run together can hold each other up, and a page
        that builds alone is sound *)
@@ -2560,7 +2561,7 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
         monitor["archive: " <> ToString[Length[alone]] <> " pages one at a time"];
         pageShareRuns[source, docsDir, builtDocsDir, alone, n, limit, dependencies, work, "alone", 1]
     ];
-    If[ last =!= {}, runKernelScripts[last, 1, "archive: pages one at a time"]];
+    If[ last =!= {}, runKernelScripts[last, 1, "archive: pages one at a time"]; unrecordedLogs[last]];
     (* a page that stopped alone as well is one the stock build never finishes, and the last build,
        which has no time limit of its own, would wait on it without end *)
     $stuckPages = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ last];
@@ -2572,6 +2573,22 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
     Count[Lookup[record, changed, None], KeyValuePattern["Result" -> Except[_?FailureQ]]]
 ];
 
+(* what the processes that recorded none or not all of their pages last wrote, when the deploy is
+   monitored: a process that ended by itself without its record died, and its log says of what *)
+unrecordedLogs[runs_List] := Scan[
+    Function[run, With[{left = Complement[run["Pages"], Keys[readRecord[run["Record"]]]]},
+        If[ left =!= {},
+            monitor[run["Label"] <> " recorded " <> ToString[Length[run["Pages"]] - Length[left]] <> " of " <> ToString[Length[run["Pages"]]] <> " pages; its log ends: " <>
+                logTail[run["Log"], 12]]]
+    ]],
+    runs
+];
+logTail[file_String, n_Integer] := If[ ! FileExistsQ[file], "(no log)",
+    With[{lines = Select[StringSplit[ByteArrayToString[Replace[ReadByteArray[file], Except[_ByteArray] -> ByteArray[{}]], "ISO8859-1"], "\n"], StringLength[StringTrim[#]] > 0 &]},
+        If[ lines === {}, "(empty)", StringRiffle[StringTake[#, UpTo[300]] & /@ Take[lines, -Min[n, Length[lines]]], " | "]]]
+];
+logTail[_, _] := "(no log)";
+
 (* the shares of pages and their processes' scripts, two a process: each share reads the whole
    documentation tree once, and two keep every process busy to the end; a share that has built
    none of its pages for a page's time and ten minutes, the time the stock build takes to read the
@@ -2581,7 +2598,7 @@ pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_
     MapIndexed[
         Function[{share, index}, With[{base = FileNameJoin[{work, kind <> "-" <> IntegerString[First[index]]}]},
             Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies], "Text"];
-            <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Pages" -> share, "Progress" -> (FileNameJoin[{builtDocsDir, #}] & /@ share),
+            <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Log" -> base <> ".log", "Pages" -> share, "Progress" -> (FileNameJoin[{builtDocsDir, #}] & /@ share),
               "Deadline" -> limit * Length[share] + 600, "Stall" -> limit + 600,
               "Label" -> "archive: " <> kind <> " " <> IntegerString[First[index]] <> " of " <> IntegerString[Length[shares]] <> " (" <> IntegerString[Length[share]] <> " pages)"|>
         ]],
