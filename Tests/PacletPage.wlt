@@ -615,6 +615,12 @@ MarkdownToNotebook::section = "`1`, under \"`2`\": `3` come out unevaluated.";
 fakeConvert[file_String, out_String, opts : OptionsPattern[]] := Module[{text = Import[file, "Text"]},
     If[ StringContainsQ[text, "FAIL"], Return[$Failed, Module]];
     If[ StringContainsQ[text, "HANG"], Pause[20]];
+    (* never yields: the first time only on "STUCKONCE", which leaves a file the next conversion finds *)
+    If[ StringContainsQ[text, "STUCKONCE"],
+        With[{once = FileNameJoin[{$TemporaryDirectory, "stuck-once-" <> IntegerString[Hash[file], 36]}]},
+            If[ FileExistsQ[once], DeleteFile[once], Put[1, once]; AbortProtect[While[True, Null]]]],
+        If[ StringContainsQ[text, "STUCK"], AbortProtect[While[True, Null]]]
+    ];
     If[ StringContainsQ[text, "STALE"], Message[MarkdownToNotebook::section, FileBaseName[file], "Scope", {"x"}]];
     Put[Notebook[{Cell[text, "Text"], Cell[ToString[{opts}, InputForm], "Text"]}], out];
     If[ StringContainsQ[text, "LATE"], Pause[20]];
@@ -1943,6 +1949,37 @@ VerificationTest[
     ]]],
     {2, 3, {}, True, 3},
     TestID -> "Build: on parallel kernels, launched for the build and closed after it"
+]
+
+(* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
+VerificationTest[
+    withFixtureDocs[Function[dir, Module[{before = Kernels[], built},
+        Export[FileNameJoin[{dir, "docs", "Tutorials", "Zed.md"}], "---\nTemplate: TechNote\nURI: Pub/Fixture/tutorial/Zed\n---\n\nSTUCK\n", "Text"];
+        (* the parallel tools report the kernel that was killed *)
+        built = Quiet[
+            BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> 2, "TimeConstraint" -> 5],
+            {LinkObject::linkd, KernelObject::rdead, LaunchKernels::req, LaunchKernels::clone}
+        ];
+        {Length[built["Converted"]], FileNameTake /@ built["Failed"], Kernels[] === before}
+    ]]],
+    {3, {"Zed.md"}, True},
+    {BuildPacletDocumentation::page},
+    TimeConstraint -> 240,
+    TestID -> "Build: a page that never yields is stopped by killing its parallel kernel, and the build goes on"
+]
+
+VerificationTest[
+    withFixtureDocs[Function[dir, Module[{built},
+        Export[FileNameJoin[{dir, "docs", "Tutorials", "Zed.md"}], "---\nTemplate: TechNote\nURI: Pub/Fixture/tutorial/Zed\n---\n\nSTUCKONCE\n", "Text"];
+        built = Quiet[
+            BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> 2, "TimeConstraint" -> 5],
+            {LinkObject::linkd, KernelObject::rdead, LaunchKernels::req, LaunchKernels::clone}
+        ];
+        {Length[built["Converted"]], built["Failed"]}
+    ]]],
+    {4, {}},
+    TimeConstraint -> 240,
+    TestID -> "Build: a page stopped past its time once is converted on its second try"
 ]
 
 (* === examples on another kernel: a converter that evaluates each line of its page after "EVAL: "

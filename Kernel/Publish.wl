@@ -857,12 +857,35 @@ workerFunction[setup_Association] := With[
             $workerConverter = ReleaseHold[load];
             $workerReady = True
         ];
-        With[{done = convertPage[$workerConverter, task, limit]},
-            If[ monitor, Print[If[done["OK"], "converted ", "failed "], task["Page"]]];
-            done
+        If[ FileExistsQ[timeoutMarker[task]],
+            pageTimedOut[],
+            With[{watchdog = pageWatchdog[task, limit]},
+                With[{done = convertPage[$workerConverter, task, limit]},
+                    If[ Head[watchdog] === ProcessObject, KillProcess[watchdog]];
+                    If[ monitor, Print[If[done["OK"], "converted ", "failed "], task["Page"]]];
+                    done
+                ]
+            ]
         ]
     ]
 ];
+
+(* A page's time limit on a parallel kernel is kept from outside it as well. TimeConstrained stops
+   only code that yields, and a page whose code never does would hold its kernel, and the build,
+   for good. So each page has a watchdog process: past the limit and a grace it leaves a marker
+   beside the page's work file and kills the kernel, with the processes the kernel started. A
+   kernel that meets the marker leaves the page; it is converted once more on a parallel kernel,
+   and failed as timed out when it is stopped again, never converted in the building kernel, which
+   nothing could stop. *)
+timeoutMarker[task_Association] := task["Work"] <> ".timeout";
+pageTimedOut[] := <|"OK" -> False, "Result" -> $TimedOut, "Unevaluated" -> {}|>;
+pageWatchdog[task_Association, limit_ ? NumericQ] /; $OperatingSystem =!= "Windows" := StartProcess[{
+    "sh", "-c",
+    "sleep \"$1\" || exit 0; : > \"$0\"; kids=$(pgrep -P \"$2\"); kill -9 \"$2\"; for k in $kids; do [ \"$k\" != \"$$\" ] && kill -9 \"$k\"; done",
+    timeoutMarker[task], ToString[Ceiling[limit + Min[30, limit]]], ToString[$ProcessID]
+}];
+pageWatchdog[_, _] := None;
+clearTimeoutMarkers[tasks_List] := Scan[If[FileExistsQ[timeoutMarker[#]], DeleteFile[timeoutMarker[#]]] &, tasks];
 
 (* The pages converted, in order: one by one in this kernel, or on the parallel kernels after the
    first, which this kernel converts so that whatever the converter installs is in place before
@@ -870,25 +893,37 @@ workerFunction[setup_Association] := With[
 convertTasks[tasks_List, spec_, setup_, kernels_] := With[{done = tasksConverted[tasks, spec, setup, kernels]},
     closeEvaluationKernels[];
     (* a kernel still busy is not waited for: it is killed when the build closes its kernels *)
-    If[ kernels =!= {}, TimeConstrained[ParallelEvaluate[closeEvaluationKernels[], kernels], 60]];
+    (* nor is one asked that was killed past a page's time: the kernels there are now *)
+    With[{live = Intersection[kernels, Kernels[]]}, If[ live =!= {}, TimeConstrained[ParallelEvaluate[closeEvaluationKernels[], live], 60]]];
     done
 ];
 tasksConverted[{}, _, _, _] := {};
 tasksConverted[tasks_List, spec_, setup_, {}] := Map[convertHere[spec, setup], tasks];
 tasksConverted[{task_}, spec_, setup_, _] := {convertHere[spec, setup][task]};
-tasksConverted[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest},
+tasksConverted[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest, worker, again},
     first = convertHere[spec, setup][First[tasks]];
-    DistributeDefinitions[convertPage, withExampleStore, matchGeneralMessages, closeEvaluationKernels];
+    DistributeDefinitions[convertPage, withExampleStore, matchGeneralMessages, closeEvaluationKernels, timeoutMarker, pageTimedOut, pageWatchdog];
+    clearTimeoutMarkers[Rest[tasks]];
     If[ MatchQ[spec["Distribute"], _Hold], DistributeDefinitions @@ spec["Distribute"]];
-    rest = ParallelMap[
-        workerFunction[Join[setup, <|"Directories" -> DeleteDuplicates[Join[setup["Directories"], parserDirectories[]]], "Off" -> offGeneralMessages[]|>]],
-        Rest[tasks],
-        Method -> "FinestGrained"
+    worker = workerFunction[Join[setup, <|"Directories" -> DeleteDuplicates[Join[setup["Directories"], parserDirectories[]]], "Off" -> offGeneralMessages[]|>]];
+    rest = ParallelMap[worker, Rest[tasks], Method -> "FinestGrained"];
+    (* a page whose kernel was killed past its time is converted once more on the kernels there are
+       now: a page that hangs now and then gets through, and one that always does fails *)
+    again = Select[Range[Length[rest]], FileExistsQ[timeoutMarker[Rest[tasks][[#]]]] &];
+    If[ again =!= {} && Kernels[] =!= {},
+        If[ setup["Monitor"], Scan[Print["again ", #["Page"], ": stopped past its time"] &, Rest[tasks][[again]]]];
+        clearTimeoutMarkers[Rest[tasks][[again]]];
+        rest = ReplacePart[rest, Thread[again -> ParallelMap[worker, Rest[tasks][[again]], Method -> "FinestGrained"]]]
     ];
     rest = MapThread[
-        If[ TrueQ[Lookup[Replace[#2, Except[_Association] -> <||>], "OK", False]], #2, convertHere[spec, setup][#1]] &,
+        Which[
+            TrueQ[Lookup[Replace[#2, Except[_Association] -> <||>], "OK", False]], #2,
+            FileExistsQ[timeoutMarker[#1]], If[setup["Monitor"], Print["failed ", #1["Page"], ": stopped past its time"]]; pageTimedOut[],
+            True, convertHere[spec, setup][#1]
+        ] &,
         {Rest[tasks], rest}
     ];
+    clearTimeoutMarkers[Rest[tasks]];
     Prepend[rest, first]
 ];
 
