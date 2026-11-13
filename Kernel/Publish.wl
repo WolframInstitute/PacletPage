@@ -2438,9 +2438,9 @@ runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
             ! MatchQ[run["Process"], _ProcessObject] || ProcessStatus[run["Process"]] =!= "Running",
                 finished[run["Script"]] = "Finished"; runEnded[run, "finished"]; False,
             AbsoluteTime[] - run["Start"] > run["Deadline"],
-                killProcessTree[run["Process"]]; finished[run["Script"]] = "TimedOut"; runEnded[run, "stopped past its time"]; False,
+                stoppedReport[run]; killProcessTree[run["Process"]]; finished[run["Script"]] = "TimedOut"; runEnded[run, "stopped past its time"]; False,
             AbsoluteTime[] > stallCheck && stalledQ[run],
-                killProcessTree[run["Process"]]; finished[run["Script"]] = "Stalled"; runEnded[run, "stopped: nothing new for " <> ToString[run["Stall"]] <> " s"]; False,
+                stoppedReport[run]; killProcessTree[run["Process"]]; finished[run["Script"]] = "Stalled"; runEnded[run, "stopped: nothing new for " <> ToString[run["Stall"]] <> " s"]; False,
             True, True
         ]]];
         If[ AbsoluteTime[] > stallCheck, stallCheck = AbsoluteTime[] + 10];
@@ -2473,6 +2473,27 @@ runWatched[command_List, what_String] := Module[{process, out = {}, err = {}, st
       "StandardOutput" -> StringJoin[Select[out, StringQ]], "StandardError" -> StringJoin[Select[err, StringQ]]|>
 ];
 
+(* what a run about to be stopped is doing, when the deploy is monitored: its process and those it
+   started, each with its share of a processor and its state, so that a log tells a process that
+   spins from one that waits *)
+stoppedReport[run_Association] := If[ StringQ[Lookup[run, "Label", None]] && MatchQ[run["Process"], _ProcessObject],
+    Replace[processReport[run["Process"]["PID"]], report_String :> monitor[run["Label"] <> " when stopped: " <> report]]
+];
+
+(* a process and those it started: each one's name, share of a processor and state; None where
+   there is no ps *)
+processReport[pid_Integer] /; $OperatingSystem =!= "Windows" := With[{ps = RunProcess[{"ps", "-e", "-o", "pid=,ppid=,pcpu=,stat=,comm="}]},
+    If[ ! AssociationQ[ps] || ps["ExitCode"] =!= 0, None,
+        With[{rows = Select[StringSplit[StringTrim[#], Whitespace, 5] & /@ StringSplit[ps["StandardOutput"], "\n"],
+                Length[#] === 5 && StringMatchQ[#[[1]] <> #[[2]], DigitCharacter ..] &]},
+            With[{tree = Prepend[descendantProcesses[Association[(FromDigits[#[[1]]] -> {FromDigits[#[[2]]], #[[5]], #[[4]]}) & /@ rows], {pid}], pid]},
+                StringRiffle[Map[FileNameTake[#[[5]]] <> " " <> #[[3]] <> "% " <> #[[4]] &, Select[rows, MemberQ[tree, FromDigits[#[[1]]]] &]], ", "]
+            ]
+        ]
+    ]
+];
+processReport[_] := None;
+
 runEnded[run_Association, how_String] := If[StringQ[Lookup[run, "Label", None]], monitor[run["Label"] <> " " <> how]];
 
 (* a run that has written nothing new for its "Stall" seconds, since it started or since its record,
@@ -2500,7 +2521,7 @@ drainProcess[process_ProcessObject] := (
    page and packs. The shares are small, so that the processes stay busy to the end. The number of
    pages built here. *)
 buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordFile_String, changed_List, n_Integer, limit_, dependencies_List] := Module[
-    {work, runs, again, retries, record},
+    {work, runs, again, retries, alone, last, record},
     If[ changed === {} || n < 2, Return[0, Module]];
     work = CreateDirectory[];
     If[ ! DirectoryQ[builtDocsDir], CreateDirectory[builtDocsDir, CreateIntermediateDirectories -> True]];
@@ -2514,12 +2535,20 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
         pageShareRuns[source, docsDir, builtDocsDir, again, n, limit, dependencies, work, "again"]
     ];
     If[ retries =!= {}, runKernelScripts[retries, n, "archive: pages again"]];
-    (* the pages of a process that stopped a second time: one of them is a page the stock build
-       never finishes, and the last build, which has no time limit of its own, would wait on it
-       without end *)
-    $stuckPages = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ retries];
-    If[ $stuckPages =!= {}, monitor["archive: " <> ToString[Length[$stuckPages]] <> " pages did not build in their time, twice: " <> StringRiffle[$stuckPages, ", "]]];
-    record = Join[readRecord[recordFile], Association[Select[Map[readRecord[#["Record"]] &, Join[runs, retries]], AssociationQ]]];
+    (* the pages of a process that stopped a second time are built one at a time, a process each
+       and no other beside it: processes that run together can hold each other up, and a page
+       that builds alone is sound *)
+    alone = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ retries];
+    last = If[ alone === {}, {},
+        monitor["archive: " <> ToString[Length[alone]] <> " pages one at a time"];
+        pageShareRuns[source, docsDir, builtDocsDir, alone, n, limit, dependencies, work, "alone", 1]
+    ];
+    If[ last =!= {}, runKernelScripts[last, 1, "archive: pages one at a time"]];
+    (* a page that stopped alone as well is one the stock build never finishes, and the last build,
+       which has no time limit of its own, would wait on it without end *)
+    $stuckPages = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ last];
+    If[ $stuckPages =!= {}, monitor["archive: " <> ToString[Length[$stuckPages]] <> " pages did not build in their time, alone: " <> StringRiffle[$stuckPages, ", "]]];
+    record = Join[readRecord[recordFile], Association[Select[Map[readRecord[#["Record"]] &, Join[runs, retries, last]], AssociationQ]]];
     If[ ! DirectoryQ[DirectoryName[recordFile]], CreateDirectory[DirectoryName[recordFile], CreateIntermediateDirectories -> True]];
     Put[record, recordFile];
     DeleteDirectory[work, DeleteContents -> True];
@@ -2530,8 +2559,8 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
    documentation tree once, and two keep every process busy to the end; a share that has built
    none of its pages for a page's time and ten minutes, the time the stock build takes to read the
    tree first, has stalled *)
-pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_Integer, limit_, dependencies_List, work_String, kind_String] := With[
-    {shares = Partition[pages, UpTo[Max[1, Ceiling[Length[pages] / (2 n)]]]]},
+pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_Integer, limit_, dependencies_List, work_String, kind_String, size_ : Automatic] := With[
+    {shares = Partition[pages, UpTo[If[IntegerQ[size], size, Max[1, Ceiling[Length[pages] / (2 n)]]]]]},
     MapIndexed[
         Function[{share, index}, With[{base = FileNameJoin[{work, kind <> "-" <> IntegerString[First[index]]}]},
             Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies], "Text"];
@@ -2834,7 +2863,7 @@ DeployPacletResource::nobuild = "`1`/build holds no archive built from the pacle
 DeployPacletResource::write = "`1` Nothing was deleted, so the resource keeps its pages; deploy again.";
 DeployPacletResource::nodef = "`1` has no ResourceDefinition.nb or no documentation: build it first with BuildPacletDocumentation.";
 DeployPacletResource::build = "PacletBuild failed: `1`.";
-DeployPacletResource::stuck = SubmitPacletResource::stuck = "`1` documentation pages did not build within their time, in two processes each, so the stock documentation build does not finish them and nothing was built or deployed: `2`. Each process held two pages, so one of a pair may be sound.";
+DeployPacletResource::stuck = SubmitPacletResource::stuck = "`1` documentation pages did not build within their time, the last time each alone in a process with no other beside it, so the stock documentation build does not finish them and nothing was built or deployed: `2`.";
 DeployPacletResource::pages = "The built archive holds `1` of the `2` documentation pages; nothing was deployed. Missing: `3`.";
 DeployPacletResource::missing = "`1` documentation pages did not build, within \"MaxFailures\"; the archive goes without them: `2`.";
 DeployPacletResource::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, and the archive goes without them: `2`.";

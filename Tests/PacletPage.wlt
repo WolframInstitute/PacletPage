@@ -1754,14 +1754,15 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{dir = localFixture[], work = CreateDirectory[], runs},
+    Module[{dir = localFixture[], work = CreateDirectory[], runs, alone},
         runs = pageShareRuns[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", Table["p" <> IntegerString[i] <> ".nb", {i, 100}], 4, 900, {}, work, "share"];
+        alone = pageShareRuns[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {"a.nb", "b.nb", "c.nb"}, 4, 900, {}, work, "alone", 1];
         DeleteDirectory[dir, DeleteContents -> True];
         DeleteDirectory[work, DeleteContents -> True];
-        {Length /@ Lookup[runs, "Pages"], Lookup[First[runs], {"Deadline", "Stall"}], First[First[runs]["Progress"]]}
+        {Length /@ Lookup[runs, "Pages"], Lookup[First[runs], {"Deadline", "Stall"}], First[First[runs]["Progress"]], Lookup[alone, "Pages"]}
     ],
-    {{13, 13, 13, 13, 13, 13, 13, 9}, {900 * 13 + 600, 1500}, FileNameJoin[{"/b/Documentation", "p1.nb"}]},
-    TestID -> "Archive: the changed pages come in two shares a process, each with its time and the pages it builds to watch"
+    {{13, 13, 13, 13, 13, 13, 13, 9}, {900 * 13 + 600, 1500}, FileNameJoin[{"/b/Documentation", "p1.nb"}], {{"a.nb"}, {"b.nb"}, {"c.nb"}}},
+    TestID -> "Archive: the changed pages come in two shares a process, each with its time and the pages it builds to watch; or a page a share"
 ]
 
 VerificationTest[
@@ -1949,6 +1950,12 @@ VerificationTest[
     ]]],
     {2, 3, {}, True, 3},
     TestID -> "Build: on parallel kernels, launched for the build and closed after it"
+]
+
+VerificationTest[
+    {StringMatchQ[processReport[$ProcessID], ___ ~~ "Kernel" ~~ ___ ~~ "% " ~~ __], processReport[None]},
+    {True, None},
+    TestID -> "Archive: a process about to be stopped is reported with its share of a processor and its state"
 ]
 
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
