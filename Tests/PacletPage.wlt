@@ -1724,7 +1724,8 @@ VerificationTest[
             "UsingFrontEnd[ToBoxes[Graphics[Circle[]]]];\n",
             "before = descendantProcesses[processTable[], {$ProcessID}];\n",
             $endScriptCode,
-            "Put[{Length[before], descendantProcesses[processTable[], {$ProcessID}]}, ", wlString[out], "];\n"
+            (* one killed that the kernel has not reaped yet is listed, defunct, until the kernel exits: it is not left *)
+            "Put[{Length[before], With[{table = processTable[]}, livingProcesses[table, descendantProcesses[table, {$ProcessID}]]]}, ", wlString[out], "];\n"
         ], "Text"];
         TimeConstrained[RunProcess[{kernelExecutable[], "-noprompt", "-script", script}], 240];
         result = If[FileExistsQ[out], Get[out], None];
