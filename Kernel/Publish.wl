@@ -1809,14 +1809,19 @@ staleDocumentation[relatives_List, written_List] := Select[relatives,
 (* The copy-to-clipboard form of a documented symbol on the resource page. The stock boxes paste
    PacletSymbol[<the resource's URL>, symbol], which a kernel resolves by looking the URL up as a
    paclet name and never finding it, so every fresh session downloads the resource again. These
-   paste a form that installs the paclet once, from its published archive or else its resource,
-   and resolves it by name after. The stock boxes are kept per id, so this is a rule placed before
+   paste a form that names the version the code was copied from: where that version alone is
+   installed the paclet is found by name, and otherwise every installed version is uninstalled and
+   that one installed, from its published archive of that version or else from its resource, which
+   holds the newest. A copy loaded from a directory is not installed, and stays.
+   The stock boxes are kept per id, so this is a rule placed before
    them, for the ids of this resource: its short URL or its deployed location. The rules here hold
    all they test, so a parallel kernel that transforms pages takes them as they are. *)
 
-installForm[name_String, archive_String, _] := With[{n = name, a = archive}, HoldComplete[If[PacletFind[n] === {}, PacletInstall[a], n]]];
-installForm[name_String, None, resource_String] := With[{n = name, r = resource}, HoldComplete[If[PacletFind[n] === {}, PacletInstall[ResourceObject[r]], n]]];
-installForm[_, _, _] := None;
+installForm[name_String, version_String, archive_String, _] := With[{n = name, v = version, a = archive},
+    HoldComplete[If[Through[PacletFind[n]["Version"]] === {v}, n, PacletUninstall[n]; PacletInstall[a]]]];
+installForm[name_String, version_String, None, resource_String] := With[{n = name, v = version, r = resource},
+    HoldComplete[If[Through[PacletFind[n]["Version"]] === {v}, n, PacletUninstall[n]; PacletInstall[ResourceObject[r]]]]];
+installForm[_, _, _, _] := None;
 
 symbolBoxRules[name_String, form_HoldComplete] := {
     HoldPattern[PacletResource`Private`fancyPacletSymbolBoxes[
@@ -1880,9 +1885,9 @@ scrapeErrors[notebook_NotebookObject] := DeleteCases[
     Alternatives @@ $builtNotebookErrors
 ];
 
-(* the URL of the archive "Archive" publishes, the latest under its directory *)
-archiveURL[dirName_String, name_String] := First[CloudObject[StringTrim[dirName, "/"] <> "/" <> StringReplace[name, "/" -> "__"] <> ".paclet"]];
-archiveURL[_, _] := None;
+(* the archive of one version, as publishArchive names it *)
+archiveURL[dirName_String, name_String, version_String] := First[CloudObject[StringTrim[dirName, "/"] <> "/" <> StringReplace[name, "/" -> "__"] <> "-" <> version <> ".paclet"]];
+archiveURL[_, _, _] := None;
 
 (* the symbols a built paclet's PacletInfo declares *)
 archiveSymbols[builtRoot_String] := Module[{file = FileNameJoin[{builtRoot, "PacletInfo.wl"}], info},
@@ -2600,7 +2605,7 @@ pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_
             Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies], "Text"];
             <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Log" -> base <> ".log", "Pages" -> share, "Progress" -> (FileNameJoin[{builtDocsDir, #}] & /@ share),
               "Deadline" -> limit * Length[share] + 600, "Stall" -> limit + 600,
-              "Label" -> "archive: " <> kind <> " " <> IntegerString[First[index]] <> " of " <> IntegerString[Length[shares]] <> " (" <> IntegerString[Length[share]] <> " pages)"|>
+              "Label" -> "archive: " <> kind <> " " <> IntegerString[First[index]] <> " of " <> IntegerString[Length[shares]] <> " (" <> If[Length[share] === 1, FileBaseName[First[share]], IntegerString[Length[share]] <> " pages"] <> ")"|>
         ]],
         shares
     ]
@@ -2978,7 +2983,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
        offline dry run stops before it. *)
     hero = heroImage[OptionValue["HeroImage"], definition];
     (* the symbols' copied form and the declared symbols, in this kernel and the parallel ones *)
-    symbolRules = If[ offline, {}, symbolBoxRules[name, installForm[name, archiveURL[OptionValue["Archive"], name], If[MatchQ[target, _CloudObject], First[target], None]]]];
+    symbolRules = If[ offline, {}, symbolBoxRules[name, installForm[name, paclet["Version"], archiveURL[OptionValue["Archive"], name, paclet["Version"]], If[MatchQ[target, _CloudObject], First[target], None]]]];
     pinned = pinRules[name, built["Symbols"]];
     {resource, location, deployed} = Replace[
         If[ offline, {None, None, None}, UsingFrontEnd @ Internal`InheritedBlock[

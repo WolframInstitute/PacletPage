@@ -42,8 +42,8 @@ paclet with a documentation site, without a front end and without scripts of the
   outside the paclet, and LibraryLink libraries declared but not shipped are refused.
 - A complete resource page from its first visit, on any cloud subscription: Details, examples, the
   main guide, the hero image and the source link, with the paclet's version and commit recorded.
-  The examples link the paclet's symbols, and code copied from them installs the paclet once, then
-  finds it by name. A paclet with several guides lists them as a tree beside every page.
+  The examples link the paclet's symbols, and code copied from them installs the version it was copied from, in
+  place of any other. A paclet with several guides lists them as a tree beside every page.
 - Deploys that scale: only the documentation notebooks and pages that changed are written again,
   and the pages are made over parallel kernels, each kept for the next deploy. A release can build
   in one process and deploy from that build in another.

@@ -1760,9 +1760,9 @@ VerificationTest[
         alone = pageShareRuns[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {"a.nb", "b.nb", "c.nb"}, 4, 900, {}, work, "alone", 1];
         DeleteDirectory[dir, DeleteContents -> True];
         DeleteDirectory[work, DeleteContents -> True];
-        {Length /@ Lookup[runs, "Pages"], Lookup[First[runs], {"Deadline", "Stall"}], First[First[runs]["Progress"]], Lookup[alone, "Pages"]}
+        {Length /@ Lookup[runs, "Pages"], Lookup[First[runs], {"Deadline", "Stall"}], First[First[runs]["Progress"]], Lookup[alone, "Pages"], {First[runs]["Label"], First[alone]["Label"]}}
     ],
-    {{13, 13, 13, 13, 13, 13, 13, 9}, {900 * 13 + 600, 1500}, FileNameJoin[{"/b/Documentation", "p1.nb"}], {{"a.nb"}, {"b.nb"}, {"c.nb"}}},
+    {{13, 13, 13, 13, 13, 13, 13, 9}, {900 * 13 + 600, 1500}, FileNameJoin[{"/b/Documentation", "p1.nb"}], {{"a.nb"}, {"b.nb"}, {"c.nb"}}, {"archive: share 1 of 8 (13 pages)", "archive: alone 1 of 3 (a)"}},
     TestID -> "Archive: the changed pages come in two shares a process, each with its time and the pages it builds to watch; or a page a share"
 ]
 
@@ -2264,7 +2264,7 @@ VerificationTest[
 VerificationTest[
     Needs["PacletResource`"];
     Internal`InheritedBlock[{PacletResource`Private`fancyPacletSymbolBoxes},
-        installSymbolBoxes["Pub/Sym", installForm["Pub/Sym", "https://c.example/obj/u/Paclets/Pub__Sym.paclet", "https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]];
+        installSymbolBoxes["Pub/Sym", installForm["Pub/Sym", "1.2.3", "https://c.example/obj/u/Paclets/Pub__Sym-1.2.3.paclet", "https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]];
         Cases[
             {
                 PacletResource`Private`fancyPacletSymbolBoxes[HoldComplete["https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"], "Pub/Sym", "PubSym`f"],
@@ -2275,16 +2275,18 @@ VerificationTest[
         ]
     ],
     {
-        HoldComplete[PacletSymbol[If[PacletFind["Pub/Sym"] === {}, PacletInstall["https://c.example/obj/u/Paclets/Pub__Sym.paclet"], "Pub/Sym"], "PubSym`f"]],
-        HoldComplete[PacletSymbol[If[PacletFind["Pub/Sym"] === {}, PacletInstall["https://c.example/obj/u/Paclets/Pub__Sym.paclet"], "Pub/Sym"], "PubSym`g"]],
+        HoldComplete[PacletSymbol[If[Through[PacletFind["Pub/Sym"]["Version"]] === {"1.2.3"}, "Pub/Sym", PacletUninstall["Pub/Sym"]; PacletInstall["https://c.example/obj/u/Paclets/Pub__Sym-1.2.3.paclet"]], "PubSym`f"]],
+        HoldComplete[PacletSymbol[If[Through[PacletFind["Pub/Sym"]["Version"]] === {"1.2.3"}, "Pub/Sym", PacletUninstall["Pub/Sym"]; PacletInstall["https://c.example/obj/u/Paclets/Pub__Sym-1.2.3.paclet"]], "PubSym`g"]],
         HoldComplete[PacletSymbol["https://c.example/obj/u/DeployedResources/Paclet/Other/X", "X`h"]]
     },
-    TestID -> "Publish: a symbol on the resource page copies as code that installs the paclet once, from its archive"
+    TestID -> "Publish: a symbol on the resource page copies as code that installs the version it was copied from, from that version's archive, in place of any other"
 ]
 
 VerificationTest[
-    {installForm["Pub/Sym", None, "https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"], installForm["Pub/Sym", None, None]},
-    {HoldComplete[If[PacletFind["Pub/Sym"] === {}, PacletInstall[ResourceObject["https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]], "Pub/Sym"]], None},
+    {installForm["Pub/Sym", "1.2.3", None, "https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"], installForm["Pub/Sym", "1.2.3", None, None],
+        archiveURL[None, "Pub/Sym", "1.2.3"]},
+    {HoldComplete[If[Through[PacletFind["Pub/Sym"]["Version"]] === {"1.2.3"}, "Pub/Sym", PacletUninstall["Pub/Sym"];
+        PacletInstall[ResourceObject["https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]]]], None, None},
     TestID -> "Publish: without a published archive, the copied code installs the paclet from its resource"
 ]
 
