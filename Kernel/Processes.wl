@@ -73,7 +73,9 @@ frontEndProcesses[table_Association, roots_List] := Select[descendantProcesses[t
    does not reap *)
 endProcesses[_Association, {}] := Null;
 endProcesses[table_Association, pids_List] := Scan[
-    Function[generation, RunProcess[Join[{"kill", "-KILL"}, IntegerString /@ generation]]; waitForExit[generation, 5]],
+    (* a killed process is gone within a moment on a quiet machine, and may take many seconds on
+       a loaded one: the wait ends as soon as it is gone *)
+    Function[generation, RunProcess[Join[{"kill", "-KILL"}, IntegerString /@ generation]]; waitForExit[generation, 30]],
     Reverse[Prepend[processLayers[table, pids], pids]]
 ];
 

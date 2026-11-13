@@ -869,7 +869,8 @@ workerFunction[setup_Association] := With[
    they look for it; a page that fails on a parallel kernel is tried once more here. *)
 convertTasks[tasks_List, spec_, setup_, kernels_] := With[{done = tasksConverted[tasks, spec, setup, kernels]},
     closeEvaluationKernels[];
-    If[ kernels =!= {}, ParallelEvaluate[closeEvaluationKernels[], kernels]];
+    (* a kernel still busy is not waited for: it is killed when the build closes its kernels *)
+    If[ kernels =!= {}, TimeConstrained[ParallelEvaluate[closeEvaluationKernels[], kernels], 60]];
     done
 ];
 tasksConverted[{}, _, _, _] := {};
@@ -950,7 +951,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     {
         paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, store, cacheSymbol, useCache, separator,
         all, files, metas, guides, definitionSource, tasks, misses, kernelsBefore, kernels, setup, results, outcomes,
-        ok, failed, pruned, pageFiles, skipped, unevaluated, flagged
+        ok, failed, pruned, pageFiles, skipped, unevaluated, flagged, kernelPIDs
     },
     If[ ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] && ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]],
         Message[BuildPacletDocumentation::dir, dir]; Return[$Failed, Module]];
@@ -1087,13 +1088,14 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
         Print[Length[tasks], " pages: ", Length[tasks] - Length[misses], " cached, ", Length[misses], " to convert"]];
     kernelsBefore = Kernels[];
     kernels = If[ Length[misses] > 1, buildKernels[OptionValue["Parallel"]], {}];
+    kernelPIDs = If[kernels === {}, {}, kernelProcessIDs[Complement[Kernels[], kernelsBefore]]];
     setup = <|
         "Directories" -> DeleteDuplicates[Append[pacletDirectories[], dir]], "Load" -> spec["Load"],
         "Context" -> If[OptionValue["EvaluationKernel"] === None, paclet["PrimaryContext"], None],
         "TimeConstraint" -> OptionValue["TimeConstraint"], "Monitor" -> TrueQ[OptionValue["Monitor"]]
     |>;
     results = AssociationThread[Lookup[misses, "Entry", {}], convertTasks[misses, spec, setup, kernels]];
-    If[ kernels =!= {}, closeKernels[Complement[Kernels[], kernelsBefore]]];
+    If[ kernels =!= {}, closeKernels[Complement[Kernels[], kernelsBefore], kernelPIDs]];
     (* each converted page enters the cache; every page that has its notebook is copied to it *)
     outcomes = Map[
         Function[task, Which[
@@ -2477,6 +2479,11 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
         pageShareRuns[source, docsDir, builtDocsDir, again, n, limit, dependencies, work, "again"]
     ];
     If[ retries =!= {}, runKernelScripts[retries, n, "archive: pages again"]];
+    (* the pages of a process that stopped a second time: one of them is a page the stock build
+       never finishes, and the last build, which has no time limit of its own, would wait on it
+       without end *)
+    $stuckPages = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ retries];
+    If[ $stuckPages =!= {}, monitor["archive: " <> ToString[Length[$stuckPages]] <> " pages did not build in their time, twice: " <> StringRiffle[$stuckPages, ", "]]];
     record = Join[readRecord[recordFile], Association[Select[Map[readRecord[#["Record"]] &, Join[runs, retries]], AssociationQ]]];
     If[ ! DirectoryQ[DirectoryName[recordFile]], CreateDirectory[DirectoryName[recordFile], CreateIntermediateDirectories -> True]];
     Put[record, recordFile];
@@ -2559,7 +2566,11 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
     changed = changedPages[FileNameJoin[{source, "Documentation"}], builtDocsDir, readRecord[recordFile]];
     monitor["archive: " <> ToString[Length[authoring]] <> " documentation pages, " <> ToString[Length[changed]] <> " to build"];
     processes = If[ Length[changed] > 1, pageProcesses[Lookup[pageOptions, "Parallel", False]], 0];
+    $stuckPages = {};
     parallel = buildPagesInParallel[source, FileNameJoin[{source, "Documentation"}], builtDocsDir, recordFile, changed, processes, Lookup[pageOptions, "TimeConstraint", 900], dependencies];
+    If[ $stuckPages =!= {},
+        If[ source =!= dir, DeleteDirectory[stageRoot, DeleteContents -> True]];
+        Message[head::stuck, Length[$stuckPages], $stuckPages]; Return[$Failed, Module]];
     built = freshKernelBuild[source, buildDir, dependencies];
     If[ source =!= dir, DeleteDirectory[stageRoot, DeleteContents -> True]];
     If[ ! StringQ[built["Archive"]] || ! FileExistsQ[built["Archive"]], Message[head::build, built["Failure"]]; Return[$Failed, Module]];
@@ -2727,8 +2738,11 @@ $endScriptCode = StringJoin["Get[", wlString[FileNameJoin[{$packageDirectory, "P
    ends before it, since a front end that quits, or loses its kernel, can crash on its way out, and
    a kernel this kernel kills it reaps, where one left to exit by itself after CloseKernels it may
    not *)
-closeKernels[{}] := {};
-closeKernels[kernels_List] := With[{pids = kernelProcessIDs[kernels]},
+closeKernels[{}, ___] := {};
+(* known gives the process ids taken while the kernels were idle: a kernel that is busy when it is
+   closed, a page's code still running in it, does not answer for its id, and would be left
+   running with CloseKernels waiting on it *)
+closeKernels[kernels_List, known_List : {}] := With[{pids = Union[known, kernelProcessIDs[kernels]]},
     With[{table = processTable[]}, endProcesses[table, frontEndProcesses[table, pids]]];
     endProcesses[processTable[], pids];
     CloseKernels[kernels]
@@ -2785,6 +2799,7 @@ DeployPacletResource::nobuild = "`1`/build holds no archive built from the pacle
 DeployPacletResource::write = "`1` Nothing was deleted, so the resource keeps its pages; deploy again.";
 DeployPacletResource::nodef = "`1` has no ResourceDefinition.nb or no documentation: build it first with BuildPacletDocumentation.";
 DeployPacletResource::build = "PacletBuild failed: `1`.";
+DeployPacletResource::stuck = SubmitPacletResource::stuck = "`1` documentation pages did not build within their time, in two processes each, so the stock documentation build does not finish them and nothing was built or deployed: `2`. Each process held two pages, so one of a pair may be sound.";
 DeployPacletResource::pages = "The built archive holds `1` of the `2` documentation pages; nothing was deployed. Missing: `3`.";
 DeployPacletResource::missing = "`1` documentation pages did not build, within \"MaxFailures\"; the archive goes without them: `2`.";
 DeployPacletResource::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, and the archive goes without them: `2`.";
