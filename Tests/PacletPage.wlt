@@ -835,6 +835,21 @@ VerificationTest[
 ]
 
 VerificationTest[
+    withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{work = CreateDirectory[], in, out, run, result},
+        in = FileNameJoin[{work, "in.wxf"}];
+        out = FileNameJoin[{work, "out.wxf"}];
+        (* a directory PacletDirectoryLoad was given that holds no PacletInfo of its own, as a repository's root *)
+        Export[in, <|"Directories" -> {fixture["Directory"], DirectoryName[fixture["Directory"]]}, "Context" -> fixture["Context"], "Dependencies" -> {}|>, "WXF"];
+        run = RunProcess[kernelScriptCommand[kernelExecutable[], $definitionScan, {in, out}], All, ""];
+        result = {StringContainsQ[run["StandardOutput"] <> run["StandardError"], "badarg"], KeyExistsQ[Import[out, "WXF"], "Cones"]};
+        DeleteDirectory[work, DeleteContents -> True];
+        result
+    ]]],
+    {False, True},
+    TestID -> "Scan: a directory with no PacletInfo among the scanned ones is passed over without a message"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n", "bar" -> "```wl\nbar[1]\n```\n"|>, Function[fixture, Module[
         {dep = CreateDirectory[], name = "Dp" <> IntegerString[RandomInteger[10^12], 36], depCode, build, runs = {}},
         CreateDirectory[FileNameJoin[{dep, "Kernel"}]];

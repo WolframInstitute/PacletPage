@@ -96,8 +96,12 @@ canonical[definition_] := definition /.
    a quarter of a millisecond, whatever the text's length *)
 fingerprint[text_String] := IntegerString[Hash[text, "CRC32"], 16, 8] <> IntegerString[Hash[text, "Adler32"], 16, 8];
 
+(* the paclet of a directory with a PacletInfo file, else None: a directory PacletDirectoryLoad was
+   given may only hold paclets, and PacletObject[File[dir]] reports CreatePaclet::badarg for it *)
+pacletOf[dir_String] := If[ FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] || FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]], PacletObject[File[dir]], None];
+
 (* the contexts a paclet directory declares: its primary context and its Kernel extensions' *)
-pacletContexts[dir_String] := With[{paclet = PacletObject[File[dir]]},
+pacletContexts[dir_String] := With[{paclet = pacletOf[dir]},
     If[ ! PacletObjectQ[paclet], {},
         DeleteDuplicates @ Select[Flatten[{paclet["PrimaryContext"], Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Kernel", rules___} :> Lookup[Cases[{rules}, _Rule], "Context", {}]]}], StringQ]
     ]
@@ -159,7 +163,7 @@ Scan[
             progress["loading ", context];
             If[ ! loadedQ[context], AppendTo[unloaded, context]];
             (* a newer version installed outranks the directory given: what loaded is not it *)
-            With[{found = PacletObject[PacletObject[File[dependency]]["Name"]]},
+            With[{found = With[{own = pacletOf[dependency]}, If[ PacletObjectQ[own], PacletObject[own["Name"]], None]]},
                 If[ PacletObjectQ[found] && ExpandFileName[found["Location"]] =!= ExpandFileName[dependency],
                     AppendTo[outranked, context -> found["Version"]]; unloaded = Union[unloaded, {context}]]
             ];
@@ -247,8 +251,8 @@ If[ ! loaded,
     ownerOf[name_String] := ownerOf[contextOf[name], "Context"];
     ownerOf[context_String, "Context"] := ownerOf[context, "Context"] = Replace[
         MaximalBy[Select[owners, StringStartsQ[context, First[#]] &], StringLength[First[#]] &, 1], {{_ -> dir_} :> dir, _ -> None}];
-    pacletNames = Association[Function[dir, With[{paclet = PacletObject[File[dir]]}, If[PacletObjectQ[paclet], paclet["Name"] -> dir, Nothing]]] /@ input["Directories"]];
-    direct[dir_] := direct[dir] = With[{paclet = PacletObject[File[dir]]},
+    pacletNames = Association[Function[dir, With[{paclet = pacletOf[dir]}, If[PacletObjectQ[paclet], paclet["Name"] -> dir, Nothing]]] /@ input["Directories"]];
+    direct[dir_] := direct[dir] = With[{paclet = pacletOf[dir]},
         If[ ! PacletObjectQ[paclet], {},
             DeleteMissing[Lookup[pacletNames, Replace[Replace[paclet["Dependencies"], Except[_List] -> {}], {(name_String -> _) :> name, {name_String, ___} :> name}, {1}]]]]];
     reach[dir_] := reach[dir] = FixedPoint[Union[#, Catenate[direct /@ #]] &, {dir}];
@@ -310,7 +314,7 @@ If[ ! loaded,
     wasRead = AssociationThread[read -> True];
     mainDirectory = ownerOf[input["Context"], "Context"];
     owned = GroupBy[Transpose[{ownerOf /@ kept, keyIndex, keptParts[[All, 3]]}], First -> Rest];
-    assetNames[dir_String] := With[{paclet = PacletObject[File[dir]]},
+    assetNames[dir_String] := With[{paclet = pacletOf[dir]},
         If[ ! PacletObjectQ[paclet], <||>,
             Association @ Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Asset", rules___} :> With[{options = Association[Cases[{rules}, _Rule]]},
                 Cases[Flatten[{Lookup[options, "Assets", {}]}], ((name_String -> path_String) | {name_String, path_String}) :>
