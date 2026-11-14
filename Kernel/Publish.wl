@@ -2983,7 +2983,7 @@ DeployPacletResource::nocommit = "`1` is already published and records no commit
 $sitesRefreshed = False;
 refreshPacletSites[] := If[ ! TrueQ[$sitesRefreshed] && TrueQ[$AllowInternet],
     $sitesRefreshed = True;
-    monitor["deploy: the paclet sites refreshed"];
+    monitor["the paclet sites refreshed"];
     TimeConstrained[Scan[PacletSiteUpdate[#, Asynchronous -> False] &, PacletSites[]], 60]
 ];
 
