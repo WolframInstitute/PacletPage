@@ -58,7 +58,9 @@ resourceSpec[_] := $Failed;
 (* Published pages are read by an external curl, a block of them in one process, never by URLRead:
    Wolfram 15.0's transfer thread, libcurllink's, crashes the kernel now and then, the more often the
    more transfers it runs at once, and a site's catalog and check request hundreds. Every request is
-   anonymous, as a reader's browser makes it, follows redirects and has its own two minutes. Each
+   anonymous, as a reader's browser makes it, and has its own two minutes. Redirects are followed as
+   URLRead follows them, up to six: one to the cloud's sign-in check ends there, with the status it
+   names (401 for a page closed to strangers), never at the sign-in page it leads on to. Each
    answer is <|"StatusCode", "ContentType", "Body"|> (the body when asked for), or a Failure where
    nothing came back; with no curl, every answer is a Failure and PacletPage::nocurl says why. *)
 PacletPage::nocurl = "No curl was found on the PATH; PacletPage reads published pages with it. Install curl, or put it on the PATH.";
@@ -80,16 +82,32 @@ curlGet[urls : {__String}, body_?BooleanQ, n_Integer] := With[{curl = curlExecut
     If[ curl === None,
         Message[PacletPage::nocurl];
         Map[Failure["NoCurl", <|"MessageTemplate" -> "No curl to read `1` with.", "MessageParameters" -> {#}|>] &, urls],
-        Module[{dir = CreateDirectory[], config, out, answers},
+        Module[{dir = CreateDirectory[], current = urls, answers = ConstantArray[None, Length[urls]], pending = Range[Length[urls]], hops = 0, config, out, lines},
             config = FileNameJoin[{dir, "requests"}];
-            WriteString[config, StringJoin[MapIndexed[
-                "url = " <> curlQuoted[#1] <> "\noutput = " <> curlQuoted[FileNameJoin[{dir, IntegerString[First[#2]]}]] <> "\n" &, urls]]];
-            Close[config];
-            out = curlRun[{curl, "--silent", "--location", "--max-time", "120", "--parallel", "--parallel-max", IntegerString[Max[1, n]],
-                "--write-out", "%{urlnum}\t%{http_code}\t%{content_type}\n", "--config", config}];
-            answers = curlAnswers[out, urls, dir, body];
+            While[ pending =!= {} && hops < 7,
+                hops++;
+                If[FileExistsQ[config], DeleteFile[config]];
+                WriteString[config, StringJoin[Map[
+                    "url = " <> curlQuoted[current[[#]]] <> "\noutput = " <> curlQuoted[FileNameJoin[{dir, IntegerString[#]}]] <> "\n" &, pending]]];
+                Close[config];
+                out = curlRun[{curl, "--silent", "--max-time", "120", "--parallel", "--parallel-max", IntegerString[Max[1, n]],
+                    "--write-out", "%{urlnum}\t%{http_code}\t%{content_type}\t%{redirect_url}\n", "--config", config}];
+                lines = curlLines[out, Length[pending]];
+                pending = Catenate @ MapThread[
+                    Function[{index, line}, Replace[line, {
+                        (* a redirect to the sign-in check: the status it names, as URLRead gives it *)
+                        {status_, type_, next_String} /; 300 <= status < 400 && StringContainsQ[next, "j_spring_oauth_security_check"] :> (
+                            answers[[index]] = curlAnswer[signInStatus[next], type, If[TrueQ[body], "", None]]; {}),
+                        {status_, _, next_String} /; 300 <= status < 400 && next =!= "" && hops < 7 :> (current[[index]] = next; {index}),
+                        {status_, type_, _} /; status > 0 :> (
+                            answers[[index]] = curlAnswer[status, type, If[TrueQ[body], fileText[FileNameJoin[{dir, IntegerString[index]}], type], None]]; {}),
+                        _ -> {}
+                    }]],
+                    {pending, lines}
+                ]
+            ];
             DeleteDirectory[dir, DeleteContents -> True];
-            answers
+            MapThread[Replace[#1, None :> Failure["NoResponse", <|"MessageTemplate" -> "No answer from `1`.", "MessageParameters" -> {#2}|>]] &, {answers, urls}]
         ]
     ]
 ];
@@ -99,28 +117,31 @@ curlRun[arguments_List] := Replace[RunProcess[arguments, "StandardOutput"], Exce
 (* a string as curl's config file reads it: quoted, its backslashes and quotes escaped *)
 curlQuoted[s_String] := "\"" <> StringReplace[s, {"\\" -> "\\\\", "\"" -> "\\\""}] <> "\"";
 
-(* curl's lines, "index, status, content type" for each url in the order they finished, read into
-   the urls' answers in their order: status 0, or no line, is no answer *)
-curlAnswers[out_String, urls_List, dir_String, body_] := Module[{answers = ConstantArray[None, Length[urls]], fields, index, status},
+(* curl's lines, "index, status, content type, redirect" for each request in the order they finished,
+   read into {status, content type, redirect} in the requests' order; {0, "", ""} for no line *)
+curlLines[out_String, count_Integer] := Module[{lines = ConstantArray[{0, "", ""}, count], fields, index, status},
     Scan[
         Function[line,
             fields = StringSplit[line, "\t", All];
             If[ Length[fields] >= 2,
                 index = Interpreter["Integer"][fields[[1]]];
                 status = Interpreter["Integer"][fields[[2]]];
-                If[ IntegerQ[index] && 0 <= index < Length[urls] && IntegerQ[status] && status > 0,
-                    With[{type = If[Length[fields] >= 3, fields[[3]], ""]},
-                        answers[[index + 1]] = Join[
-                            <|"StatusCode" -> status, "ContentType" -> type|>,
-                            If[TrueQ[body], <|"Body" -> fileText[FileNameJoin[{dir, IntegerString[index + 1]}], type]|>, <||>]
-                        ]
-                    ]
-                ]
+                If[ IntegerQ[index] && 0 <= index < count && IntegerQ[status],
+                    lines[[index + 1]] = {status, If[Length[fields] >= 3, fields[[3]], ""], If[Length[fields] >= 4, fields[[4]], ""]}]
             ]
         ],
         StringSplit[out, "\n"]
     ];
-    MapThread[Replace[#1, None :> Failure["NoResponse", <|"MessageTemplate" -> "No answer from `1`.", "MessageParameters" -> {#2}|>]] &, {answers, urls}]
+    lines
+];
+
+curlAnswer[status_Integer, type_String, None] := <|"StatusCode" -> status, "ContentType" -> type|>;
+curlAnswer[status_Integer, type_String, body_String] := <|"StatusCode" -> status, "ContentType" -> type, "Body" -> body|>;
+
+(* the status a redirect to the cloud's sign-in check names, 401 where it names none *)
+signInStatus[url_String] := Replace[
+    Interpreter["Integer"][First[StringCases[url, "statusCode=" ~~ code : DigitCharacter .. :> code], ""]],
+    Except[_Integer] -> 401
 ];
 
 (* a body's text as URLRead gives it: decoded by the charset its content type names, UTF-8 or a

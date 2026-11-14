@@ -131,12 +131,16 @@ curlPost[url_String, referer_String, fields_List] := With[{curl = curlExecutable
         Message[PacletPage::nocurl]; Failure["NoCurl", <|"MessageTemplate" -> "No curl to post to `1` with.", "MessageParameters" -> {url}|>],
         Module[{dir = CreateDirectory[], out, answer},
             out = curlRun[Join[
-                {curl, "--silent", "--location", "--max-time", "120", "--header", "Referer: " <> referer, "--output", FileNameJoin[{dir, "1"}],
-                    "--write-out", "%{urlnum}\t%{http_code}\t%{content_type}\n"},
+                {curl, "--silent", "--max-time", "120", "--header", "Referer: " <> referer, "--output", FileNameJoin[{dir, "1"}],
+                    "--write-out", "%{urlnum}\t%{http_code}\t%{content_type}\t%{redirect_url}\n"},
                 Catenate[Replace[fields, {(name_String -> File[file_String]) :> {"--form", name <> "=@" <> file}, (name_String -> value_) :> {"--form-string", name <> "=" <> TextString[value]}}, {1}]],
                 {url}
             ]];
-            answer = First[curlAnswers[out, {url}, dir, True]];
+            answer = Replace[First[curlLines[out, 1]], {
+                {status_, type_, next_String} /; 300 <= status < 400 && StringContainsQ[next, "j_spring_oauth_security_check"] :> curlAnswer[signInStatus[next], type, ""],
+                {status_, type_, _} /; status > 0 :> curlAnswer[status, type, fileText[FileNameJoin[{dir, "1"}], type]],
+                _ :> Failure["NoResponse", <|"MessageTemplate" -> "No answer from `1`.", "MessageParameters" -> {url}|>]
+            }];
             DeleteDirectory[dir, DeleteContents -> True];
             answer
         ]

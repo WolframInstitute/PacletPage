@@ -1049,15 +1049,43 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{dir = CreateDirectory[], answers},
-        WriteString[FileNameJoin[{dir, "1"}], "first"]; Close[FileNameJoin[{dir, "1"}]];
-        BinaryWrite[FileNameJoin[{dir, "3"}], ByteArray[{97, 169, 98}]]; Close[FileNameJoin[{dir, "3"}]];
-        answers = curlAnswers["2\t000\t\n0\t200\ttext/html; charset=UTF-8\n2\t404\ttext/html\n", {"u1", "u2", "u3"}, dir, True];
+    curlLines["2\t000\t\t\n0\t200\ttext/html; charset=UTF-8\t\n2\t302\ttext/html\thttps://b/c\n", 3],
+    {{200, "text/html; charset=UTF-8", ""}, {0, "", ""}, {302, "text/html", "https://b/c"}},
+    TestID -> "Read: curl's lines, in the order the transfers finished, are read into the requests' order, a later line for a request over an earlier one; no line is status 0"
+]
+
+VerificationTest[
+    Module[{runs = {}, dir = CreateDirectory[], answers},
+        Block[{
+            curlExecutable = "curl" &,
+            curlRun = Function[arguments, With[{config = ReadString[Last[arguments]]},
+                AppendTo[runs, StringCount[config, "url = "]];
+                Which[
+                    StringContainsQ[config, "\"https://a/closed\""],
+                        "0\t302\ttext/html\thttps://www.wolframcloud.com/j_spring_oauth_security_check?statusCode=401\n1\t301\t\thttps://a/moved-to\n2\t200\ttext/plain\t\n",
+                    True,
+                        "0\t200\ttext/html\t\n"
+                ]
+            ]]
+        },
+            answers = curlGet[{"https://a/closed", "https://a/moved", "https://a/plain"}, False, 4]
+        ];
         DeleteDirectory[dir, DeleteContents -> True];
-        {answers[[1]], FailureQ[answers[[2]]], answers[[3]]}
+        {answers, runs}
     ],
-    {<|"StatusCode" -> 200, "ContentType" -> "text/html; charset=UTF-8", "Body" -> "first"|>, True, <|"StatusCode" -> 404, "ContentType" -> "text/html", "Body" -> "a\[Copyright]b"|>},
-    TestID -> "Read: curl's lines, in the order the transfers finished, are the answers of the urls in their order; status 0 or no line is no answer, and a body with no charset is a character a byte, as URLRead reads it"
+    {{<|"StatusCode" -> 401, "ContentType" -> "text/html"|>, <|"StatusCode" -> 200, "ContentType" -> "text/html"|>, <|"StatusCode" -> 200, "ContentType" -> "text/plain"|>}, {3, 1}},
+    TestID -> "Read: a redirect to the cloud's sign-in check is the status it names, as URLRead reads it, and any other redirect is requested again at its target"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], result},
+        BinaryWrite[FileNameJoin[{dir, "3"}], ByteArray[{97, 169, 98}]]; Close[FileNameJoin[{dir, "3"}]];
+        result = fileText[FileNameJoin[{dir, "3"}], "text/html"];
+        DeleteDirectory[dir, DeleteContents -> True];
+        result
+    ],
+    "a\[Copyright]b",
+    TestID -> "Read: a body with no charset is a character a byte, as URLRead reads it"
 ]
 
 VerificationTest[
