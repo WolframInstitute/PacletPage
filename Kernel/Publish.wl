@@ -1756,7 +1756,7 @@ transformKey[file_String, type_, options_List, valid_Association] := With[{held 
    a page that holds none, and every page of a paclet that declares no symbols, keeps its transform
    when the paclet's version changes *)
 transformPageContext[held_] := With[{context = $transform["Context"], names = Lookup[$transform, "SymbolNames", <||>]},
-    If[ Length[names] === 0 || MatchQ[held, _HoldComplete] && ! showsSymbolQ[held, names], Take[context, 3], context]
+    If[ Length[names] === 0 || MatchQ[held, _HoldComplete] && ! showsSymbolQ[held, names], Take[context, UpTo[3]], context]
 ];
 showsSymbolQ[held_, names_Association] := AnyTrue[Cases[held, s_String :> s, Infinity], KeyExistsQ[names, #] &];
 
