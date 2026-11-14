@@ -2035,6 +2035,26 @@ VerificationTest[
     TestID -> "Deploy: a cloud upload that stalls is cut at its time limit and sent again"
 ]
 
+VerificationTest[
+    Module[{calls = {}, read},
+        read = Function[{urls, n}, AppendTo[calls, {urls, n}];
+            Map[If[Length[calls] === 1 && MemberQ[{"b", "d"}, #], Missing["HTTP", 401], "body " <> #] &, urls]];
+        {Block[{$refetchPauses = {0, 0}}, refetched[read, {"a", "b", "c", "d"}]], calls}
+    ],
+    {{"body a", "body b", "body c", "body d"}, {{{"a", "b", "c", "d"}, 16}, {{"b", "d"}, 4}}},
+    TestID -> "Catalog: pages that do not read are read again, four at a time, until they do"
+]
+
+VerificationTest[
+    {
+        leftOutCheck[<|"Pages" -> <|"ref/A" -> <||>, "ref/B" -> <||>|>, "LeftOut" -> {}|>, "https://s.example/"]["OK"],
+        Lookup[leftOutCheck[<|"Pages" -> <|"ref/A" -> <||>|>, "LeftOut" -> {"https://r.example/D/ref/B.html"}|>, "https://s.example/"], {"OK", "Detail"}],
+        leftOutCheck[<|"Pages" -> <|"ref/A" -> <||>|>|>, "https://s.example/"]["OK"]
+    },
+    {True, {False, "1 of 2 published pages left out: https://r.example/D/ref/B.html"}, True},
+    TestID -> "Check: a site whose catalog left out published pages does not pass"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},

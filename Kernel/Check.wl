@@ -131,6 +131,15 @@ sentCheck[name_String, directory_String, site_String] := Module[
         ]]
 ];
 
+(* the catalog's pages against the resource's: a published page whose notebook the catalog could not
+   read is a page the site lacks *)
+leftOutCheck[catalog_Association, site_String] := With[{left = Lookup[catalog, "LeftOut", {}]},
+    check["Pages", site, left === {},
+        If[ left === {}, ToString[Length[catalog["Pages"]]] <> " pages, none left out",
+            ToString[Length[left]] <> " of " <> ToString[Length[catalog["Pages"]] + Length[left]] <> " published pages left out: " <>
+                StringRiffle[Take[left, UpTo[5]], ", "] <> If[Length[left] > 5, ", ...", ""]]]
+];
+
 runCheck[{f_, arguments___}] := f[arguments];
 
 waitSeconds[seconds_?NumericQ] := Max[0, seconds];
@@ -150,7 +159,7 @@ CheckPacletPage[catalog_, name_, opts : OptionsPattern[]] := Block[{$deployMonit
     directory = site <> "Feedback";
     root = catalog["RootGuide"];
     checks = Join[
-        {{shellCheck, site, site}, {shellCheck, site <> "Page", site}},
+        {{shellCheck, site, site}, {shellCheck, site <> "Page", site}, {leftOutCheck, catalog, site}},
         {pageCheck, #, catalog["Pages"][#]["Notebook"]} & /@ checkedPages[catalog, OptionValue["Pages"]],
         Cases[checkedPages[catalog, OptionValue["Pages"]], id_ /; StringQ[catalog["Pages"][id]["HTML"]] :> {htmlCheck, id, catalog["Pages"][id]["HTML"]}],
         If[ catalog["Kind"] === "Repository" && KeyExistsQ[catalog["Pages"], root],

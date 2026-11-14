@@ -61,16 +61,37 @@ responseText[other_] := Missing["NotRead", other];
 
 fetchText[url_String] := responseText[URLRead[HTTPRequest[url], {"StatusCode", "Body"}, TimeConstraint -> 120]];
 
-(* the HTTP status of many pages, sixteen at a time *)
-fetchStatuses[urls_List] := Catenate @ Map[
+(* the HTTP status of many pages, n at a time, sixteen by default *)
+fetchStatuses[urls_List, n_Integer : 16] := Catenate @ Map[
     Function[block, URLRead[HTTPRequest /@ block, "StatusCode", TimeConstraint -> 120]],
-    Partition[urls, UpTo[16]]
+    Partition[urls, UpTo[n]]
 ];
 
-(* many pages, read sixteen at a time: a list of requests is read concurrently *)
-fetchTexts[urls_List] := Catenate @ Map[
+(* many pages, read n at a time, sixteen by default: a list of requests is read concurrently *)
+fetchTexts[urls_List, n_Integer : 16] := Catenate @ Map[
     Function[block, responseText /@ URLRead[HTTPRequest /@ block, {"StatusCode", "Body"}, TimeConstraint -> 120]],
-    Partition[urls, UpTo[16]]
+    Partition[urls, UpTo[n]]
+];
+
+(* Many pages, the ones not read read again, four at a time, after each pause: a page the cloud is
+   redeploying, as the Paclet Repository does for days after it publishes, answers as private now
+   and then, and the same page reads a moment later. Read gives each url its body or Missing. *)
+$refetchPauses = {5, 20};
+refetched[read_, urls_List] := Module[{results = read[urls, 16]},
+    Do[
+        With[{failed = Flatten[Position[results, _Missing, {1}, Heads -> False]]},
+            If[failed === {}, Break[]];
+            Pause[pause];
+            results[[failed]] = read[urls[[failed]], 4]
+        ],
+        {pause, $refetchPauses}
+    ];
+    results
+];
+fetchTextsAgain[urls_List] := refetched[fetchTexts, urls];
+fetchStatusesAgain[urls_List] := refetched[
+    Function[{u, n}, Map[If[# === 200, 200, Missing["HTTP", #]] &, fetchStatuses[u, n]]],
+    urls
 ];
 
 regexEscape[s_String] := StringReplace[s,
@@ -247,7 +268,7 @@ pageName[id_String] := Last[StringSplit[id, "/", 2]];
 resolveNotebooks[pages_Association, ids_List] := Module[{pending, bodies},
     pending = Select[ids, MatchQ[pages[#]["Notebook"], _Missing] &];
     If[ pending === {}, Return[pages, Module]];
-    bodies = fetchTexts[pages[#]["HTML"] & /@ pending];
+    bodies = fetchTextsAgain[pages[#]["HTML"] & /@ pending];
     Join[pages, Association @ MapThread[
         #1 -> Append[pages[#1], "Notebook" -> If[StringQ[#2], repositoryNotebook[#2], Missing["NoNotebook"]]] &,
         {pending, bodies}
@@ -275,7 +296,7 @@ Options[PacletPageCatalog] = {
 };
 
 PacletPageCatalog[source_, opts : OptionsPattern[]] := Module[
-    {spec, html, links, local, pages, listed, queue, level, walked = <||>, nb, structure, discovered, published, unpublished, monitor, root, title},
+    {spec, html, links, local, pages, listed, queue, level, walked = <||>, nb, structure, discovered, published, unpublished, leftOut, monitor, root, title},
     spec = resourceSpec[source];
     If[ spec === $Failed, Message[PacletPageCatalog::resource, source]; Return[$Failed, Module]];
     monitor = TrueQ[OptionValue["Monitor"]];
@@ -322,17 +343,16 @@ PacletPageCatalog[source_, opts : OptionsPattern[]] := Module[
     (* a page only a guide links to joins the catalog when it is published: a guide may name a
        page that never got one, or link a page of another paclet under this paclet's name *)
     discovered = Complement[Keys[pages], listed];
-    published = AssociationThread[discovered, MatchQ[#, 200] & /@ fetchStatuses[pages[#]["HTML"] & /@ discovered]];
+    published = AssociationThread[discovered, MatchQ[#, 200] & /@ fetchStatusesAgain[pages[#]["HTML"] & /@ discovered]];
     unpublished = Lookup[pages, Keys[Select[published, Not]], <||>][[All, "HTML"]];
     pages = KeyDrop[pages, Keys[Select[published, Not]]];
 
     (* the notebook behind every other page *)
     pages = resolveNotebooks[pages, Keys[pages]];
     If[monitor, Print["PacletPageCatalog: ", Length[pages], " pages resolved"]];
-    Scan[
-        Function[key, If[ ! StringQ[pages[key]["Notebook"]], Message[PacletPageCatalog::nonb, pages[key]["HTML"]]]],
-        Keys[pages]
-    ];
+    leftOut = Keys[Select[pages, ! StringQ[#["Notebook"]] &]];
+    Scan[Message[PacletPageCatalog::nonb, pages[#]["HTML"]] &, leftOut];
+    leftOut = Lookup[pages, leftOut, <||>][[All, "HTML"]];
     pages = Select[pages, StringQ[#["Notebook"]] &];
 
     (* keywords, and titles a page lacks, from the built documentation *)
@@ -364,6 +384,8 @@ PacletPageCatalog[source_, opts : OptionsPattern[]] := Module[
         "Pages" -> pages,
         (* pages a guide links to that are not published, such as pages added since the last deploy *)
         "Unpublished" -> unpublished,
+        (* published pages whose notebook could not be read, read again twice: the site lacks them *)
+        "LeftOut" -> leftOut,
         "Version" -> publishedVersion[spec],
         "Date" -> DateString[TimeZoneConvert[Now, 0], "ISODateTime"]
     |>

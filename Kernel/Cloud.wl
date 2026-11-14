@@ -233,7 +233,8 @@ DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Block[{$deployMoni
         "Page" -> page,
         "Feedback" -> feedback,
         "Source" -> source,
-        "Pages" -> Length[catalog["Pages"]]
+        "Pages" -> Length[catalog["Pages"]],
+        "LeftOut" -> Length[Lookup[catalog, "LeftOut", {}]]
     |>
 ]];
 
