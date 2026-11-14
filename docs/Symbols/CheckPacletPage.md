@@ -21,7 +21,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 - A notebook that answers 403 is not public: `SetPacletPagePermissions` repairs it. One that answers 404 is gone; on the Paclet Repository that means the paclet was updated, and the site has to be published again from a new catalog.
 - The report has `"OK"`, `"Site"`, `"Failed"`, the checks that failed, and `"Checks"`, a `Dataset` with one row per check.
 - With `"Feedback" -> "Send"`, an example entry is sent as the site's Feedback panel sends it, with an image attached: the check passes when the form answers with its thank-you page and the entry and its attachment are stored. The entry is then set `"not a defect"`, so the team's list keeps it out of the open ones. Reading it back takes the account's cloud session.
-- The pages are requested sixteen at a time.
+- The pages are requested sixteen at a time, by an external curl, found on the `PATH` (and on Windows in its System32), never by the kernel's own transfers, which Wolfram 15.0 runs on a thread that can crash the kernel. Without curl, every check fails and `PacletPage::nocurl` says why.
 - With `"Wait"`, the checks that fail run again every 10 seconds until they pass or the time is up: a site checked right after it is published may have pages the cloud has not rendered yet.
 - `name` is a site of the connected account, or the URL of a site in any account.
 - The following options can be given:
