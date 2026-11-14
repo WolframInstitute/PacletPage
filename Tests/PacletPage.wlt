@@ -2077,6 +2077,18 @@ VerificationTest[
     TestID -> "Build: the kernels PacletPage starts, and a build, start no asynchronous site update or information refresh"
 ]
 
+VerificationTest[
+    Block[{PacletManager`Services`Private`getPacletSiteData},
+        PacletSites[];
+        DownValues[PacletManager`Services`Private`getPacletSiteData] = {HoldPattern[PacletManager`Services`Private`getPacletSiteData[]] :> {
+            {"https://fresh.example", "F", None, Date[], Date[], None}, {"https://old.example", "O", None, {2020, 1, 1}, {2020, 1, 1}, None},
+            {"https://never.example", "N", None, {}, {}, None}}};
+        staleSites[]
+    ],
+    {"https://old.example", "https://never.example"},
+    TestID -> "Build: the paclet sites last updated over three days ago, or never, are the stale ones PacletPage refreshes when it loads"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},

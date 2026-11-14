@@ -2999,6 +2999,22 @@ refreshPacletSites[] := If[ ! TrueQ[$sitesRefreshed] && TrueQ[$AllowInternet],
     TimeConstrained[Scan[PacletSiteUpdate[#, Asynchronous -> False] &, PacletSites[]], 60]
 ];
 
+(* The sites whose last update succeeded over three days ago, or never, by the paclet manager's own
+   record, which its weekly update reads; none where that record is not at hand *)
+staleSites[] := If[ DownValues[PacletManager`Services`Private`getPacletSiteData] === {} || DownValues[PacletManager`Package`differenceInDays] === {}, {},
+    Cases[PacletManager`Services`Private`getPacletSiteData[],
+        {url_String, _, _, _, last_, ___} /; ! MatchQ[last, {__Integer} | {__?NumericQ}] || PacletManager`Package`differenceInDays[last, Date[]] > 3 :> url]
+];
+
+(* When PacletPage loads in a kernel whose sites are stale, such as each container of a build on a
+   new pod, it refreshes them synchronously at once, so that the weekly update the paclet manager
+   scheduled when the kernel started finds them fresh when it fires, later, in the middle of
+   whatever the kernel does then, and starts nothing. Not on parallel kernels, which start no weekly
+   update. *)
+refreshStaleSites[] := If[ $KernelID === 0 && TrueQ[$AllowInternet],
+    With[{stale = staleSites[]}, If[ stale =!= {}, TimeConstrained[Scan[PacletSiteUpdate[#, Asynchronous -> False] &, stale], 30]]]
+];
+
 DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],
     ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, Catch[Module[
     {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed, symbolRules, pinned,

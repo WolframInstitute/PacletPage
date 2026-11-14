@@ -101,6 +101,8 @@ $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage"
 
 Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl"}];
 
+refreshStaleSites[];
+
 End[]
 
 EndPackage[]
