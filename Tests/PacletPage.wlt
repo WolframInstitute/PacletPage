@@ -1049,6 +1049,52 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], answers},
+        WriteString[FileNameJoin[{dir, "1"}], "first"]; Close[FileNameJoin[{dir, "1"}]];
+        BinaryWrite[FileNameJoin[{dir, "3"}], ByteArray[{97, 169, 98}]]; Close[FileNameJoin[{dir, "3"}]];
+        answers = curlAnswers["2\t000\t\n0\t200\ttext/html; charset=UTF-8\n2\t404\ttext/html\n", {"u1", "u2", "u3"}, dir, True];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {answers[[1]], FailureQ[answers[[2]]], answers[[3]]}
+    ],
+    {<|"StatusCode" -> 200, "ContentType" -> "text/html; charset=UTF-8", "Body" -> "first"|>, True, <|"StatusCode" -> 404, "ContentType" -> "text/html", "Body" -> "a\[Copyright]b"|>},
+    TestID -> "Read: curl's lines, in the order the transfers finished, are the answers of the urls in their order; status 0 or no line is no answer, and a body with no charset is a character a byte, as URLRead reads it"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], file, result},
+        file = FileNameJoin[{dir, "body"}];
+        BinaryWrite[file, StringToByteArray["\[Copyright] caf\[EAcute]", "UTF-8"]]; Close[file];
+        result = {fileText[file, "text/html; charset=utf-8"], fileText[file, "text/html;charset=\"UTF-8\""], StringLength[fileText[file, "text/html"]], fileText[FileNameJoin[{dir, "none"}], "text/html"]};
+        DeleteDirectory[dir, DeleteContents -> True];
+        result
+    ],
+    {"\[Copyright] caf\[EAcute]", "\[Copyright] caf\[EAcute]", 9, ""},
+    TestID -> "Read: a body is decoded by the charset its content type names, and is a character a byte where it names none"
+]
+
+VerificationTest[
+    Block[{curlExecutable = None &}, {FailureQ[First[curlGet[{"https://example.org/"}, False, 1]]], FailureQ[curlPost["https://example.org/", "r", {}]]}],
+    {True, True},
+    {PacletPage::nocurl, PacletPage::nocurl},
+    TestID -> "Read: with no curl, every answer is a Failure and the reason is said, never a read through the kernel"
+]
+
+VerificationTest[
+    If[ curlExecutable[] === None, True,
+        With[{answers = curlGet[{"http://127.0.0.1:9/a", "http://127.0.0.1:9/b"}, True, 2]}, Length[answers] === 2 && AllTrue[answers, FailureQ]]
+    ],
+    True,
+    TestID -> "Read: a curl that reaches nothing gives each url a Failure, in a process of its own"
+]
+
+VerificationTest[
+    FreeQ[Join[DownValues[anonymousStatus], DownValues[anonymousBody], DownValues[anonymousStatuses], DownValues[fetchText], DownValues[fetchTexts],
+        DownValues[fetchStatuses], DownValues[sentCheck]], URLRead | URLFetch | URLExecute | URLSubmit],
+    True,
+    TestID -> "Read: the check and the catalog read published pages through curl alone, with no transfer of the kernel's"
+]
+
+VerificationTest[
     {sameAccountQ[{"me@x.org", "me@x.org"}, "me@x.org"], sameAccountQ[{"me@x.org", "you@x.org"}, "me@x.org"],
         sameAccountQ[{"me@x.org", None}, "me@x.org"], sameAccountQ[{}, "me@x.org"], sameAccountQ[{"me@x.org"}, None]},
     {True, False, False, False, False},

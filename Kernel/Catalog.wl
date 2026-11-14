@@ -55,21 +55,103 @@ resourceSpec[_] := $Failed;
 
 (* ==================== reading published pages ==================== *)
 
+(* Published pages are read by an external curl, a block of them in one process, never by URLRead:
+   Wolfram 15.0's transfer thread, libcurllink's, crashes the kernel now and then, the more often the
+   more transfers it runs at once, and a site's catalog and check request hundreds. Every request is
+   anonymous, as a reader's browser makes it, follows redirects and has its own two minutes. Each
+   answer is <|"StatusCode", "ContentType", "Body"|> (the body when asked for), or a Failure where
+   nothing came back; with no curl, every answer is a Failure and PacletPage::nocurl says why. *)
+PacletPage::nocurl = "No curl was found on the PATH; PacletPage reads published pages with it. Install curl, or put it on the PATH.";
+
+curlExecutable[] := curlExecutable[] = Replace[
+    Select[FileNameJoin[{#, If[$OperatingSystem === "Windows", "curl.exe", "curl"]}] & /@ curlDirectories[], FileExistsQ],
+    {{curl_, ___} :> curl, {} -> None}
+];
+(* the PATH's directories, and on Windows its System32, where Windows 10 and later ship curl.exe *)
+curlDirectories[] := DeleteDuplicates @ Join[
+    StringSplit[Replace[Environment["PATH"], Except[_String] -> ""], If[$OperatingSystem === "Windows", ";", ":"]],
+    If[ $OperatingSystem === "Windows" && StringQ[Environment["SystemRoot"]], {FileNameJoin[{Environment["SystemRoot"], "System32"}]}, {}]
+];
+
+(* the answers to GET requests of the urls, read by one curl at most n at a time; bodies too when
+   body is True *)
+curlGet[{}, _, _] := {};
+curlGet[urls : {__String}, body_?BooleanQ, n_Integer] := With[{curl = curlExecutable[]},
+    If[ curl === None,
+        Message[PacletPage::nocurl];
+        Map[Failure["NoCurl", <|"MessageTemplate" -> "No curl to read `1` with.", "MessageParameters" -> {#}|>] &, urls],
+        Module[{dir = CreateDirectory[], config, out, answers},
+            config = FileNameJoin[{dir, "requests"}];
+            WriteString[config, StringJoin[MapIndexed[
+                "url = " <> curlQuoted[#1] <> "\noutput = " <> curlQuoted[FileNameJoin[{dir, IntegerString[First[#2]]}]] <> "\n" &, urls]]];
+            Close[config];
+            out = curlRun[{curl, "--silent", "--location", "--max-time", "120", "--parallel", "--parallel-max", IntegerString[Max[1, n]],
+                "--write-out", "%{urlnum}\t%{http_code}\t%{content_type}\n", "--config", config}];
+            answers = curlAnswers[out, urls, dir, body];
+            DeleteDirectory[dir, DeleteContents -> True];
+            answers
+        ]
+    ]
+];
+
+curlRun[arguments_List] := Replace[RunProcess[arguments, "StandardOutput"], Except[_String] -> ""];
+
+(* a string as curl's config file reads it: quoted, its backslashes and quotes escaped *)
+curlQuoted[s_String] := "\"" <> StringReplace[s, {"\\" -> "\\\\", "\"" -> "\\\""}] <> "\"";
+
+(* curl's lines, "index, status, content type" for each url in the order they finished, read into
+   the urls' answers in their order: status 0, or no line, is no answer *)
+curlAnswers[out_String, urls_List, dir_String, body_] := Module[{answers = ConstantArray[None, Length[urls]], fields, index, status},
+    Scan[
+        Function[line,
+            fields = StringSplit[line, "\t", All];
+            If[ Length[fields] >= 2,
+                index = Interpreter["Integer"][fields[[1]]];
+                status = Interpreter["Integer"][fields[[2]]];
+                If[ IntegerQ[index] && 0 <= index < Length[urls] && IntegerQ[status] && status > 0,
+                    With[{type = If[Length[fields] >= 3, fields[[3]], ""]},
+                        answers[[index + 1]] = Join[
+                            <|"StatusCode" -> status, "ContentType" -> type|>,
+                            If[TrueQ[body], <|"Body" -> fileText[FileNameJoin[{dir, IntegerString[index + 1]}], type]|>, <||>]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        StringSplit[out, "\n"]
+    ];
+    MapThread[Replace[#1, None :> Failure["NoResponse", <|"MessageTemplate" -> "No answer from `1`.", "MessageParameters" -> {#2}|>]] &, {answers, urls}]
+];
+
+(* a body's text as URLRead gives it: decoded by the charset its content type names, UTF-8 or a
+   single-byte one, and one character a byte where it names none; "" for no body *)
+fileText[file_String, type_String] := If[ ! FileExistsQ[file], "",
+    With[{bytes = ReadByteArray[file], charset = ToLowerCase[First[StringCases[type, RegularExpression["(?i)charset=\\s*\"?([^;\"\\s]+)"] -> "$1"], ""]]},
+        Which[
+            ! ByteArrayQ[bytes], "",
+            MemberQ[{"utf-8", "utf8"}, charset], Quiet[ByteArrayToString[bytes, "UTF-8"], $CharacterEncoding::utf8],
+            KeyExistsQ[$singleByteCharsets, charset], FromCharacterCode[Normal[bytes], $singleByteCharsets[charset]],
+            True, FromCharacterCode[Normal[bytes]]
+        ]
+    ]
+];
+$singleByteCharsets = <|"iso-8859-1" -> "ISOLatin1", "latin1" -> "ISOLatin1", "us-ascii" -> "ASCII", "windows-1252" -> "WindowsANSI"|>;
+
 (* the body of a page, or Missing with the HTTP status (or the failure) when it cannot be read *)
 responseText[response_Association] := If[response["StatusCode"] === 200, response["Body"], Missing["HTTP", response["StatusCode"]]];
 responseText[other_] := Missing["NotRead", other];
 
-fetchText[url_String] := responseText[URLRead[HTTPRequest[url], {"StatusCode", "Body"}, TimeConstraint -> 120]];
+fetchText[url_String] := responseText[First[curlGet[{url}, True, 1]]];
 
-(* the HTTP status of many pages, n at a time, sixteen by default *)
+(* the HTTP status of many pages, n at a time, sixteen by default; a Failure for one with no answer *)
 fetchStatuses[urls_List, n_Integer : 16] := Catenate @ Map[
-    Function[block, URLRead[HTTPRequest /@ block, "StatusCode", TimeConstraint -> 120]],
+    Function[block, Replace[curlGet[block, False, n], answer_Association :> answer["StatusCode"], {1}]],
     Partition[urls, UpTo[n]]
 ];
 
-(* many pages, read n at a time, sixteen by default: a list of requests is read concurrently *)
+(* many pages, read n at a time, sixteen by default, concurrently *)
 fetchTexts[urls_List, n_Integer : 16] := Catenate @ Map[
-    Function[block, responseText /@ URLRead[HTTPRequest /@ block, {"StatusCode", "Body"}, TimeConstraint -> 120]],
+    Function[block, responseText /@ curlGet[block, True, n]],
     Partition[urls, UpTo[n]]
 ];
 

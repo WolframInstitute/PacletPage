@@ -7,14 +7,10 @@
    is gone, which for a Paclet Repository site means the paclet was updated and the site has to
    be published again from a new catalog. *)
 
-anonymousStatus[url_String] := With[{response = URLRead[HTTPRequest[url], {"StatusCode", "Headers"}, Authentication -> None, TimeConstraint -> 120]},
-    If[ AssociationQ[response],
-        <|"Status" -> response["StatusCode"], "Type" -> Lookup[toAssociation[response["Headers"]], "content-type", Lookup[toAssociation[response["Headers"]], "Content-Type", ""]]|>,
-        <|"Status" -> Missing["NoResponse"], "Type" -> ""|>
-    ]
-];
+(* the requests go through curl, as the catalog's do (curlGet), anonymous by nature *)
+anonymousStatus[url_String] := responseStatus[First[curlGet[{url}, False, 1]]];
 
-anonymousBody[url_String] := With[{response = URLRead[HTTPRequest[url], {"StatusCode", "Body"}, Authentication -> None, TimeConstraint -> 120]},
+anonymousBody[url_String] := With[{response = First[curlGet[{url}, True, 1]]},
     If[AssociationQ[response] && response["StatusCode"] === 200, response["Body"], Missing["NotRead", url]]
 ];
 
@@ -42,7 +38,7 @@ shellCheck[url_String, site_String] := With[{body = anonymousBody[url]},
 (* the anonymous statuses of many URLs, sixteen at a time, with a line every ten blocks when monitored *)
 anonymousStatuses[urls_List] := Module[{done = 0},
     Catenate @ Map[
-        Function[block, With[{responses = URLRead[HTTPRequest /@ block, {"StatusCode", "Headers"}, Authentication -> None, TimeConstraint -> 120]},
+        Function[block, With[{responses = curlGet[block, False, 16]},
             done += Length[block];
             If[ Length[urls] > 16 && (Mod[done, 160] < Length[block] || done === Length[urls]),
                 monitor["check", "pages: " <> ToString[done] <> " of " <> ToString[Length[urls]] <> " requested"]];
@@ -52,8 +48,7 @@ anonymousStatuses[urls_List] := Module[{done = 0},
     ]
 ];
 
-responseStatus[response_Association] := <|"Status" -> response["StatusCode"],
-    "Type" -> Lookup[toAssociation[response["Headers"]], "content-type", Lookup[toAssociation[response["Headers"]], "Content-Type", ""]]|>;
+responseStatus[response_Association] := <|"Status" -> response["StatusCode"], "Type" -> Lookup[response, "ContentType", ""]|>;
 responseStatus[_] := <|"Status" -> Missing["NoResponse"], "Type" -> ""|>;
 
 (* the checks run: the pages' requests together, the others one by one *)
@@ -111,10 +106,8 @@ sentCheck[name_String, directory_String, site_String] := Module[
     {marker = "An example entry sent by CheckPacletPage, " <> CreateUUID[], image, response, entry},
     image = FileNameJoin[{$TemporaryDirectory, CreateUUID["check-"] <> ".png"}];
     Export[image, Image[ConstantArray[{0.85, 0.2, 0.1}, {8, 8}]], "PNG"];
-    response = URLRead[
-        HTTPRequest[directory <> "/Form", <|"Method" -> "POST", "Headers" -> {"Referer" -> site <> "Page"},
-            "Body" -> {"Feedback" -> marker, "Page" -> "check", "Title" -> "CheckPacletPage", "View" -> "check", "Attachment1" -> File[image]}|>],
-        {"StatusCode", "Body"}, Authentication -> None, TimeConstraint -> 120];
+    response = curlPost[directory <> "/Form", site <> "Page",
+        {"Feedback" -> marker, "Page" -> "check", "Title" -> "CheckPacletPage", "View" -> "check", "Attachment1" -> File[image]}];
     DeleteFile[image];
     entry = If[ AssociationQ[response] && response["StatusCode"] === 200 && StringContainsQ[response["Body"], "pp-feedback-thanks"],
         SelectFirst[Replace[Normal[PacletPageFeedback[name]], Except[_List] -> {}], Lookup[#, "Feedback", ""] === marker &, None],
@@ -129,6 +122,25 @@ sentCheck[name_String, directory_String, site_String] := Module[
             ! StringQ[entry["Attachments"]] || entry["Attachments"] === "", "stored without its attachment",
             True, "stored with its attachment, and set \"not a defect\""
         ]]
+];
+
+(* a form posted as the site's page posts it, multipart, through curl: <|"StatusCode", "Body"|>, or a
+   Failure where nothing came back. A string field goes as a string, never read as a file's name. *)
+curlPost[url_String, referer_String, fields_List] := With[{curl = curlExecutable[]},
+    If[ curl === None,
+        Message[PacletPage::nocurl]; Failure["NoCurl", <|"MessageTemplate" -> "No curl to post to `1` with.", "MessageParameters" -> {url}|>],
+        Module[{dir = CreateDirectory[], out, answer},
+            out = curlRun[Join[
+                {curl, "--silent", "--location", "--max-time", "120", "--header", "Referer: " <> referer, "--output", FileNameJoin[{dir, "1"}],
+                    "--write-out", "%{urlnum}\t%{http_code}\t%{content_type}\n"},
+                Catenate[Replace[fields, {(name_String -> File[file_String]) :> {"--form", name <> "=@" <> file}, (name_String -> value_) :> {"--form-string", name <> "=" <> TextString[value]}}, {1}]],
+                {url}
+            ]];
+            answer = First[curlAnswers[out, {url}, dir, True]];
+            DeleteDirectory[dir, DeleteContents -> True];
+            answer
+        ]
+    ]
 ];
 
 (* the catalog's pages against the resource's: a published page whose notebook the catalog could not
