@@ -2025,6 +2025,17 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{showing = HoldComplete[Notebook[{Cell[BoxData[RowBox[{"f", "[", "1", "]"}]], "Input"]}]]},
+        SameQ @@ Map[
+            Function[version, Block[{$transform = newTransform["/no/cache", transformContext[{version}, {}], {version}, {}, {}]}, transformPageContext[showing]]],
+            {"1.0.0", "2.0.0"}
+        ]
+    ],
+    True,
+    TestID -> "Deploy: the pages of a paclet that declares no symbols, which the transform boxes none of, keep their transform when its version changes"
+]
+
+VerificationTest[
     Module[{calls = 0, result},
         result = Block[{$cloudCopyPauses = {0, 0}, $cloudCopyTime = {1, 0},
                 CopyFile = Function[{from, to, opt}, calls++; If[calls === 1, Pause[10]]; CloudObject["https://c.example/obj/u/x"]]},
