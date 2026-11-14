@@ -488,13 +488,31 @@ $converterInternals = {
     "resolveSource", "litParse", "resolveIncludes", "executableQ", "resetBoundaryQ", "$setupHeadingQ",
     "cumulativeHashes", "exampleCacheName", "evaluatorTag", "stableHash", "mdSep", "$narrativeTemplates", "$cacheLocation"
 };
+(* The converter loads Wolfram/Parser at its first call and, where no copy it can load is at hand,
+   installs it from the Paclet Repository: a transfer in the middle of a page's conversion, which no
+   build should make. Each kernel that converts pages prepares the parser before it: a copy vendored
+   beside a converter read from its checkout, else one installed, then the converter's attempt
+   marked made, so that it installs nothing. The code is System's alone, so a parallel kernel runs
+   it as it is. *)
+$parserPreparation = Function[context,
+    If[ NameQ[context <> "$parserTried"],
+        With[{vendored = If[NameQ[context <> "vendoredParserDir"], Symbol[context <> "vendoredParserDir"][], None]},
+            If[StringQ[vendored] && DirectoryQ[vendored], PacletDirectoryLoad[vendored]]
+        ];
+        If[ PacletFind["Wolfram/Parser"] =!= {} && ! MemberQ[$Packages, "Wolfram`Parser`"], Needs["Wolfram`Parser`"]];
+        ToExpression[context <> "$parserTried", InputForm, Function[s, s = True, HoldAllComplete]];
+        If[ NameQ[context <> "parserLoadedQ"] && TrueQ[Symbol[context <> "parserLoadedQ"][]],
+            ToExpression[context <> "$parserReady", InputForm, Function[s, s = True, HoldAllComplete]]]
+    ]
+];
+
 converterInternals[spec_Association] := Module[{symbol, context},
     symbol = Replace[spec["Function"], rf_ResourceFunction :> ResourceFunction[rf, "Function"]];
     If[ Head[symbol] =!= Symbol, Return[None, Module]];
     context = With[{s = symbol}, Context[s]];
     If[ ! AllTrue[$converterInternals, NameQ[context <> #] && ToExpression[context <> #, InputForm, Function[s, OwnValues[s] =!= {} || DownValues[s] =!= {}, HoldAllComplete]] &],
         Return[None, Module]];
-    If[ NameQ[context <> "ensureParser"], Symbol[context <> "ensureParser"][]];
+    $parserPreparation[context];
     (* a converter with rules for its outputs' forms has them in its cache's keys, as a salt *)
     Join[AssociationMap[Symbol[context <> #] &, $converterInternals],
         If[NameQ[context <> "outputSalt"], <|"outputSalt" -> Symbol[context <> "outputSalt"]|>, <||>]]
@@ -864,6 +882,15 @@ globalsClearedAfter[{names_List, bare_List}, result_] := (
     result
 );
 
+(* the parser prepared for a converter in this kernel, once *)
+preparedHere[f_] := With[{symbol = Replace[f, rf_ResourceFunction :> ResourceFunction[rf, "Function"]]},
+    If[ Head[symbol] === Symbol,
+        With[{context = With[{s = symbol}, Context[s]]},
+            If[ ! TrueQ[$parserPrepared[context]], $parserPreparation[context]; $parserPrepared[context] = True]
+        ]
+    ]
+];
+
 globalDefinedQ[name_String] := AnyTrue[{OwnValues, DownValues, UpValues, SubValues}, #[name] =!= {} &];
 
 sectionReports[messages_List] := Cases[messages,
@@ -874,6 +901,7 @@ sectionReports[_] := {};
    gives: the parallel kernels its examples launched are closed after it,
    so that none of them is left to the examples of the pages after it *)
 convertHere[spec_Association, setup_Association][task_Association] := With[{before = Kernels[]},
+    preparedHere[spec["Function"]];
     With[{done = convertPage[spec["Function"], task, setup["TimeConstraint"]]},
         closeKernels[Complement[Kernels[], before]];
         If[ setup["Monitor"], Print[If[done["OK"], "converted ", "failed "], task["Page"]]];
@@ -896,13 +924,14 @@ matchGeneralMessages[_] := Null;
    restarts after a crash keeps the distributed definitions, and nothing else *)
 workerFunction[setup_Association] := With[
     {dirs = setup["Directories"], context = setup["Context"], load = setup["Load"], limit = setup["TimeConstraint"], monitor = setup["Monitor"],
-     off = Lookup[setup, "Off", None]},
+     off = Lookup[setup, "Off", None], prepare = Lookup[setup, "Prepare", Function[Null, Null]]},
     Function[task,
         If[ ! TrueQ[$workerReady],
             matchGeneralMessages[off];
             Scan[PacletDirectoryLoad, dirs];
             If[ StringQ[context], Needs[context]];
             $workerConverter = ReleaseHold[load];
+            If[ Head[$workerConverter] === Symbol, prepare[With[{s = $workerConverter}, Context[s]]]];
             $workerReady = True
         ];
         If[ FileExistsQ[timeoutMarker[task]],
@@ -1176,7 +1205,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     kernels = If[ Length[misses] > 1, buildKernels[OptionValue["Parallel"]], {}];
     kernelPIDs = If[kernels === {}, {}, kernelProcessIDs[Complement[Kernels[], kernelsBefore]]];
     setup = <|
-        "Directories" -> DeleteDuplicates[Append[pacletDirectories[], dir]], "Load" -> spec["Load"],
+        "Directories" -> DeleteDuplicates[Append[pacletDirectories[], dir]], "Load" -> spec["Load"], "Prepare" -> $parserPreparation,
         "Context" -> If[OptionValue["EvaluationKernel"] === None, paclet["PrimaryContext"], None],
         "TimeConstraint" -> OptionValue["TimeConstraint"], "Monitor" -> TrueQ[OptionValue["Monitor"]]
     |>;

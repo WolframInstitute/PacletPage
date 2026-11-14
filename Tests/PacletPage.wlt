@@ -1043,6 +1043,22 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], result},
+        PacletPagePrepTest`$parserTried = False;
+        PacletPagePrepTest`$parserReady = False;
+        PacletPagePrepTest`vendoredParserDir[] := dir;
+        PacletPagePrepTest`parserLoadedQ[] := True;
+        $parserPreparation["PacletPagePrepTest`"];
+        result = {PacletPagePrepTest`$parserTried, PacletPagePrepTest`$parserReady, FreeQ[$parserPreparation, PacletInstall | PacletSiteUpdate | URLRead | URLSubmit]};
+        ClearAll["PacletPagePrepTest`*"];
+        DeleteDirectory[dir, DeleteContents -> True];
+        result
+    ],
+    {True, True, True},
+    TestID -> "Build: a kernel that converts pages prepares the converter's parser from what is at hand and marks its attempt made, so no conversion installs anything over the network"
+]
+
+VerificationTest[
     MatchQ[Import[$pinnedConverter, "WXF"], KeyValuePattern[{"URL" -> $converterURL, "Name" -> _String, "Definition" -> _Language`DefinitionList, "ID" -> _String}]],
     True,
     TestID -> "Build: this release of PacletPage carries a pinned published converter"
