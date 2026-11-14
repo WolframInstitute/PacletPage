@@ -981,7 +981,10 @@ BuildPacletDocumentation::page = "`1` did not become a notebook: `2`.";
 BuildPacletDocumentation::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, from a Flag frontmatter key, a flag cell or the palette's flag buttons: `2`.";
 BuildPacletDocumentation::nodefinition = "No markdown definition was found, as ResourceDefinition.md in `1` or a Template: Paclet page under `2`, so `3` was not rebuilt; a deploy would publish it as it is. Give \"Definition\", or \"Definition\" -> None to build without one.";
 
-BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Block[{$programHashes = <||>}, buildPacletDocumentation[dir, opts]];
+(* a build, as a deploy, keeps the kernel's asynchronous site update and information refresh from
+   starting while it runs (see $sitesRefreshed) *)
+BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Block[{$programHashes = <||>,
+    ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, buildPacletDocumentation[dir, opts]];
 buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentation]] := Module[
     {
         paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, store, cacheSymbol, useCache, separator,
@@ -2202,6 +2205,12 @@ kernelLicenseArguments[line_List, environment_] := With[
 ];
 kernelLicenseArguments[_, _] := {};
 
+(* What every kernel PacletPage starts for a script runs first: the paclet manager's weekly update of
+   its sites and the resource system's refresh of its information are asynchronous transfers that a
+   fresh kernel starts on its own, on a machine whose sites are not fresh, such as a new pod, and a
+   15.0 kernel can crash in one (see $sitesRefreshed); the script's kernel has no use for either. *)
+$quietKernelCode = "PacletManager`Services`Private`doWeeklyUpdate[] := Null;\nResourceSystemClient`$AsyncronousResourceInformationUpdates = False;\n";
+
 (* the command of a script run in a fresh kernel, with its arguments *)
 kernelScriptCommand[kernel_String, script_String, arguments_List : {}] := Join[{kernel, "-noprompt"}, kernelLicenseArguments[], {"-script", script}, arguments];
 
@@ -2216,6 +2225,7 @@ archiveLoadScript[archive_String, context_String, dependencies_List : {}] := Str
 
 (* the code of the check, up to its report *)
 archiveLoadCode[archive_String, context_String, dependencies_List : {}] := StringJoin[
+    $quietKernelCode,
     "$ProgressReporting = False;\n",
     dependencyLoadCode[dependencies],
     "dir = CreateDirectory[];\n",
@@ -2344,6 +2354,7 @@ tidyBuiltPage[file_String] := StringContainsQ[ReadString[file], "\"PageDelimiter
    what the caller has loaded. Its documentation step is the stock one, followed by the tidying of
    the pages it built, before PacletBuild hashes them into the manifest and packs them. *)
 pacletBuildScript[source_String, buildDir_String, dependencies_List : {}] := StringJoin[
+    $quietKernelCode,
     "$ProgressReporting = False;\n",
     dependencyLoadCode[dependencies],
     "PacletDirectoryLoad[", wlString[ParentDirectory[$packageDirectory]], "];\n",
@@ -2453,6 +2464,7 @@ documentationLinkBase[paclet_PacletObject] := Replace[
    process does over its own share while the others build theirs. Its output goes to a log, so
    that nothing waits on a full pipe. *)
 pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List] := StringJoin[
+    $quietKernelCode,
     "$ProgressReporting = False;\n",
     "$Output = $Messages = {OpenWrite[", wlString[log], "]};\n",
     dependencyLoadCode[dependencies],
@@ -3203,7 +3215,11 @@ showAPIErrors[] := If[ ! TrueQ[$apiErrorsShown],
 (* SubmitRepository[notebook] asks for the version in a dialog, which a kernel without a front end
    cannot show; the same submission is the notebook scraped into a ResourceObject and handed to
    ResourceSubmit with the version and publisher of PacletInfo.wl. *)
-SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Catch[Module[
+SubmitPacletResource[dir_String, opts : OptionsPattern[]] := Block[
+    {ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &},
+    submitPacletResource[dir, opts]
+];
+submitPacletResource[dir_String, opts : OptionsPattern[SubmitPacletResource]] := Catch[Module[
     {definition, paclet, version, publisher, issues, built, result, offline},
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];
     If[ ! readyToPublishQ[SubmitPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "submit"]];

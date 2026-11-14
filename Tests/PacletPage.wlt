@@ -2066,6 +2066,17 @@ VerificationTest[
     TestID -> "Deploy: neither the resource system's information nor the paclet sites are refreshed asynchronously during a deploy, and a deploy that stops early reads no site"
 ]
 
+VerificationTest[
+    {
+        AllTrue[{pacletBuildScript, archiveLoadCode, pageShareScript}, MatchQ[DownValues[#], {HoldPattern[_ :> StringJoin[$quietKernelCode, ___]], ___}] &],
+        StringContainsQ[ReadString[FileNameJoin[{$packageDirectory, "DefinitionScan.wls"}]], "doWeeklyUpdate[] := Null"],
+        Block[{buildPacletDocumentation = Function[Null, {ResourceSystemClient`$AsyncronousResourceInformationUpdates, PacletManager`Services`Private`doWeeklyUpdate[]}]},
+            BuildPacletDocumentation["/no/such"]]
+    },
+    {True, True, {False, Null}},
+    TestID -> "Build: the kernels PacletPage starts, and a build, start no asynchronous site update or information refresh"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},

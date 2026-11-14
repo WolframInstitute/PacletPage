@@ -1,3 +1,7 @@
+(* no asynchronous site update or information refresh in this kernel: see PacletPage's $quietKernelCode *)
+PacletManager`Services`Private`doWeeklyUpdate[] := Null;
+ResourceSystemClient`$AsyncronousResourceInformationUpdates = False;
+
 Begin["DefinitionScan`"]
 
 (* Run by BuildPacletDocumentation in a fresh kernel, and never read into PacletPage itself: loads a

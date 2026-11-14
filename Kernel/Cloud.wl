@@ -190,7 +190,8 @@ Options[DeployPacletPage] = Join[
 
 DeployPacletPage::name = "`1` is not a site name: use letters, digits, \"_\" and \"-\", with \"/\" between directories.";
 
-DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Module[
+DeployPacletPage[catalog_, name_, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],
+    ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, Module[
     {site, page, feedback, source, files, result, title, mail, feedbackOptions},
     Which[
         ! catalogQ[catalog], Message[PacletPageFiles::catalog, catalog]; Return[$Failed, Module],
