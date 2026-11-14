@@ -2057,13 +2057,13 @@ VerificationTest[
 
 VerificationTest[
     Module[{seen = {}},
-        Block[{readyToPublishQ = Function[Null, AppendTo[seen, ResourceSystemClient`$AsyncronousResourceInformationUpdates]; False]},
+        Block[{readyToPublishQ = Function[Null, AppendTo[seen, {ResourceSystemClient`$AsyncronousResourceInformationUpdates, PacletManager`Services`Private`doWeeklyUpdate[]}]; False]},
             DeployPacletResource["/no/such/paclet/dir"]
         ];
-        {seen, ResourceSystemClient`$AsyncronousResourceInformationUpdates =!= False}
+        {seen, ResourceSystemClient`$AsyncronousResourceInformationUpdates =!= False, $sitesRefreshed}
     ],
-    {{False}, True},
-    TestID -> "Deploy: the resource system's information is not refreshed asynchronously during a deploy"
+    {{{False, Null}}, True, False},
+    TestID -> "Deploy: neither the resource system's information nor the paclet sites are refreshed asynchronously during a deploy, and a deploy that stops early reads no site"
 ]
 
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)

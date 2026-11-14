@@ -2975,13 +2975,26 @@ DeployPacletResource::nocommit = "`1` is already published and records no commit
    delivered as a byte array on CURLLink's own thread, can crash the kernel (a freed chunk read in
    libcurllink), as it did in the middle of a deploy's definition notebook three times. The
    information is then read from the local cache, as it is between refreshes. *)
+(* The paclet manager's weekly update of its sites likewise starts asynchronous transfers, from a task
+   it schedules when it starts, which can fire in the middle of a deploy: on 15.0 one in flight was
+   followed by those crashes each time, and a kernel that ends with one in flight crashes too. A
+   deploy keeps the weekly update from starting, and refreshes the sites itself, synchronously, once
+   a kernel, before it deploys. *)
+$sitesRefreshed = False;
+refreshPacletSites[] := If[ ! TrueQ[$sitesRefreshed] && TrueQ[$AllowInternet],
+    $sitesRefreshed = True;
+    monitor["deploy: the paclet sites refreshed"];
+    TimeConstrained[Scan[PacletSiteUpdate[#, Asynchronous -> False] &, PacletSites[]], 60]
+];
+
 DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],
-    ResourceSystemClient`$AsyncronousResourceInformationUpdates = False}, Catch[Module[
+    ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, Catch[Module[
     {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed, symbolRules, pinned,
      sourceVersioned, source},
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];
     If[ ! readyToPublishQ[DeployPacletResource, dir, OptionValue["DocumentationSource"]], Throw[$Failed, "deploy"]];
     offline = offlineDryRunQ[OptionValue["DryRun"]];
+    If[ ! offline && ! TrueQ[OptionValue["DryRun"]], refreshPacletSites[]];
     $deployedDocumentation = None;
     $pages = newPages[];
     $transform = None;
@@ -3292,7 +3305,8 @@ resourceOptionsWith[resourceOptions_, buildOptions_] := Join[
 PublishPacletPage::cloud = DeployPacletResource::cloud;
 PublishPacletPage::account = "Connected to the Wolfram Cloud as `1`, not as `2`; nothing was built or published. Connect as `2` to publish this paclet.";
 
-PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Catch[Module[
+PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],
+    ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, Catch[Module[
     {build, resource, catalog, site, check, monitored = TrueQ[OptionValue["Monitor"]]},
     (* the account first: a paclet's documentation may publish as it is built, as PacletPage's own
        tutorial does, so a dry run that builds takes the account too; one that does not only reports *)
