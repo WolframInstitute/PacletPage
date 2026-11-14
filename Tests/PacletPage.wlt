@@ -2014,7 +2014,7 @@ VerificationTest[
           showing = HoldComplete[Notebook[{Cell[BoxData[RowBox[{"f", "[", "1", "]"}]], "Input"]}]]},
         Map[
             Function[held, SameQ @@ Map[
-                Function[version, Block[{$transform = newTransform["/no/cache", transformContext[{version}, pinned], {version}, pinned, {}]}, pageContext[held]]],
+                Function[version, Block[{$transform = newTransform["/no/cache", transformContext[{version}, pinned], {version}, pinned, {}]}, transformPageContext[held]]],
                 {"1.0.0", "2.0.0"}
             ]],
             {plain, showing}

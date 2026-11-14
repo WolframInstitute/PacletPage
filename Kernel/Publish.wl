@@ -1742,7 +1742,7 @@ transformKey[file_String, type_, options_List, valid_Association] := With[{held 
         pacletLinks[held, Lookup[options, "PacletName", None], valid],
         type,
         DeleteCases[options, ("PackageURIs" | "PacletInfo") -> _],
-        pageContext[held],
+        transformPageContext[held],
         (* the link rule a page with a sub-guide heading is transformed by *)
         If[FreeQ[held, "OrangeLink"], None, orangeLinkRule[]]
     }]
@@ -1751,7 +1751,7 @@ transformKey[file_String, type_, options_List, valid_Association] := With[{held 
 (* what a page's transform is made with: the symbols' rules, which name the paclet's version, only for
    a page that holds one of its symbols' names, as the transform makes boxes of those alone; a page
    that holds none keeps its transform when the paclet's version changes *)
-pageContext[held_] := With[{context = $transform["Context"], names = Lookup[$transform, "SymbolNames", <||>]},
+transformPageContext[held_] := With[{context = $transform["Context"], names = Lookup[$transform, "SymbolNames", <||>]},
     If[ Length[names] > 0 && MatchQ[held, _HoldComplete] && ! showsSymbolQ[held, names], Take[context, 3], context]
 ];
 showsSymbolQ[held_, names_Association] := AnyTrue[Cases[held, s_String :> s, Infinity], KeyExistsQ[names, #] &];
@@ -2916,7 +2916,7 @@ transformContext[symbolRules_List, pinned_List] := {
 
 (* a digest of the definitions the transform of a page runs, and of those its key is made by *)
 transformCode[] := digest[List @@ Map[Function[s, {OwnValues[s], DownValues[s], SubValues[s]}, HoldAllComplete], Hold[
-    transformRule, transformPages, transformFiles, $pageTransform, transformKey, transformFile, pacletLinks, heldNotebook, pageContext, showsSymbolQ,
+    transformRule, transformPages, transformFiles, $pageTransform, transformKey, transformFile, pacletLinks, heldNotebook, transformPageContext, showsSymbolQ,
     orangeLinkRule, installDeployFixes, withoutNoise, withoutLocalNumbers, localQ, localKey, localName, $localNamePattern,
     $buildNoise, $frontEndNoise
 ]]];
