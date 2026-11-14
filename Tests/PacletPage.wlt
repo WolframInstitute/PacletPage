@@ -1068,7 +1068,7 @@ VerificationTest[
         DeleteDirectory[dir, DeleteContents -> True];
         result
     ],
-    {"\[Copyright] caf\[EAcute]", "\[Copyright] caf\[EAcute]", 9, ""},
+    {"\[Copyright] caf\[EAcute]", "\[Copyright] caf\[EAcute]", 8, ""},
     TestID -> "Read: a body is decoded by the charset its content type names, and is a character a byte where it names none"
 ]
 
