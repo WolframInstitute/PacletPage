@@ -2970,7 +2970,13 @@ DeployPacletResource::commit = "`1` is already published from commit `2`, not `3
 DeployPacletResource::unknowncommit = "`1` is already published from commit `2`, and this paclet's commit is unknown (not a git checkout); nothing was deployed. Pass \"Commit\", or use \"Republish\" -> True.";
 DeployPacletResource::nocommit = "`1` is already published and records no commit; nothing was deployed. Use \"Republish\" -> True to replace it.";
 
-DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]]}, Catch[Module[
+(* A deploy runs with the resource system's daily refresh of its public-resource information done
+   synchronously, not by an asynchronous request: on Wolfram 15.0 the asynchronous request's body,
+   delivered as a byte array on CURLLink's own thread, can crash the kernel (a freed chunk read in
+   libcurllink), as it did in the middle of a deploy's definition notebook three times. The
+   information is then read from the local cache, as it is between refreshes. *)
+DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],
+    ResourceSystemClient`$AsyncronousResourceInformationUpdates = False}, Catch[Module[
     {definition, paclet, name, built, resource, location, hero, deployed, archive, commit, versioned, offline, target, accountOK, removed, symbolRules, pinned,
      sourceVersioned, source},
     definition = FileNameJoin[{dir, "ResourceDefinition.nb"}];

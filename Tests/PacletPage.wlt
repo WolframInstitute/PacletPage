@@ -2055,6 +2055,17 @@ VerificationTest[
     TestID -> "Check: a site whose catalog left out published pages does not pass"
 ]
 
+VerificationTest[
+    Module[{seen = {}},
+        Block[{readyToPublishQ = Function[Null, AppendTo[seen, ResourceSystemClient`$AsyncronousResourceInformationUpdates]; False]},
+            DeployPacletResource["/no/such/paclet/dir"]
+        ];
+        {seen, ResourceSystemClient`$AsyncronousResourceInformationUpdates =!= False}
+    ],
+    {{False}, True},
+    TestID -> "Deploy: the resource system's information is not refreshed asynchronously during a deploy"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},
