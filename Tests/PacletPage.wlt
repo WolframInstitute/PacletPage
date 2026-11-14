@@ -1009,6 +1009,46 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], file, spec, result},
+        file = FileNameJoin[{dir, "Converter.wxf"}];
+        PacletPageSaved`convert[x_] := PacletPageSaved`Private`helper[x] + 1;
+        PacletPageSaved`Private`helper[x_] := 10 x;
+        Export[file, <|"Name" -> "PacletPageSaved`convert", "Definition" -> Language`ExtendedFullDefinition[PacletPageSaved`convert], "ID" -> "saved-1"|>, "WXF"];
+        ClearAll[PacletPageSaved`convert, PacletPageSaved`Private`helper];
+        spec = converterSpec[File[file]];
+        result = {spec["Function"], spec["Function"][2], spec["ID"], spec["Distribute"]};
+        ClearAll[PacletPageSaved`convert, PacletPageSaved`Private`helper];
+        result = Join[result, {ReleaseHold[spec["Load"]][3], FreeQ[spec["Load"], ResourceFunction | ResourceObject | CloudObject | URLRead | URLFetch]}];
+        ClearAll[PacletPageSaved`convert, PacletPageSaved`Private`helper];
+        DeleteDirectory[dir, DeleteContents -> True];
+        result
+    ],
+    {PacletPageSaved`convert, 21, "saved-1", None, 31, True},
+    TestID -> "Build: a converter saved as its definitions is made from its file, in the building kernel and in each kernel that converts pages, with no network"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], pinned, result},
+        pinned = FileNameJoin[{dir, "Converter.wxf"}];
+        Export[pinned, <|"Name" -> "x`f", "Definition" -> {}, "ID" -> "pinned"|>, "WXF"];
+        result = {
+            Block[{$checkoutDirectory = dir, $pinnedConverter = pinned}, automaticConverter[]],
+            Block[{$checkoutDirectory = dir, $pinnedConverter = FileNameJoin[{dir, "none.wxf"}]}, automaticConverter[]]
+        };
+        DeleteDirectory[dir, DeleteContents -> True];
+        result === {File[pinned], $converterURL}
+    ],
+    True,
+    TestID -> "Build: with no converter checkout beside it, PacletPage uses the converter it carries, and the published one only when it carries none"
+]
+
+VerificationTest[
+    MatchQ[Import[$pinnedConverter, "WXF"], KeyValuePattern[{"URL" -> $converterURL, "Name" -> _String, "Definition" -> _Language`DefinitionList, "ID" -> _String}]],
+    True,
+    TestID -> "Build: this release of PacletPage carries a pinned published converter"
+]
+
+VerificationTest[
     {sameAccountQ[{"me@x.org", "me@x.org"}, "me@x.org"], sameAccountQ[{"me@x.org", "you@x.org"}, "me@x.org"],
         sameAccountQ[{"me@x.org", None}, "me@x.org"], sameAccountQ[{}, "me@x.org"], sameAccountQ[{"me@x.org"}, None]},
     {True, False, False, False, False},

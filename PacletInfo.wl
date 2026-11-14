@@ -6,7 +6,7 @@ PacletObject[<|
     "Creator" -> "Nikolay Murzin",
     "PublisherID" -> "WolframInstitute",
     "License" -> "MIT",
-    "Version" -> "0.3.72",
+    "Version" -> "0.3.73",
     "WolframVersion" -> "14.3+",
     "PrimaryContext" -> "WolframInstitute`PacletPage`",
     "Extensions" -> {
@@ -34,7 +34,7 @@ PacletObject[<|
         },
         {
             "Asset",
-            "Assets" -> {{"Web", "Assets/Web"}, {"Example", "Assets/Example"}, {"Hero", "Assets/Hero.wxf"}}
+            "Assets" -> {{"Web", "Assets/Web"}, {"Example", "Assets/Example"}, {"Hero", "Assets/Hero.wxf"}, {"Converter", "Assets/Converter.wxf"}}
         },
         {
             "Documentation",

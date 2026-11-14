@@ -22,7 +22,8 @@ $checkoutDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "..", "..
    gives it on a parallel kernel; "Distribute", held code naming what the parallel kernels get as
    distributed definitions, or None; "ID", what tells its versions apart in the page cache.
    Automatic is MarkdownToNotebook: the one loaded already, else the checkout's file (with the
-   checkout's WolframParser registered first, for TeX), else the published function. The file
+   checkout's WolframParser registered first, for TeX), else the converter this release of
+   PacletPage was tested with, which it carries, else the published function. The file
    defines its symbols in the current context, so it is read in a context of its own, on no
    context path: its helpers (tr, urlQ, ...) are then never the namesakes of the symbols of a
    package a page's examples load, whose shadowing messages would be captured into the page. The
@@ -33,32 +34,79 @@ converterLoad[file_String] := With[{path = file, context = $converterContext},
     Hold[Block[{$Context = context, $ContextPath = {"System`"}}, Get[path]]; Symbol[context <> "MarkdownToNotebook"]]
 ];
 
-converterSpec[Automatic] := converterSpec[Automatic] = Which[
-    DownValues[Global`MarkdownToNotebook] =!= {},
-        <|
-            "Function" -> Global`MarkdownToNotebook, "Load" -> Hold[Symbol["Global`MarkdownToNotebook"]],
-            "Distribute" -> Hold[Global`MarkdownToNotebook],
-            "ID" -> digest[{DownValues[Global`MarkdownToNotebook], Options[Global`MarkdownToNotebook]}]
-        |>,
+converterSpec[Automatic] := converterSpec[Automatic] = If[ DownValues[Global`MarkdownToNotebook] =!= {},
+    <|
+        "Function" -> Global`MarkdownToNotebook, "Load" -> Hold[Symbol["Global`MarkdownToNotebook"]],
+        "Distribute" -> Hold[Global`MarkdownToNotebook],
+        "ID" -> digest[{DownValues[Global`MarkdownToNotebook], Options[Global`MarkdownToNotebook]}]
+    |>,
+    converterSpec[automaticConverter[]]
+];
+automaticConverter[] := Which[
     FileExistsQ[FileNameJoin[{$checkoutDirectory, "MarkdownToNotebook.wl"}]],
         If[ DirectoryQ[FileNameJoin[{$checkoutDirectory, "examples", "Paclet", "WolframParser"}]],
             PacletDirectoryLoad[FileNameJoin[{$checkoutDirectory, "examples", "Paclet", "WolframParser"}]]
         ];
-        converterSpec[FileNameJoin[{$checkoutDirectory, "MarkdownToNotebook.wl"}]],
+        FileNameJoin[{$checkoutDirectory, "MarkdownToNotebook.wl"}],
+    FileExistsQ[$pinnedConverter],
+        File[$pinnedConverter],
     True,
-        converterSpec[$converterURL]
+        $converterURL
 ];
 converterSpec[file_String] /; FileExistsQ[file] := converterSpec[file] = <|
     "Function" -> ReleaseHold[converterLoad[file]], "Load" -> converterLoad[file], "Distribute" -> None,
     "ID" -> digest[{FileHash[file, "SHA256", "HexString"], $converterContext}]
 |>;
-(* a published function is used through its ResourceObject: a bare ResourceFunction[url] fails
-   on parallel kernels *)
-converterSpec[url_String] := converterSpec[url] = With[{u = url, f = ResourceFunction[ResourceObject[url]]}, <|
-    "Function" -> f, "Load" -> Hold[ResourceFunction[ResourceObject[u]]], "Distribute" -> None,
-    (* the deployed definitions: a redeploy at the same URL is another converter *)
-    "ID" -> digest[{u, ResourceFunction[f, "DefinitionData"]}]
+(* A published function is fetched once, through its ResourceObject (a bare ResourceFunction[url]
+   fails on parallel kernels), and its definitions saved where the kernels that convert pages read
+   them, with no network: a page kernel that fetched it again would wait on the cloud, ten seconds
+   or more, and could be handed a broken download. The resource system's lookup of a URL reports
+   URLParse::invuri for an Automatic it parses on the way. *)
+converterSpec[url_String] := converterSpec[url] = With[{snapshot = converterSnapshot[url]},
+    With[{file = FileNameJoin[{$TemporaryDirectory, "PacletPage-converter-" <> snapshot["ID"] <> ".wxf"}]},
+        Export[file, snapshot, "WXF"];
+        savedConverterSpec[file, snapshot]
+    ]
+];
+
+(* the published function's definitions, the full name of its symbol and its ID, the deployed
+   definitions: a redeploy at the same URL is another converter *)
+converterSnapshot[url_String] := With[{f = Quiet[ResourceFunction[ResourceObject[url]], URLParse::invuri]},
+    With[{symbol = ResourceFunction[f, "Function"]},
+        <|
+            "URL" -> url, "Name" -> Context[symbol] <> SymbolName[Unevaluated[symbol]], "Definition" -> Language`ExtendedFullDefinition[symbol],
+            "ID" -> digest[{url, ResourceFunction[f, "DefinitionData"]}], "Fetched" -> DateString["ISODateTime"]
+        |>
+    ]
+];
+
+(* A converter saved as a file of its definitions, {"URL", "Name", "Definition", "ID", ...}: its
+   definitions made in a kernel, and its symbol given, by code that needs nothing of PacletPage and
+   no network, so that a parallel kernel runs it as well. Each release of PacletPage carries the
+   published converter it was tested with as such a file, Assets/Converter.wxf, pinned by
+   pin-converter.wls: a build uses that converter, whatever has been deployed since. *)
+$pinnedConverter := FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Converter.wxf"}];
+
+converterSpec[File[file_String]] := converterSpec[File[file]] = With[{snapshot = Import[file, "WXF"]},
+    If[ MatchQ[snapshot, KeyValuePattern[{"Name" -> _String, "Definition" -> _, "ID" -> _String}]],
+        savedConverterSpec[file, snapshot],
+        Message[BuildPacletDocumentation::converter, file]; converterSpec[$converterURL]
+    ]
+];
+BuildPacletDocumentation::converter = "The converter saved in `1` cannot be read; the published one is used.";
+
+savedConverterSpec[file_String, snapshot_Association] := With[{load = savedConverterLoad[file]}, <|
+    "Function" -> ReleaseHold[load], "Load" -> load, "Distribute" -> None, "ID" -> snapshot["ID"]
 |>];
+savedConverterLoad[file_String] := With[{f = file},
+    Hold[With[{saved = Import[f, "WXF"]}, Language`ExtendedFullDefinition[] = saved["Definition"]; Symbol[saved["Name"]]]]
+];
+
+(* the published converter fetched and saved as the one this checkout of PacletPage carries *)
+pinConverter[url_String : $converterURL] := With[{snapshot = converterSnapshot[url]},
+    Export[$pinnedConverter, snapshot, "WXF", PerformanceGoal -> "Size"];
+    KeyTake[snapshot, {"URL", "Name", "ID", "Fetched"}]
+];
 converterSpec[f_] := <|"Function" -> f, "Load" -> Hold[f], "Distribute" -> Hold[f], "ID" -> digest[f]|>;
 
 converter[spec_] := converterSpec[spec]["Function"];
