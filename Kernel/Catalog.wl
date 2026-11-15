@@ -193,11 +193,15 @@ plainText[s_String] := StringTrim @ StringReplace[
 
 $fieldSeparator = "\:f8ff";
 
+(* a link's text as the title of the page it leads to: without the right guillemet that a guide's
+   heading ends its link to another guide with, after a space or a non-breaking one *)
+linkTitle[html_String] := StringDelete[plainText[html], (WhitespaceCharacter | "\[NonBreakingSpace]") ... ~~ "\[RightGuillemet]" ~~ EndOfString];
+
 (* the documentation pages an HTML page links to under docBase, in page order, each once:
-   {kind, page name, link text} *)
+   {kind, page name, link title} *)
 docLinks[html_String, docBase_String] := DeleteDuplicatesBy[
     Map[
-        Function[fields, {fields[[1]], URLDecode[fields[[2]]], plainText[fields[[3]]]}],
+        Function[fields, {fields[[1]], URLDecode[fields[[2]]], linkTitle[fields[[3]]]}],
         StringSplit[#, $fieldSeparator, All] & /@ StringCases[html,
             RegularExpression["(?s)<a\\s[^>]*?href=\"" <> regexEscape[docBase] <>
                 "(guide|ref|tutorial)/([^\"/?#]+)\\.html\"[^>]*>(.*?)</a>"] ->

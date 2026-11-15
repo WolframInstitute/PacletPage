@@ -975,13 +975,44 @@ tasksConverted[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest, 
     Prepend[rest, first]
 ];
 
+(* A guide's section heading that is a link to another guide ends in a right guillemet, inside the
+   link, as such a heading does in the Wolfram Language's own guides. There the authoring notebook
+   holds the mark, which the Documentation Tools palette appends to the label of a heading that is
+   a link, and the documentation build takes the label as it is into the page's OrangeLink; it
+   adds a mark itself to a GuideTOCLink alone. The converter makes
+   "### [Title](paclet:Publisher/Name/guide/Other)" a GuideFunctionsSubsection whose text is the
+   link, labelled with the title, so the build marks the label in the notebook the converter
+   wrote. A heading that is no link, one whose link leads to no guide, and a label that ends in
+   the mark already stay as they are. *)
+$subGuideMark = " \[RightGuillemet]";
+
+(* a paclet: URI of a guide, the paclet's own, another paclet's or the system's *)
+guideURIQ[uri_String] := StringMatchQ[uri, "paclet:" ~~ ((___ ~~ "/") | "") ~~ "guide/" ~~ Except["/"] ..];
+guideURIQ[_] := False;
+
+markedSubGuideHeadings[notebook_] := notebook /. Cell[
+        TextData[ButtonBox[label_String, rules___] | {ButtonBox[label_String, rules___]}], "GuideFunctionsSubsection", options___
+    ] /; guideURIQ[FirstCase[{rules}, (ButtonData -> uri_) :> uri]] && ! StringEndsQ[StringTrim[label], "\[RightGuillemet]"] :>
+    Cell[TextData[ButtonBox[label <> $subGuideMark, rules]], "GuideFunctionsSubsection", options];
+
+(* A converted guide's notebook with its sub-guide headings marked, in place: whether it was
+   written again. A notebook with no heading to mark is only read. One that is marked is written
+   as the converter wrote it, its cells' ids kept, so it is the same from one build to the next. *)
+markSubGuideHeadings[file_String] := With[{text = ReadString[file]},
+    StringQ[text] && StringContainsQ[text, "\"GuideFunctionsSubsection\""] && With[{notebook = Get[file]},
+        With[{marked = markedSubGuideHeadings[notebook]}, marked =!= notebook && StringQ[Export[file, marked, "NB"]]]
+    ]
+];
+
 (* the page cache's key: everything a page's notebook depends on. The guides' titles are in it
-   because every page's Related Guides links show them. *)
+   because every page's Related Guides links show them, and the mark of a guide's sub-guide
+   headings is in a guide's. *)
 $pageCacheVersion = "2";
 pageKey[task_Association, converterID_, code_String, guides_List] := digest[
     Join[
         {$pageCacheVersion, task["Page"], FileHash[task["File"], "SHA256"], task["Options"], converterID, code, guides},
-        Replace[Lookup[task, "Evaluation", None], {spec_Association :> {spec["Key"]}, _ -> {}}]
+        Replace[Lookup[task, "Evaluation", None], {spec_Association :> {spec["Key"]}, _ -> {}}],
+        If[Lookup[task, "Template", None] === "Guide", {$subGuideMark}, {}]
     ]
 ];
 
@@ -1084,7 +1115,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     tasks = Map[
         Function[file, With[{template = Lookup[metas[file], "Template", "Default"]},
             <|
-                "File" -> file, "Page" -> relativePath[source, file],
+                "File" -> file, "Page" -> relativePath[source, file], "Template" -> template,
                 "Out" -> pageNotebook[target, template, metas[file], file],
                 "Options" -> Join[{"EvaluateSeparator" -> separator[template]}, converterOptions[OptionValue["ConverterOptions"], file]],
                 "Evaluation" -> evaluationSpec[OptionValue["EvaluationKernel"], template, dir, paclet["PrimaryContext"]]
@@ -1182,11 +1213,13 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     |>;
     results = AssociationThread[Lookup[misses, "Entry", {}], convertTasks[misses, spec, setup, kernels]];
     If[ kernels =!= {}, closeKernels[Complement[Kernels[], kernelsBefore], kernelPIDs]];
-    (* each converted page enters the cache; every page that has its notebook is copied to it *)
+    (* each converted page enters the cache, a guide with its sub-guide headings marked; every page
+       that has its notebook is copied to it *)
     outcomes = Map[
         Function[task, Which[
             task["Cached"], "Cached",
             TrueQ[results[task["Entry"]]["OK"]],
+                If[ Lookup[task, "Template", None] === "Guide", markSubGuideHeadings[task["Work"]]];
                 CopyFile[task["Work"], task["Entry"], OverwriteTarget -> True];
                 "Converted",
             True,

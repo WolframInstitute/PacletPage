@@ -36,7 +36,8 @@ paclet with a documentation site, without a front end and without scripts of the
   through MarkdownToNotebook, with their examples evaluated. Unchanged pages come from a cache that a
   build server can keep, the others convert on parallel kernels when asked, and an example runs
   again when a definition its cells reach changes. A paclet that loads only on another kernel has its examples
-  evaluated there.
+  evaluated there. A guide's heading that links to another guide ends in a right guillemet, as in the
+  Wolfram Language's guides.
 - Checked releases: nothing is published unless the archive holds every documentation page and
   loads alone in a fresh kernel, or on the kernel its examples run on. A version already published from another commit, a link leading
   outside the paclet, and LibraryLink libraries declared but not shipped are refused.

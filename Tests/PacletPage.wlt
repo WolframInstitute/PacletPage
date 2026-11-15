@@ -109,6 +109,20 @@ VerificationTest[
 ]
 
 VerificationTest[
+    docLinks[
+        StringJoin[
+            "<a href=\"https://r.example/D/guide/Sub.html\">Sub Guide <span class=\"special-character RightGuillemet\">&#187;</span></a>",
+            "<a href=\"https://r.example/D/guide/Other.html\">Other Guide\[NonBreakingSpace]\[RightGuillemet]</a>",
+            "<a href=\"https://r.example/D/guide/Bare.html\">\[RightGuillemet]</a>",
+            "<a href=\"https://r.example/D/tutorial/Quotes.html\">\[LeftGuillemet]Quoted\[RightGuillemet] Words</a>"
+        ],
+        "https://r.example/D/"
+    ],
+    {{"guide", "Sub", "Sub Guide"}, {"guide", "Other", "Other Guide"}, {"guide", "Bare", ""}, {"tutorial", "Quotes", "\[LeftGuillemet]Quoted\[RightGuillemet] Words"}},
+    TestID -> "Catalog: a page's title is its link's text without the guillemet a sub-guide heading ends in"
+]
+
+VerificationTest[
     repositoryNotebook["<div id=\"notebook-embed\" data-nb-uri=\"https://s.example/obj/a/b.nb?x=1&amp;y=2\"></div>"],
     "https://s.example/obj/a/b.nb?x=1&y=2",
     TestID -> "Catalog: a Repository page names its notebook"
@@ -761,6 +775,94 @@ VerificationTest[
     ]]],
     {3, 3, 3},
     TestID -> "Build: another converter converts every page again and evaluates its examples afresh"
+]
+
+(* a guide's headings: links to guides, of the paclet and of the system, alone in their headings;
+   one marked already; a plain heading; a link to a symbol; a link with text beside it; and a
+   link to a guide that is no section heading *)
+subGuideLink[label_String, uri_String] := ButtonBox[label, BaseStyle -> "Link", ButtonData -> uri];
+
+headingsNotebook[] := Notebook[{
+    Cell["Main Guide", "GuideTitle"],
+    Cell[TextData[subGuideLink["Sub One", "paclet:Pub/Fixture/guide/SubOne"]], "GuideFunctionsSubsection", CellID -> 1],
+    Cell[TextData[{subGuideLink["Sub Two", "paclet:guide/SubTwo"]}], "GuideFunctionsSubsection"],
+    Cell[TextData[subGuideLink["Sub Three \[RightGuillemet]", "paclet:Pub/Fixture/guide/SubThree"]], "GuideFunctionsSubsection"],
+    Cell["Plain Heading", "GuideFunctionsSubsection"],
+    Cell[TextData[subGuideLink["A Symbol", "paclet:Pub/Fixture/ref/Foo"]], "GuideFunctionsSubsection"],
+    Cell[TextData[{subGuideLink["Sub Four", "paclet:Pub/Fixture/guide/SubFour"], " and more"}], "GuideFunctionsSubsection"],
+    Cell[TextData[subGuideLink["Sub Five", "paclet:Pub/Fixture/guide/SubFive"]], "GuideTOCLink"]
+}];
+
+(* each heading's text, a link read as its label *)
+headingTexts[notebook_] := Cases[notebook,
+    Cell[content_, "GuideFunctionsSubsection" | "GuideTOCLink", ___] :> StringJoin[Flatten[{content /. ButtonBox[label_, ___] :> label} /. TextData -> List]],
+    Infinity];
+
+VerificationTest[
+    With[{marked = markedSubGuideHeadings[headingsNotebook[]]},
+        {
+            headingTexts[marked],
+            Cases[marked, ButtonBox[label_, ___] :> StringEndsQ[label, "\[RightGuillemet]"], Infinity],
+            FirstCase[marked, Cell[_, "GuideFunctionsSubsection", options___] :> {options}, None, Infinity],
+            markedSubGuideHeadings[marked] === marked
+        }
+    ],
+    {
+        {"Sub One \[RightGuillemet]", "Sub Two \[RightGuillemet]", "Sub Three \[RightGuillemet]", "Plain Heading", "A Symbol", "Sub Four and more", "Sub Five"},
+        {True, True, True, False, False, False},
+        {CellID -> 1},
+        True
+    },
+    TestID -> "Build: a guide's heading that is a link to a guide ends in a guillemet inside the link, once; a plain heading and any other link stay as they are"
+]
+
+(* a converter that writes those headings for every page *)
+headingsConvert[file_String, out_String, opts : OptionsPattern[]] := (Put[headingsNotebook[], out]; out);
+
+VerificationTest[
+    withFixtureDocs[Function[dir, Module[{headings, first, guide, second},
+        headings[path_List] := headingTexts[Get[FileNameJoin[Join[{dir, "Documentation", "English"}, path]]]];
+        first = BuildPacletDocumentation[dir, "Converter" -> headingsConvert, "Definition" -> None];
+        guide = headings[{"Guides", "Main.nb"}];
+        second = BuildPacletDocumentation[dir, "Converter" -> headingsConvert, "Definition" -> None];
+        {
+            Length[first["Converted"]], Take[guide, 4],
+            Take[headings[{"ReferencePages", "Symbols", "Foo.nb"}], 4], Take[headings[{"Tutorials", "Steps.nb"}], 4],
+            Length[second["Cached"]], headings[{"Guides", "Main.nb"}] === guide
+        }
+    ]]],
+    {
+        3, {"Sub One \[RightGuillemet]", "Sub Two \[RightGuillemet]", "Sub Three \[RightGuillemet]", "Plain Heading"},
+        {"Sub One", "Sub Two", "Sub Three \[RightGuillemet]", "Plain Heading"}, {"Sub One", "Sub Two", "Sub Three \[RightGuillemet]", "Plain Heading"},
+        3, True
+    },
+    TestID -> "Build: a guide's notebook has its sub-guide headings marked, from the converter and from the cache; no other page is touched"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], file, plain, before, results},
+        file = FileNameJoin[{dir, "guide.nb"}];
+        plain = FileNameJoin[{dir, "plain.nb"}];
+        Put[headingsNotebook[], file];
+        Put[Notebook[{Cell["Main Guide", "GuideTitle"], Cell["Plain Heading", "GuideFunctionsSubsection"]}], plain];
+        before = ReadString[plain];
+        results = {markSubGuideHeadings[file], markSubGuideHeadings[file], Take[headingTexts[Get[file]], 2], markSubGuideHeadings[plain], ReadString[plain] === before};
+        DeleteDirectory[dir, DeleteContents -> True];
+        results
+    ],
+    {True, False, {"Sub One \[RightGuillemet]", "Sub Two \[RightGuillemet]"}, False, True},
+    TestID -> "Build: a guide's notebook is written again only when a heading of it is marked"
+]
+
+VerificationTest[
+    Module[{task = <|"Page" -> "p", "File" -> FindFile["WolframInstitute`PacletPage`"], "Options" -> {}|>},
+        {
+            pageKey[Append[task, "Template" -> "Symbol"], "c", "code", {}] === pageKey[task, "c", "code", {}],
+            pageKey[Append[task, "Template" -> "Guide"], "c", "code", {}] === pageKey[task, "c", "code", {}]
+        }
+    ],
+    {True, False},
+    TestID -> "Build: a guide's key has the mark of its sub-guide headings, so a guide cached without it is converted again, and no other page's key changes"
 ]
 
 (* === building with the paclet's definitions scanned: a paclet of three functions, foo calling a
@@ -1652,6 +1754,18 @@ VerificationTest[
       {FontColor -> LightDarkSwitched[RGBColor[0.9686274509803922, 0.4666666666666667, 0.]]},
       {"Hyperlink", "GuideFunctionsSubsection", FontColor -> LightDarkSwitched[RGBColor[0.85098, 0.396078, 0.]]}}},
     TestID -> "Publish: a guide's sub-guide heading links to the deployed page, in the heading's style and the OrangeLink's orange"
+]
+
+VerificationTest[
+    Needs["PacletResource`"];
+    Block[{PacletResource`Notebooks`Private`$packageURLTemplate = "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/`1`.html",
+            PacletResource`Notebooks`Private`$pacletName = "Pub/Name", PacletResource`Notebooks`Private`$validRefs = None},
+        Cases[
+            Cell[BoxData[TemplateBox[{Cell[TextData["Plane Conics \[RightGuillemet]"]], "paclet:Pub/Name/guide/Conics"}, "OrangeLink", BaseStyle -> "GuideFunctionsSubsection"]],
+                "GuideFunctionsSubsection"] /. orangeLinkRule[],
+            TemplateBox[{text_, {URL[u_], None}, ___}, "HyperlinkTemplate"] :> {text, u}, Infinity]],
+    {{Cell[TextData["Plane Conics \[RightGuillemet]"]], "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/guide/Conics.html"}},
+    TestID -> "Publish: a sub-guide heading's guillemet stays inside its link on the deployed page, which the site shows"
 ]
 
 (* the parallel kernels apply the rule without this package loaded *)
