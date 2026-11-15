@@ -1388,8 +1388,12 @@ withoutNoise[expr_] := withoutLocalNumbers[DeleteCases[expr, $buildNoise, Infini
 
 (* each Module local, a symbol whose name ends in $ and digits, or a string that is such a name with
    three digits or more, as a box shows it, replaced by local[n], n its place among the distinct
-   names in order of first appearance, held; a name in two contexts is one local *)
-withoutLocalNumbers[expr_] := Module[{found, names, rules},
+   names in order of first appearance, held; a name in two contexts is one local. Such a name
+   inside a longer string, as a message's parameters show a session's symbol in its text, is
+   numbered the same way in the text. *)
+withoutLocalNumbers[expr_] := wholeLocals[embeddedLocals[expr]];
+
+wholeLocals[expr_] := Module[{found, names, rules},
     found = Cases[expr, s : (_Symbol | _String) /; localQ[s] :> {HoldPattern[s], localKey[s]}, {0, Infinity}, Heads -> True];
     If[ found === {}, Return[expr, Module]];
     names = AssociationThread[DeleteDuplicates[found[[All, 2]]] -> Range[Length[DeleteDuplicates[found[[All, 2]]]]]];
@@ -1404,6 +1408,22 @@ localQ[_] := False;
 localKey[s_Symbol] := SymbolName[Unevaluated[s]];
 localKey[s_String] := localName[s];
 localName[s_String] := Last[StringSplit[s, "`"], s];
+
+(* the strings that hold a local's name, with any context, among other text, each name in them
+   written local[n] instead, n its place among the distinct names in those strings in order of
+   first appearance *)
+embeddedLocals[expr_] := Module[{strings, keys, names},
+    strings = DeleteDuplicates[Cases[expr, s_String /; embedsLocalQ[s], {0, Infinity}, Heads -> True]];
+    If[ strings === {}, Return[expr, Module]];
+    keys = DeleteDuplicates[Catenate[StringCases[#, $embeddedLocal :> name] & /@ strings]];
+    names = AssociationThread[keys -> Range[Length[keys]]];
+    Replace[expr,
+        Dispatch[Map[# -> StringReplace[#, $embeddedLocal :> "local[" <> IntegerString[names[name]] <> "]"] &, strings]],
+        {0, Infinity}, Heads -> True]
+];
+embedsLocalQ[s_String] := StringContainsQ[s, "$"] && ! localQ[s] && StringContainsQ[s, $embeddedLocal];
+$embeddedLocal = WordBoundary ~~ ((LetterCharacter ~~ (LetterCharacter | DigitCharacter) ... ~~ "`") ...) ~~
+    name : (LetterCharacter ~~ (LetterCharacter | DigitCharacter) ... ~~ "$" ~~ Repeated[DigitCharacter, {3, Infinity}]) ~~ WordBoundary;
 $localNamePattern = LetterCharacter ~~ (LetterCharacter | DigitCharacter) ... ~~ "$" ~~ DigitCharacter ..;
 
 (* what a deploy writes and makes again whatever the record says: "Documentation", "Pages" *)

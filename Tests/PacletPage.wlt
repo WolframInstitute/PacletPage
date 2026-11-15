@@ -2237,6 +2237,19 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{message = Function[{n, p, m}, With[{text = "\"the term \" <> \"TypeTheoryEnvironment[Environment`Private`store$" <> n <> "] in Environment`Private`" <> p <> "$" <> m <> " and store$" <> n <> "\""},
+            HoldComplete[Notebook[{Cell[BoxData[RowBox[{"Failure", "[", text, "]"}]], "Output"]}]]]]},
+        {
+            withoutNoise[message["12345", "k", "12346"]] === withoutNoise[message["987", "k", "1000"]],
+            withoutNoise[message["12345", "store", "12346"]] === withoutNoise[message["12345", "store", "12345"]],
+            withoutNoise[HoldComplete[Cell["costs $1000 and x$1234y, not a$12", "Text"]]]
+        }
+    ],
+    {True, False, HoldComplete[Cell["costs $1000 and x$1234y, not a$12", "Text"]]},
+    TestID -> "Deploy: a session's symbol named inside a message's text, numbered by another session, keys as before; other dollars left as they are"
+]
+
+VerificationTest[
     {transformCode[] === transformCode[], Internal`InheritedBlock[{pacletLinks}, pacletLinks[_] := 1; transformCode[]] =!= transformCode[],
         FreeQ[transformContext[{}, {}], PacletObject["WolframInstitute/PacletPage"]["Version"]]},
     {True, True, True},
