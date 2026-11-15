@@ -1090,6 +1090,68 @@ VerificationTest[
     TestID -> "Publish: a sub-guide heading's guillemet stays inside its link on the deployed page, which the site shows"
 ]
 
+VerificationTest[
+    Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["deps-"] <> ".nb"}], notebook, results},
+        notebook = Notebook[{Cell[TextData[{
+            Cell[BoxData[TemplateBox[{Cell[TextData["Manifold"]], "paclet:Pub/Dep/ref/Manifold", "Pub/Dep Package Symbol"}, "PackageLink", BaseStyle -> "InlineFormula"]], "InlineFormula"],
+            Cell[BoxData[TemplateBox[{Cell[TextData["Notes"]], "paclet:Pub/Dep/tutorial/Notes#2041"}, "RefLinkPlain", BaseStyle -> "InlineFormula"]], "InlineFormula"],
+            Cell[BoxData[TemplateBox[{Cell[TextData["Own"]], "paclet:Pub/Main/ref/Own", "Pub/Main Package Symbol"}, "PackageLink", BaseStyle -> "InlineFormula"]], "InlineFormula"],
+            Cell[BoxData[TemplateBox[{Cell[TextData["Plot"]], "paclet:ref/Plot"}, "RefLink", BaseStyle -> "InlineFormula"]], "InlineFormula"]}], "SeeAlso"]}];
+        Put[notebook, file];
+        results = {dependencyRefsIn[file, {"Pub/Dep"}], dependencyRefs[heldNotebook[file], {"Pub/Dep"}], dependencyRefsIn[file, {}], dependencyRefs[heldNotebook[file], {"Pub/Other"}]};
+        DeleteFile[file];
+        results
+    ],
+    {{"paclet:Pub/Dep/ref/Manifold", "paclet:Pub/Dep/tutorial/Notes"}, {"paclet:Pub/Dep/ref/Manifold", "paclet:Pub/Dep/tutorial/Notes"}, {}, {}},
+    TestID -> "Publish: a page's links into the paclets it depends on are read from its notebook, without their fragments"
+]
+
+VerificationTest[
+    Needs["PacletResource`"];
+    With[{options = {"PacletName" -> "Pub/Main", "DocumentationHTMLRoot" -> "https://c.example/obj/u/DeployedResources/Paclet/Pub/Main/Documentation"}},
+        Block[{fetchStatuses = Function[urls, Map[Which[
+                StringStartsQ[#, "https://c.example/"] && StringContainsQ[#, "/Here.html"], 200,
+                ! StringStartsQ[#, "https://c.example/"] && StringContainsQ[#, "/Repo.html"], 200,
+                True, 404] &, urls]]},
+            With[{table = dependencyLinkTable[{"paclet:Pub/Dep/ref/Here", "paclet:Pub/Dep/ref/Repo", "paclet:Pub/Dep/ref/Gone"}, {"Pub/Dep"}, options]},
+                {
+                    table["paclet:Pub/Dep/ref/Here"],
+                    StringEndsQ[table["paclet:Pub/Dep/ref/Repo"], "Pub/Dep/ref/Repo.html"] && StringStartsQ[table["paclet:Pub/Dep/ref/Repo"], "https://resources.wolframcloud.com/"],
+                    table["paclet:Pub/Dep/ref/Gone"]
+                }
+            ]
+        ]
+    ],
+    {"https://c.example/obj/u/DeployedResources/Paclet/Pub/Dep/Documentation/ref/Here.html", True, None},
+    TestID -> "Publish: a link into a dependency leads to its page beside the paclet's own, else on the Paclet Repository, else nowhere"
+]
+
+VerificationTest[
+    Needs["PacletResource`"];
+    Block[{PacletResource`Notebooks`Private`$packageURLTemplate = "https://c.example/obj/u/DeployedResources/Paclet/Pub/Main/Documentation/`1`.html",
+            PacletResource`Notebooks`Private`$pacletName = "Pub/Main", PacletResource`Notebooks`Private`$validRefs = None},
+        Internal`InheritedBlock[{PacletResource`Notebooks`Private`makeEmbeddedPackageLink},
+            installDependencyLinkRule[dependencyLinkRule[<|
+                "paclet:Pub/Dep/ref/Manifold" -> "https://c.example/obj/u/DeployedResources/Paclet/Pub/Dep/Documentation/ref/Manifold.html",
+                "paclet:Pub/Dep/tutorial/Notes" -> None|>]];
+            Map[
+                Cases[# /. PacletResource`Notebooks`Private`$embeddedLinkRules, TemplateBox[{_, {URL[u_], None}, ___}, "HyperlinkTemplate"] :> u, Infinity] &,
+                {
+                    TemplateBox[{Cell[TextData["Manifold"]], "paclet:Pub/Dep/ref/Manifold#12", "Pub/Dep Package Symbol"}, "PackageLink", BaseStyle -> "InlineFormula"],
+                    TemplateBox[{Cell[TextData["Notes"]], "paclet:Pub/Dep/tutorial/Notes"}, "RefLinkPlain", BaseStyle -> "InlineFormula"],
+                    TemplateBox[{Cell[TextData["Own"]], "paclet:Pub/Main/ref/Own", "Pub/Main Package Symbol"}, "PackageLink", BaseStyle -> "InlineFormula"]
+                }
+            ]
+        ]
+    ],
+    {
+        {"https://c.example/obj/u/DeployedResources/Paclet/Pub/Dep/Documentation/ref/Manifold.html#12"},
+        {},
+        {"https://c.example/obj/u/DeployedResources/Paclet/Pub/Main/Documentation/ref/Own.html"}
+    },
+    TestID -> "Publish: a link into a dependency is made a link to its published page, or its label alone; a link into the paclet stays its own"
+]
+
 
 
 VerificationTest[

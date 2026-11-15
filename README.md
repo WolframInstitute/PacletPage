@@ -43,7 +43,8 @@ paclet with a documentation site, without a front end and without scripts of the
 - A complete resource page from its first visit, on any cloud subscription: Details, examples, the
   main guide, the hero image and the source link, with the paclet's version and commit recorded.
   The examples link the paclet's symbols, and code copied from them installs the version it was copied from, in
-  place of any other. A paclet with several guides lists them as a tree beside every page.
+  place of any other. A paclet with several guides lists them as a tree beside every page. A link to a symbol,
+  guide or tech note of a paclet it depends on leads to that paclet's published page.
 - Deploys that scale: only the documentation notebooks and pages that changed are written again,
   and the pages are made over parallel kernels, each kept for the next deploy. A release can build
   in one process and deploy from that build in another.

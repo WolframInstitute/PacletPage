@@ -1779,9 +1779,9 @@ $guideTreeScript = StringJoin[
    the transforms a completed deploy did not use are deleted. *)
 $transform = None;
 
-newTransform[cache_String, context_, symbolRules_List, pinned_List, kernels_List] := <|
+newTransform[cache_String, context_, symbolRules_List, pinned_List, kernels_List, dependencies_List : {}] := <|
     "Cache" -> cache, "Context" -> context, "SymbolRules" -> symbolRules, "PinRules" -> pinned, "Kernels" -> kernels,
-    "SymbolNames" -> transformSymbolNames[pinned],
+    "SymbolNames" -> transformSymbolNames[pinned], "Dependencies" -> dependencies, "DependencyLinks" -> <||>,
     "Used" -> {}, "Cached" -> 0, "Transformed" -> 0, "Again" -> 0
 |>;
 
@@ -1800,12 +1800,16 @@ transformPages[dir_String, type_, opts_List] := Module[{files, options, valid, k
     options = Append[DeleteCases[opts, "PackageURIs" -> _],
         "PackageURIs" -> Replace[Lookup[opts, "PackageURIs", Automatic], Automatic :> PacletResource`Notebooks`Private`$validRefs]];
     valid = AssociationThread[Replace[Lookup[options, "PackageURIs"], Except[_List] -> {}] -> True];
+    addDependencyLinks[files, options];
     keys = AssociationMap[transformKey[#, type, options, valid] &, files];
     cached = Select[files, FileExistsQ[transformFile[keys[#]]] &];
     Scan[CopyFile[transformFile[keys[#]], #, OverwriteTarget -> True] &, cached];
     misses = Select[files, ! MemberQ[cached, #] &];
     monitor["pages: " <> ToString[Length[cached]] <> " transformed before, " <> ToString[Length[misses]] <> " to transform"];
-    results = transformFiles[misses, type, options];
+    results = Internal`InheritedBlock[{PacletResource`Notebooks`Private`makeEmbeddedPackageLink},
+        installDependencyLinkRule[dependencyLinkRule[Lookup[$transform, "DependencyLinks", <||>]]];
+        transformFiles[misses, type, options]
+    ];
     Scan[If[StringQ[results[#]], CopyFile[#, transformFile[keys[#]], OverwriteTarget -> True]] &, misses];
     $transform["Used"] = Join[$transform["Used"], Values[keys]];
     $transform["Cached"] += Length[cached];
@@ -1824,9 +1828,91 @@ transformKey[file_String, type_, options_List, valid_Association] := With[{held 
         DeleteCases[options, ("PackageURIs" | "PacletInfo") -> _],
         transformPageContext[held],
         (* the link rule a page with a sub-guide heading is transformed by *)
-        If[FreeQ[held, "OrangeLink"], None, orangeLinkRule[]]
+        If[FreeQ[held, "OrangeLink"], None, orangeLinkRule[]],
+        (* where its links into the paclets it depends on lead *)
+        Replace[KeyTake[Lookup[$transform, "DependencyLinks", <||>], dependencyRefs[held, Lookup[$transform, "Dependencies", {}]]], <||> -> Nothing]
     }]
 ];
+
+(* === links into the paclets a paclet depends on ===
+   The converter links a symbol, guide or tech note that a paclet the documented one depends on has a
+   page for to that paclet's page, paclet:<Publisher/Name>/ref/<Symbol> for instance. The stock
+   transform makes every link a link into the documented paclet. A link into a dependency leads to the
+   dependency's published page instead: on the account the paclet is deployed to, where a paclet
+   deployed beside it has its pages, or else on the Paclet Repository, whichever has the page. A link
+   to a page published in neither place shows its label alone, as a link to a page the paclet does
+   not have does. *)
+
+(* a page's links into the dependencies, without their fragments *)
+dependencyRefs[held_HoldComplete, dependencies : {__String}] := Union[
+    StringDelete[#, "#" ~~ ___ ~~ EndOfString] & /@ Cases[held, ref_String /; StringStartsQ[ref, Alternatives @@ Map["paclet:" <> # <> "/" &, dependencies]], Infinity]];
+dependencyRefs[_, _] := {};
+
+(* the same, read from a notebook's file without parsing it *)
+dependencyRefsIn[file_String, dependencies : {__String}] := Union @ StringCases[ReadString[file],
+    "\"paclet:" ~~ ref : ((Alternatives @@ dependencies) ~~ "/" ~~ Except["\"" | "#" | "\\"] ..) :> "paclet:" <> ref];
+dependencyRefsIn[_, _] := {};
+
+(* the published page of each of the files' links into the dependencies not looked up before, or None *)
+addDependencyLinks[files_List, options_List] := If[ AssociationQ[$transform],
+    With[{
+        dependencies = Lookup[$transform, "Dependencies", {}],
+        known = Lookup[$transform, "DependencyLinks", <||>]},
+        With[{refs = Complement[Union @@ Map[dependencyRefsIn[#, dependencies] &, files], Keys[known]]},
+            If[ refs =!= {}, $transform["DependencyLinks"] = Join[known, dependencyLinkTable[refs, dependencies, options]]]
+        ]
+    ]
+];
+
+(* each link's published page, looked for in each place in turn *)
+dependencyLinkTable[refs_List, dependencies_List, options_List] := Module[{table = AssociationThread[refs -> None], pending = refs, urls, found},
+    Do[
+        urls = Select[AssociationMap[dependencyPageURL[#, dependencies, options, place] &, pending], StringQ];
+        found = Pick[Keys[urls], fetchStatuses[Values[urls]], 200];
+        table = Join[table, KeyTake[urls, found]];
+        pending = Complement[pending, found],
+        {place, 2}
+    ];
+    table
+];
+
+(* a link's page in the place-th place its paclet may be published, or None *)
+dependencyPageURL[ref_String, dependencies_List, options_List, place_Integer] := With[{
+    dependency = SelectFirst[dependencies, StringStartsQ[ref, "paclet:" <> # <> "/"] &, None]},
+    If[ dependency === None, None,
+        With[{roots = dependencyRoots[dependency, options]},
+            If[ Length[roots] < place, None,
+                roots[[place]] <> "/" <> StringDrop[ref, StringLength["paclet:" <> dependency <> "/"]] <> ".html"]]]
+];
+
+(* where a dependency's pages may be published: beside the documented paclet's, on the account it is
+   deployed to, then on the Paclet Repository *)
+dependencyRoots[dependency_String, options_List] := With[{
+    name = Lookup[options, "PacletName", None],
+    root = PacletResource`Notebooks`Private`determineDocHTMLRoot[Lookup[options, "PacletName", None], Lookup[options, "DocumentationHTMLRoot", Automatic]]},
+    DeleteDuplicates @ Select[{
+        If[ StringQ[name] && StringQ[root] && StringContainsQ[root, "/DeployedResources/Paclet/" <> name <> "/"],
+            StringReplace[root, "/DeployedResources/Paclet/" <> name <> "/" -> "/DeployedResources/Paclet/" <> dependency <> "/"], None],
+        PacletResource`Notebooks`Private`determineDocHTMLRoot[dependency, Automatic]
+    }, StringQ]
+];
+
+(* The definition a transform makes a page's links into its dependencies with, before the stock
+   ones: the link to the page the table names, or the label alone. It uses none of this package's
+   definitions, as the parallel kernels apply it without the package. *)
+dependencyLinkRule[table_Association] := With[{links = table},
+    HoldPattern[PacletResource`Notebooks`Private`makeEmbeddedPackageLink[label_, ref_String /; KeyExistsQ[links, StringDelete[ref, "#" ~~ ___ ~~ EndOfString]], style___]] :>
+        With[{url = links[StringDelete[ref, "#" ~~ ___ ~~ EndOfString]]},
+            If[ StringQ[url],
+                PacletResource`Notebooks`Private`embeddedLink[label, url <> First[StringCases[ref, f : ("#" ~~ ___ ~~ EndOfString) :> f], ""], style],
+                label]]
+];
+
+(* in this kernel, inside a block that restores the stock definitions *)
+installDependencyLinkRule[rule_] := (
+    Unprotect[PacletResource`Notebooks`Private`makeEmbeddedPackageLink];
+    DownValues[PacletResource`Notebooks`Private`makeEmbeddedPackageLink] = Prepend[DownValues[PacletResource`Notebooks`Private`makeEmbeddedPackageLink], rule]
+);
 
 (* what a page's transform is made with: the symbols' rules, which name the paclet's version, only for
    a page that holds one of its declared symbols' names, as the transform makes boxes of those alone;
@@ -1857,15 +1943,19 @@ pacletLinks[_, _, _] := {};
 transformFiles[{}, _, _] := <||>;
 transformFiles[files_List, type_, options_List] := Module[{results = <||>, again},
     If[ Length[files] >= 24 && $transform["Kernels"] =!= {},
-        With[{setup = <|"Type" -> type, "Options" -> options, "SymbolRules" -> $transform["SymbolRules"], "PinRules" -> $transform["PinRules"], "LinkRules" -> {orangeLinkRule[]}|>},
+        With[{setup = <|"Type" -> type, "Options" -> options, "SymbolRules" -> $transform["SymbolRules"], "PinRules" -> $transform["PinRules"], "LinkRules" -> {orangeLinkRule[]},
+                "DependencyRule" -> dependencyLinkRule[Lookup[$transform, "DependencyLinks", <||>]]|>},
             ParallelEvaluate[
                 $transformSetup = setup;
                 Needs["PacletResource`"];
                 $transformStock = {
                     DownValues[PacletResource`Private`fancyPacletSymbolBoxes],
                     DownValues[PacletResource`Private`pacletDeclaredSymbols],
-                    PacletResource`Notebooks`Private`$embeddedLinkRules
+                    PacletResource`Notebooks`Private`$embeddedLinkRules,
+                    DownValues[PacletResource`Notebooks`Private`makeEmbeddedPackageLink]
                 };
+                Unprotect[PacletResource`Notebooks`Private`makeEmbeddedPackageLink];
+                DownValues[PacletResource`Notebooks`Private`makeEmbeddedPackageLink] = Prepend[DownValues[PacletResource`Notebooks`Private`makeEmbeddedPackageLink], setup["DependencyRule"]];
                 Unprotect[PacletResource`Private`fancyPacletSymbolBoxes, PacletResource`Private`pacletDeclaredSymbols];
                 DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = Join[setup["SymbolRules"], DownValues[PacletResource`Private`fancyPacletSymbolBoxes]];
                 DownValues[PacletResource`Private`pacletDeclaredSymbols] = Join[setup["PinRules"], DownValues[PacletResource`Private`pacletDeclaredSymbols]];
@@ -1896,7 +1986,8 @@ transformFiles[files_List, type_, options_List] := Module[{results = <||>, again
                 If[ ListQ[$transformStock],
                     DownValues[PacletResource`Private`fancyPacletSymbolBoxes] = $transformStock[[1]];
                     DownValues[PacletResource`Private`pacletDeclaredSymbols] = $transformStock[[2]];
-                    PacletResource`Notebooks`Private`$embeddedLinkRules = $transformStock[[3]]
+                    PacletResource`Notebooks`Private`$embeddedLinkRules = $transformStock[[3]];
+                    DownValues[PacletResource`Notebooks`Private`makeEmbeddedPackageLink] = $transformStock[[4]]
                 ];
                 Clear[$transformSetup, $transformStock],
                 DistributedContexts -> None
@@ -3220,7 +3311,8 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
                     With[{deploy = Block[{$heroImage = hero, $examples = OptionValue["Examples"]}, withDeployKernels[
                             If[built["Pages"] >= 24, OptionValue["Parallel"], False],
                             Function[kernels,
-                                $transform = newTransform[FileNameJoin[{dir, "build", "transform"}], transformContext[symbolRules, pinned], symbolRules, pinned, kernels];
+                                $transform = newTransform[FileNameJoin[{dir, "build", "transform"}], transformContext[symbolRules, pinned], symbolRules, pinned, kernels,
+                                    Map[dependencyName, Replace[PacletObject[File[dir]]["Dependencies"], Except[_List] -> {}]]];
                                 withoutLanguageData[stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]]
                             ]
                         ]]},
