@@ -1065,6 +1065,34 @@ VerificationTest[
 ]
 
 VerificationTest[
+    docLinks[
+        StringJoin[
+            "<a href=\"https://r.example/D/guide/Sub.html\">Sub Guide <span class=\"special-character RightGuillemet\">&#187;</span></a>",
+            "<a href=\"https://r.example/D/guide/Other.html\">Other Guide\[NonBreakingSpace]\[RightGuillemet]</a>",
+            "<a href=\"https://r.example/D/guide/Bare.html\">\[RightGuillemet]</a>",
+            "<a href=\"https://r.example/D/tutorial/Quotes.html\">\[LeftGuillemet]Quoted\[RightGuillemet] Words</a>"
+        ],
+        "https://r.example/D/"
+    ],
+    {{"guide", "Sub", "Sub Guide"}, {"guide", "Other", "Other Guide"}, {"guide", "Bare", ""}, {"tutorial", "Quotes", "\[LeftGuillemet]Quoted\[RightGuillemet] Words"}},
+    TestID -> "Catalog: a page's title is its link's text without the guillemet a sub-guide heading ends in"
+]
+
+VerificationTest[
+    Needs["PacletResource`"];
+    Block[{PacletResource`Notebooks`Private`$packageURLTemplate = "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/`1`.html",
+            PacletResource`Notebooks`Private`$pacletName = "Pub/Name", PacletResource`Notebooks`Private`$validRefs = None},
+        Cases[
+            Cell[BoxData[TemplateBox[{Cell[TextData["Plane Conics \[RightGuillemet]"]], "paclet:Pub/Name/guide/Conics"}, "OrangeLink", BaseStyle -> "GuideFunctionsSubsection"]],
+                "GuideFunctionsSubsection"] /. orangeLinkRule[],
+            TemplateBox[{text_, {URL[u_], None}, ___}, "HyperlinkTemplate"] :> {text, u}, Infinity]],
+    {{Cell[TextData["Plane Conics \[RightGuillemet]"]], "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/guide/Conics.html"}},
+    TestID -> "Publish: a sub-guide heading's guillemet stays inside its link on the deployed page, which the site shows"
+]
+
+
+
+VerificationTest[
     curlLines["2\t000\t\t\n0\t200\ttext/html; charset=UTF-8\t\n2\t302\ttext/html\thttps://b/c\n", 3],
     {{200, "text/html; charset=UTF-8", ""}, {0, "", ""}, {302, "text/html", "https://b/c"}},
     TestID -> "Read: curl's lines, in the order the transfers finished, are read into the requests' order, a later line for a request over an earlier one; no line is status 0"
