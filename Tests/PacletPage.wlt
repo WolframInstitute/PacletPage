@@ -1091,6 +1091,17 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{lines, value},
+        lines = Internal`Bag[];
+        value = Block[{$deployMonitor = True, $heartbeatSeconds = 1, $heartbeatPrint = Function[line, Internal`StuffBag[lines, line]]},
+            withHeartbeat[Do[Total[RandomReal[1, 10^6]], 1500]; 7, "working"]];
+        {value, Count[Internal`BagPart[lines, All], "working: 0 min"] >= 2, FreeQ[Tasks[], "working"], Block[{$deployMonitor = False}, withHeartbeat[1 + 1, "quiet"]]}
+    ],
+    {7, True, True, 2},
+    TestID -> "Deploy: a long step of a monitored deploy prints a line every minute while it runs, and leaves no task behind"
+]
+
+VerificationTest[
     Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["deps-"] <> ".nb"}], notebook, results},
         notebook = Notebook[{Cell[TextData[{
             Cell[BoxData[TemplateBox[{Cell[TextData["Manifold"]], "paclet:Pub/Dep/ref/Manifold", "Pub/Dep Package Symbol"}, "PackageLink", BaseStyle -> "InlineFormula"]], "InlineFormula"],

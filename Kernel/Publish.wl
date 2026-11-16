@@ -1811,7 +1811,7 @@ transformRule[] := HoldPattern[PacletResource`Notebooks`ProcessNotebookForEmbedd
 (* the stock transform of one notebook, in place *)
 $pageTransform = Function[{file, type, options}, PacletResource`Notebooks`ProcessNotebookForEmbedding[file, type, Sequence @@ options]];
 
-transformPages[dir_String, type_, opts_List] := Module[{files, options, valid, keys, cached, misses, results},
+transformPages[dir_String, type_, opts_List] := Module[{files, options, valid, keys, cached, misses, results, timed, keyTime, copyTime},
     files = FileNames["*.nb", dir, Infinity, IgnoreCase -> True];
     (* a transform into new files, rather than in place, is the stock one *)
     If[ ! TrueQ[Lookup[opts, OverwriteTarget, False]],
@@ -1820,12 +1820,15 @@ transformPages[dir_String, type_, opts_List] := Module[{files, options, valid, k
     options = Append[DeleteCases[opts, "PackageURIs" -> _],
         "PackageURIs" -> Replace[Lookup[opts, "PackageURIs", Automatic], Automatic :> PacletResource`Notebooks`Private`$validRefs]];
     valid = AssociationThread[Replace[Lookup[options, "PackageURIs"], Except[_List] -> {}] -> True];
-    addDependencyLinks[files, options];
-    keys = AssociationMap[transformKey[#, type, options, valid] &, files];
+    (* each phase says how far it is every 15 seconds, and the summary how long each took, so that a
+       slow phase reads as slow, and a watchdog waiting for output sees it go on *)
+    timed = First @ AbsoluteTiming[addDependencyLinks[files, options]];
+    {keyTime, keys} = AbsoluteTiming[AssociationThread[files -> progressMap[transformKey[#, type, options, valid] &, files, TrueQ[$deployMonitor], "deploy: pages keyed"]]];
     cached = Select[files, FileExistsQ[transformFile[keys[#]]] &];
-    Scan[CopyFile[transformFile[keys[#]], #, OverwriteTarget -> True] &, cached];
+    copyTime = First @ AbsoluteTiming[progressMap[CopyFile[transformFile[keys[#]], #, OverwriteTarget -> True] &, cached, TrueQ[$deployMonitor], "deploy: pages taken from the transform cache"]];
     misses = Select[files, ! MemberQ[cached, #] &];
-    monitor["pages: " <> ToString[Length[cached]] <> " transformed before, " <> ToString[Length[misses]] <> " to transform"];
+    monitor["pages: " <> ToString[Length[cached]] <> " transformed before, " <> ToString[Length[misses]] <> " to transform (links looked up in " <>
+        ToString[Round[timed]] <> " s, keyed in " <> ToString[Round[keyTime]] <> " s, taken from the cache in " <> ToString[Round[copyTime]] <> " s)"];
     results = Internal`InheritedBlock[{PacletResource`Notebooks`Private`makeEmbeddedPackageLink},
         installDependencyLinkRule[dependencyLinkRule[Lookup[$transform, "DependencyLinks", <||>]]];
         transformFiles[misses, type, options]
@@ -2717,6 +2720,23 @@ runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
     finished
 ];
 
+(* An evaluation with a line every minute while it runs, when the deploy is monitored: the stock
+   deploy's steps, such as making the search index of thousands of pages, print nothing for many
+   minutes, and a watchdog waiting for output would take a slow step for a stuck one. A task the
+   kernel runs between the evaluation's own steps prints the line.
+   The task runs outside the blocks the evaluation is in, so what it prints with is fixed when it is
+   made. *)
+$heartbeatSeconds = 60;
+$heartbeatPrint = Function[line, Print["deploy: ", line]];
+SetAttributes[withHeartbeat, HoldFirst];
+withHeartbeat[expr_, what_String] := If[ ! TrueQ[$deployMonitor], expr,
+    With[{start = AbsoluteTime[], print = $heartbeatPrint},
+        With[{task = SessionSubmit[ScheduledTask[print[what <> ": " <> ToString[Round[(AbsoluteTime[] - start) / 60]] <> " min"], $heartbeatSeconds]]},
+            WithCleanup[expr, TaskRemove[task]]
+        ]
+    ]
+];
+
 (* A process run to its end, as RunProcess runs it, with a line when it starts, every minute while
    it runs, and when it ends, when the deploy is monitored *)
 runWatched[command_List, what_String] := Module[{process, out = {}, err = {}, start = AbsoluteTime[], next},
@@ -3333,7 +3353,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
                             Function[kernels,
                                 $transform = newTransform[FileNameJoin[{dir, "build", "transform"}], transformContext[symbolRules, pinned], symbolRules, pinned, kernels,
                                     Map[dependencyName, Replace[PacletObject[File[dir]]["Dependencies"], Except[_List] -> {}]]];
-                                withoutLanguageData[stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]]
+                                withHeartbeat[withoutLanguageData[stopOnCloudWriteFailure[CloudDeploy[versioned, where, Permissions -> OptionValue[Permissions]]]], "the resource's deploy is running"]
                             ]
                         ]]},
                         If[ MatchQ[deploy, _CloudObject], pruneTransforms[]];
