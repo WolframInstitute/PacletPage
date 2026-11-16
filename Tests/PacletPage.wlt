@@ -1091,6 +1091,30 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Block[{$ownerURLBase = "https://c.example/obj/me/", $ownerFetch = Function[{url, elements}, Switch[url,
+            "https://c.example/obj/me/R/index.html", {200, ToCharacterCode["<html>page</html>", "UTF-8"], {{"Date", "today"}, {"Content-Type", "text/html; charset=utf-8"}}},
+            _, {401, {}, ""}]]},
+        With[{denied = <|"StatusCode" -> 401, "ContentType" -> "text/html"|>},
+            {
+                Block[{$readAsOwner = True}, ownerAnswer["https://c.example/obj/me/R/", True, denied]],
+                Block[{$readAsOwner = True}, ownerAnswer["https://c.example/obj/me/R/", False, denied]],
+                Block[{$readAsOwner = True}, ownerAnswer["https://c.example/obj/me/S/", True, denied]],
+                Block[{$readAsOwner = True}, ownerAnswer["https://c.example/obj/other/R/", True, denied]],
+                Block[{$readAsOwner = False}, ownerAnswer["https://c.example/obj/me/R/", True, denied]]
+            }
+        ]
+    ],
+    {
+        <|"StatusCode" -> 200, "ContentType" -> "text/html; charset=utf-8", "Body" -> "<html>page</html>"|>,
+        <|"StatusCode" -> 200, "ContentType" -> "text/html; charset=utf-8"|>,
+        <|"StatusCode" -> 401, "ContentType" -> "text/html"|>,
+        <|"StatusCode" -> 401, "ContentType" -> "text/html"|>,
+        <|"StatusCode" -> 401, "ContentType" -> "text/html"|>
+    },
+    TestID -> "Catalog: a private page of the connected account is read through the session, its directory as index.html; another account's, a check's, and an unread one keep their 401"
+]
+
+VerificationTest[
     Module[{lines, value},
         lines = Internal`Bag[];
         value = Block[{$deployMonitor = True, $heartbeatSeconds = 1, $heartbeatPrint = Function[line, Internal`StuffBag[lines, line]]},

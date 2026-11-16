@@ -107,12 +107,36 @@ curlGet[urls : {__String}, body_?BooleanQ, n_Integer] := With[{curl = curlExecut
                 ]
             ];
             DeleteDirectory[dir, DeleteContents -> True];
-            MapThread[Replace[#1, None :> Failure["NoResponse", <|"MessageTemplate" -> "No answer from `1`.", "MessageParameters" -> {#2}|>]] &, {answers, urls}]
+            MapThread[
+                Replace[#1, {
+                    None :> Failure["NoResponse", <|"MessageTemplate" -> "No answer from `1`.", "MessageParameters" -> {#2}|>],
+                    answer : KeyValuePattern["StatusCode" -> 401] :> ownerAnswer[#2, body, answer]
+                }] &,
+                {answers, urls}
+            ]
         ]
     ]
 ];
 
 curlRun[arguments_List] := Replace[RunProcess[arguments, "StandardOutput"], Except[_String] -> ""];
+
+(* A page of the account the kernel is connected to that answers an anonymous read with 401, as a
+   private resource's pages do, read again through the kernel's cloud session, where the catalog
+   asks for it: so that a resource published privately has its catalog and its site. A check of
+   what anyone can read never asks. A directory's page is its index.html, and a read the session
+   cannot make keeps the anonymous answer. *)
+$readAsOwner = False;
+contentType[headers_List] := First[Cases[headers, {name_String, value_String} /; ToLowerCase[name] === "content-type" :> value], ""];
+$ownerFetch := CloudObject`Private`authenticatedURLFetch;
+$ownerURLBase := If[TrueQ[$CloudConnected] && StringQ[$UserURLBase], URLBuild[{$CloudBase, "obj", $UserURLBase}] <> "/", None];
+ownerAnswer[url_String, body_, answer_] := With[{base = $ownerURLBase},
+    If[ ! TrueQ[$readAsOwner] || ! StringQ[base] || ! StringStartsQ[url, base], answer,
+        Replace[$ownerFetch[If[StringEndsQ[url, "/"], url <> "index.html", url], {"StatusCode", "ContentData", "Headers"}], {
+            {200, data_List, headers_List} :> With[{type = contentType[headers]}, curlAnswer[200, type, If[TrueQ[body], bytesText[ByteArray[data], type], None]]],
+            _ -> answer
+        }]
+    ]
+];
 
 (* a string as curl's config file reads it: quoted, its backslashes and quotes escaped *)
 curlQuoted[s_String] := "\"" <> StringReplace[s, {"\\" -> "\\\\", "\"" -> "\\\""}] <> "\"";
@@ -146,14 +170,13 @@ signInStatus[url_String] := Replace[
 
 (* a body's text as URLRead gives it: decoded by the charset its content type names, UTF-8 or a
    single-byte one, and one character a byte where it names none; "" for no body *)
-fileText[file_String, type_String] := If[ ! FileExistsQ[file], "",
-    With[{bytes = ReadByteArray[file], charset = ToLowerCase[First[StringCases[type, RegularExpression["(?i)charset=\\s*\"?([^;\"\\s]+)"] -> "$1"], ""]]},
-        Which[
-            ! ByteArrayQ[bytes], "",
-            MemberQ[{"utf-8", "utf8"}, charset], Quiet[ByteArrayToString[bytes, "UTF-8"], $CharacterEncoding::utf8],
-            KeyExistsQ[$singleByteCharsets, charset], FromCharacterCode[Normal[bytes], $singleByteCharsets[charset]],
-            True, FromCharacterCode[Normal[bytes]]
-        ]
+fileText[file_String, type_String] := If[ ! FileExistsQ[file], "", bytesText[ReadByteArray[file], type]];
+bytesText[bytes_, type_String] := With[{charset = ToLowerCase[First[StringCases[type, RegularExpression["(?i)charset=\\s*\"?([^;\"\\s]+)"] -> "$1"], ""]]},
+    Which[
+        ! ByteArrayQ[bytes], "",
+        MemberQ[{"utf-8", "utf8"}, charset], Quiet[ByteArrayToString[bytes, "UTF-8"], $CharacterEncoding::utf8],
+        KeyExistsQ[$singleByteCharsets, charset], FromCharacterCode[Normal[bytes], $singleByteCharsets[charset]],
+        True, FromCharacterCode[Normal[bytes]]
     ]
 ];
 $singleByteCharsets = <|"iso-8859-1" -> "ISOLatin1", "latin1" -> "ISOLatin1", "us-ascii" -> "ASCII", "windows-1252" -> "WindowsANSI"|>;
@@ -402,7 +425,9 @@ Options[PacletPageCatalog] = {
     "Monitor" -> False
 };
 
-PacletPageCatalog[source_, opts : OptionsPattern[]] := Module[
+PacletPageCatalog[source_, opts : OptionsPattern[]] := Block[{$readAsOwner = True}, catalogOf[source, opts]];
+Options[catalogOf] = Options[PacletPageCatalog];
+catalogOf[source_, opts : OptionsPattern[PacletPageCatalog]] := Module[
     {spec, html, links, local, pages, listed, queue, level, walked = <||>, nb, structure, discovered, published, unpublished, leftOut, monitor, root, title},
     spec = resourceSpec[source];
     If[ spec === $Failed, Message[PacletPageCatalog::resource, source]; Return[$Failed, Module]];
