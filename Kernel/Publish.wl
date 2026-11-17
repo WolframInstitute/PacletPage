@@ -2655,12 +2655,10 @@ documentationLinkBase[paclet_PacletObject] := Replace[
    pages tidied, as PacletBuild's documentation step tidies the pages it finds untidied, which a
    process does over its own share while the others build theirs. Its output goes to a log, so
    that nothing waits on a full pipe. *)
-pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List] :=
-    pageShareScript[source, docsDir, builtDocsDir, pages, recordOut, log, dependencies, None]
-(* asked and answered, where given, are files the script writes as it asks for a front end and once
-   the front end has answered it, so that a process whose front end never answers is told from one
-   whose pages are slow *)
-pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List, markers_] := StringJoin[
+(* markers, {asked, answered}, are files the script writes as it asks for a front end and once the
+   front end has answered it, so that a process whose front end never answers is told from one whose
+   pages are slow; None writes neither *)
+pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List, markers_ : None] := StringJoin[
     $quietKernelCode,
     "$ProgressReporting = False;\n",
     "$Output = $Messages = {OpenWrite[", wlString[log], "]};\n",
