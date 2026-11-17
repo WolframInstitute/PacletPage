@@ -2230,6 +2230,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{busy = StartProcess[{"sh", "-c", "while :; do :; done"}]},
+        Pause[3];
+        With[{sample = processSample[busy["PID"]], spinning = spinningProcesses[busy["PID"]][[All, 1]]},
+            KillProcess[busy];
+            {MatchQ[sample, {__String}], Length[sample] <= $sampleLines, spinning === {ToString[busy["PID"]]}, processSample[None]}
+        ]
+    ],
+    {True, True, True, None},
+    TestID -> "Archive: a process that spins is sampled before it is stopped, its threads and stacks in a few lines"
+]
+
+VerificationTest[
     {
         kernelLicenseArguments[{"WolframKernel", "-pwfile", "!lm.example", "-entitlement", "O-ABC", "-runfirst", "x"}, "O-ENV"],
         kernelLicenseArguments[{"WolframKernel", "-entitlement", "O-ABC", "-script", "x.wl"}, "O-ENV"],

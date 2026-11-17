@@ -2761,22 +2761,102 @@ runWatched[command_List, what_String] := Module[{process, out = {}, err = {}, st
    started, each with its share of a processor and its state, so that a log tells a process that
    spins from one that waits *)
 stoppedReport[run_Association] := If[ StringQ[Lookup[run, "Label", None]] && MatchQ[run["Process"], _ProcessObject],
-    Replace[processReport[run["Process"]["PID"]], report_String :> monitor[run["Label"] <> " when stopped: " <> report]]
+    Replace[processReport[run["Process"]["PID"]], report_String :> monitor[run["Label"] <> " when stopped: " <> report]];
+    Scan[
+        Function[row, Replace[processSample[FromDigits[row[[1]]]], lines : {__String} :> Scan[monitor, Prepend[lines, run["Label"] <> " when stopped, " <> FileNameTake[row[[5]]] <> " " <> row[[1]] <> ":"]]]],
+        spinningProcesses[run["Process"]["PID"]]
+    ]
 ];
 
 (* a process and those it started: each one's name, share of a processor and state; None where
    there is no ps *)
-processReport[pid_Integer] /; $OperatingSystem =!= "Windows" := With[{ps = RunProcess[{"ps", "-e", "-o", "pid=,ppid=,pcpu=,stat=,comm="}]},
-    If[ ! AssociationQ[ps] || ps["ExitCode"] =!= 0, None,
+processReport[pid_Integer] := Replace[processRows[pid], {{} -> None, rows_ :> StringRiffle[Map[FileNameTake[#[[5]]] <> " " <> #[[3]] <> "% " <> #[[4]] &, rows], ", "]}];
+processReport[_] := None;
+
+(* the rows of ps for a process and those it started, {pid, ppid, share of a processor, state,
+   command}, or none *)
+processRows[pid_Integer] /; $OperatingSystem =!= "Windows" := With[{ps = RunProcess[{"ps", "-e", "-o", "pid=,ppid=,pcpu=,stat=,comm="}]},
+    If[ ! AssociationQ[ps] || ps["ExitCode"] =!= 0, {},
         With[{rows = Select[StringSplit[StringTrim[#], Whitespace, 5] & /@ StringSplit[ps["StandardOutput"], "\n"],
                 Length[#] === 5 && StringMatchQ[#[[1]] <> #[[2]], DigitCharacter ..] &]},
             With[{tree = Prepend[descendantProcesses[Association[(FromDigits[#[[1]]] -> {FromDigits[#[[2]]], #[[5]], #[[4]]}) & /@ rows], {pid}], pid]},
-                StringRiffle[Map[FileNameTake[#[[5]]] <> " " <> #[[3]] <> "% " <> #[[4]] &, Select[rows, MemberQ[tree, FromDigits[#[[1]]]] &]], ", "]
+                Select[rows, MemberQ[tree, FromDigits[#[[1]]]] &]
             ]
         ]
     ]
 ];
-processReport[_] := None;
+processRows[_] := {};
+
+(* those of a run's processes that use half a processor or more, a front end that spins among them *)
+spinningProcesses[pid_] := Select[processRows[pid], MatchQ[Interpreter["Number"][#[[3]]], n_?NumericQ /; n >= 50] &];
+
+(* What a spinning process is doing, before it is stopped, so that a log tells where it spins: on
+   Linux its threads' states and the kernel functions they wait in, then a backtrace of each thread
+   where eu-stack or gdb is installed and may attach; on macOS, the stacks sample finds most often.
+   At most $sampleLines lines of it; None where nothing reads it. *)
+$sampleLines = 40;
+processSample[pid_Integer] /; $OperatingSystem === "Unix" && DirectoryQ["/proc/" <> ToString[pid]] := With[
+    {threads = threadStates[pid], trace = processBacktrace[pid]},
+    Take[Join[{"  threads: " <> threads}, If[trace === {}, {"  no backtrace: neither eu-stack nor gdb attached"}, ("  " <> # &) /@ trace]], UpTo[$sampleLines]]
+];
+processSample[pid_Integer] /; $OperatingSystem === "MacOSX" := With[{lines = macSample[pid]},
+    If[lines === {}, None, Take[("  " <> # &) /@ lines, UpTo[$sampleLines]]]
+];
+processSample[_] := None;
+
+(* each state and kernel wait of a process's threads, with how many threads are in it, as
+   "3 R, 9 S futex_wait_queue" *)
+threadStates[pid_Integer] := StringRiffle[
+    Map[ToString[#[[2]]] <> " " <> #[[1]] &, SortBy[Tally[threadState /@ FileNames["*", "/proc/" <> ToString[pid] <> "/task"]], -Last[#] &]],
+    ", "
+];
+threadState[task_String] := With[
+    {stat = Replace[readSmallFile[FileNameJoin[{task, "stat"}]], Except[_String] -> ""], wchan = Replace[readSmallFile[FileNameJoin[{task, "wchan"}]], Except[_String] -> ""]},
+    StringTrim[First[StringSplit[Last[StringSplit[stat, ")", All]] <> " ?", Whitespace], "?"] <> If[MemberQ[{"", "0"}, StringTrim[wchan]], "", " " <> StringTrim[wchan]]]
+];
+readSmallFile[file_String] := If[FileExistsQ[file], ReadString[file], None];
+
+(* a backtrace of every thread by the first of eu-stack and gdb installed that attaches: its frame
+   lines, or none *)
+processBacktrace[pid_Integer] := Catch[
+    Scan[
+        Function[command, If[ installedQ[First[command]],
+            With[{frames = Select[StringSplit[Replace[limitedOutput[command, 20], Except[_String] -> ""], "\n"], StringStartsQ[StringTrim[#], "#" | "TID" | "Thread"] &]},
+                If[frames =!= {}, Throw[frames, "backtrace"]]
+            ]
+        ]],
+        {{"eu-stack", "-p", ToString[pid]}, {"gdb", "-p", ToString[pid], "-batch", "-ex", "thread apply all bt 12"}}
+    ];
+    {},
+    "backtrace"
+];
+
+(* the stacks macOS's sample finds most often in a second, as it sorts them by the top of the stack,
+   without the list of binary images after them *)
+macSample[pid_Integer] := With[{file = FileNameJoin[{$TemporaryDirectory, "pacletpage-sample-" <> ToString[pid] <> ".txt"}]},
+    limitedOutput[{"sample", ToString[pid], "1", "-file", file}, 20];
+    With[{text = Replace[readSmallFile[file], Except[_String] -> ""]},
+        If[FileExistsQ[file], DeleteFile[file]];
+        With[{after = StringSplit[text, "Sort by top of stack" ~~ Except["\n"] ... ~~ "\n", 2]},
+            If[Length[after] === 2, TakeWhile[Select[StringTrim /@ StringSplit[Last[after], "\n"], # =!= "" &], ! StringStartsQ[#, "Binary Images"] &], {}]
+        ]
+    ]
+];
+
+installedQ[tool_String] := MatchQ[RunProcess[{"sh", "-c", "command -v " <> tool}], KeyValuePattern["ExitCode" -> 0]];
+
+(* what a command writes, read as it runs so that a full pipe never stops it, the command stopped
+   past the seconds given *)
+limitedOutput[command_List, seconds_] := Module[{process = StartProcess[command], out = {}, deadline = AbsoluteTime[] + seconds},
+    If[ ! MatchQ[process, _ProcessObject], Return[None, Module]];
+    While[ ProcessStatus[process] === "Running" && AbsoluteTime[] < deadline,
+        AppendTo[out, ReadString[ProcessConnection[process, "StandardOutput"], EndOfBuffer]];
+        Pause[0.2]
+    ];
+    If[ ProcessStatus[process] === "Running", KillProcess[process]];
+    AppendTo[out, ReadString[ProcessConnection[process, "StandardOutput"], EndOfBuffer]];
+    StringJoin[Select[out, StringQ]]
+];
 
 runEnded[run_Association, how_String] := If[StringQ[Lookup[run, "Label", None]], monitor[run["Label"] <> " " <> how]];
 
