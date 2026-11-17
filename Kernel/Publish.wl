@@ -2655,7 +2655,12 @@ documentationLinkBase[paclet_PacletObject] := Replace[
    pages tidied, as PacletBuild's documentation step tidies the pages it finds untidied, which a
    process does over its own share while the others build theirs. Its output goes to a log, so
    that nothing waits on a full pipe. *)
-pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List] := StringJoin[
+pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List] :=
+    pageShareScript[source, docsDir, builtDocsDir, pages, recordOut, log, dependencies, None]
+(* asked and answered, where given, are files the script writes as it asks for a front end and once
+   the front end has answered it, so that a process whose front end never answers is told from one
+   whose pages are slow *)
+pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, recordOut_String, log_String, dependencies_List, markers_] := StringJoin[
     $quietKernelCode,
     "$ProgressReporting = False;\n",
     "$Output = $Messages = {OpenWrite[", wlString[log], "]};\n",
@@ -2667,10 +2672,13 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "pages = {", StringRiffle[wlString /@ pages, ", "], "};\n",
     "paclet = PacletObject[File[", wlString[source], "]];\n",
     "inputDir = ExpandFileName[", wlString[docsDir], "];\n",
-    "result = UsingFrontEnd @ DocumentationBuild`DocumentationBuildNotebooks[inputDir, ", wlString[builtDocsDir], ", MemberQ[pages, #] &,\n",
+    Replace[markers, {{asked_String, _String} :> "Put[0, " <> wlString[asked] <> "];\n", _ -> ""}],
+    "result = UsingFrontEnd[",
+    Replace[markers, {{_String, answered_String} :> "Rasterize[Graphics[{}], ImageSize -> 1]; Put[0, " <> wlString[answered] <> "]; ", _ -> ""}],
+    "DocumentationBuild`DocumentationBuildNotebooks[inputDir, ", wlString[builtDocsDir], ", MemberQ[pages, #] &,\n",
     "    \"BuildSearchIndex\" -> False, \"SuccessThreshold\" -> -1, \"LinkBase\" -> ", wlString[documentationLinkBase[PacletObject[File[source]]]], ",\n",
     "    \"CitationFunction\" -> PacletTools`PacletDocumentationBuild`Private`makePacletCitationFunction[paclet],\n",
-    "    \"TargetWolframVersionNumber\" -> PacletTools`PacletDocumentationBuild`Private`determinePacletDocumentationTargetVersionNumber[paclet]];\n",
+    "    \"TargetWolframVersionNumber\" -> PacletTools`PacletDocumentationBuild`Private`determinePacletDocumentationTargetVersionNumber[paclet]]];\n",
     "processed = Replace[result, {built : (_Success | _Association) :> built[\"ProcessedFiles\"], _ -> <||>}];\n",
     "Put[Association[KeyValueMap[\n",
     "    With[{page = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[MemberQ[pages, page], page -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
@@ -2682,7 +2690,8 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
 ];
 
 (* Scripts run as separate kernel processes, at most n at a time, each one killed past its
-   deadline, or when none of its "Record" and "Progress" files has changed for "Stall" seconds:
+   deadline, when its front end has not answered "FrontEndLimit" seconds after it asked for one,
+   or when none of its "Record" and "Progress" files has changed for "Stall" seconds:
    "Finished", "TimedOut" or "Stalled" by script. A process killed takes the processes it started,
    its parallel kernels and front ends, with it. A process may start parallel kernels of its own,
    which a parallel kernel may not, and the stock documentation build does when it installs a
@@ -2706,6 +2715,8 @@ runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
                 finished[run["Script"]] = "Finished"; runEnded[run, "finished"]; False,
             AbsoluteTime[] - run["Start"] > run["Deadline"],
                 stoppedReport[run]; killProcessTree[run["Process"]]; finished[run["Script"]] = "TimedOut"; runEnded[run, "stopped past its time"]; False,
+            AbsoluteTime[] > stallCheck && frontEndStalledQ[run],
+                stoppedReport[run]; killProcessTree[run["Process"]]; finished[run["Script"]] = "Stalled"; runEnded[run, "stopped: its front end did not answer in " <> ToString[run["FrontEndLimit"]] <> " s"]; False,
             AbsoluteTime[] > stallCheck && stalledQ[run],
                 stoppedReport[run]; killProcessTree[run["Process"]]; finished[run["Script"]] = "Stalled"; runEnded[run, "stopped: nothing new for " <> ToString[run["Stall"]] <> " s"]; False,
             True, True
@@ -2860,6 +2871,16 @@ limitedOutput[command_List, seconds_] := Module[{process = StartProcess[command]
 
 runEnded[run_Association, how_String] := If[StringQ[Lookup[run, "Label", None]], monitor[run["Label"] <> " " <> how]];
 
+(* A run whose front end has not answered "FrontEndLimit" seconds after it was asked for: a front end
+   starts in seconds, and one of a page process now and then spins from the start and never answers,
+   while its kernel waits; the run is stopped then, its pages taken by the next round, not after the
+   minutes a page may take. *)
+$frontEndLimit = 180;
+frontEndStalledQ[run_Association] := With[{asked = Lookup[run, "FrontEndAsked", None], answered = Lookup[run, "FrontEndAnswered", None]},
+    StringQ[asked] && StringQ[answered] && NumericQ[Lookup[run, "FrontEndLimit", None]] && FileExistsQ[asked] && ! FileExistsQ[answered] &&
+        AbsoluteTime[] - AbsoluteTime[FileDate[asked]] > run["FrontEndLimit"]
+];
+
 (* a run that has written nothing new for its "Stall" seconds, since it started or since its record,
    or a file it makes, last changed *)
 stalledQ[run_Association] := NumericQ[Lookup[run, "Stall", None]] && AbsoluteTime[] - Max[run["Start"],
@@ -2879,6 +2900,8 @@ drainProcess[process_ProcessObject] := (
     ReadString[ProcessConnection[process, "StandardOutput"], EndOfBuffer];
     ReadString[ProcessConnection[process, "StandardError"], EndOfBuffer];
 );
+
+$aloneAttempts = 3;
 
 (* The changed pages, built in n processes and entered in PacletBuild's record, so that its own
    build builds only what is left (the pages that failed here, if any), makes the indexes over every
@@ -2904,14 +2927,24 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
        and no other beside it: processes that run together can hold each other up, and a page
        that builds alone is sound *)
     alone = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ retries];
-    last = If[ alone === {}, {},
-        monitor["archive: " <> ToString[Length[alone]] <> " pages one at a time"];
-        pageShareRuns[source, docsDir, builtDocsDir, alone, n, limit, dependencies, work, "alone", 1]
+    (* A process can stop for its own sake, its front end spinning before its first page, about one
+       in ten on a loaded pod, whatever pages it holds; so a page alone has $aloneAttempts tries,
+       each in a new process, before it counts as one that never builds. *)
+    last = {};
+    Do[
+        If[ alone =!= {},
+            monitor["archive: " <> ToString[Length[alone]] <> " pages one at a time" <> If[attempt > 1, ", try " <> ToString[attempt] <> " of " <> ToString[$aloneAttempts], ""]];
+            With[{tries = pageShareRuns[source, docsDir, builtDocsDir, alone, n, limit, dependencies, work, "alone" <> If[attempt > 1, ToString[attempt], ""], 1]},
+                runKernelScripts[tries, 1, "archive: pages one at a time"]; unrecordedLogs[tries];
+                last = Join[last, tries];
+                alone = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ tries]
+            ]
+        ],
+        {attempt, $aloneAttempts}
     ];
-    If[ last =!= {}, runKernelScripts[last, 1, "archive: pages one at a time"]; unrecordedLogs[last]];
-    (* a page that stopped alone as well is one the stock build never finishes, and the last build,
-       which has no time limit of its own, would wait on it without end *)
-    $stuckPages = Catenate[Complement[#["Pages"], Keys[readRecord[#["Record"]]]] & /@ last];
+    (* a page that stopped alone on every try is one the stock build never finishes, and the last
+       build, which has no time limit of its own, would wait on it without end *)
+    $stuckPages = alone;
     If[ $stuckPages =!= {}, monitor["archive: " <> ToString[Length[$stuckPages]] <> " pages did not build in their time, alone: " <> StringRiffle[$stuckPages, ", "]]];
     record = Join[readRecord[recordFile], Association[Select[Map[readRecord[#["Record"]] &, Join[runs, retries, last]], AssociationQ]]];
     If[ ! DirectoryQ[DirectoryName[recordFile]], CreateDirectory[DirectoryName[recordFile], CreateIntermediateDirectories -> True]];
@@ -2944,9 +2977,10 @@ pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_
     {shares = Partition[pages, UpTo[If[IntegerQ[size], size, Max[1, Ceiling[Length[pages] / (2 n)]]]]]},
     MapIndexed[
         Function[{share, index}, With[{base = FileNameJoin[{work, kind <> "-" <> IntegerString[First[index]]}]},
-            Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies], "Text"];
+            Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies, {base <> "-asked.wl", base <> "-answered.wl"}], "Text"];
             <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Log" -> base <> ".log", "Pages" -> share, "Progress" -> (FileNameJoin[{builtDocsDir, #}] & /@ share),
               "Deadline" -> limit * Length[share] + 600, "Stall" -> limit + 600,
+              "FrontEndAsked" -> base <> "-asked.wl", "FrontEndAnswered" -> base <> "-answered.wl", "FrontEndLimit" -> $frontEndLimit,
               "Label" -> "archive: " <> kind <> " " <> IntegerString[First[index]] <> " of " <> IntegerString[Length[shares]] <> " (" <> If[Length[share] === 1, FileBaseName[First[share]], IntegerString[Length[share]] <> " pages"] <> ")"|>
         ]],
         shares

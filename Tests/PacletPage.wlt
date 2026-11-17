@@ -1718,6 +1718,35 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], hung, answering, marker, result},
+        marker[name_] := FileNameJoin[{dir, name}];
+        hung = marker["hung.wl"]; answering = marker["answering.wl"];
+        Export[hung, "Put[0, " <> ToString[marker["hung-asked.wl"], InputForm] <> "]; Pause[60];", "Text"];
+        Export[answering, "Put[0, " <> ToString[marker["answering-asked.wl"], InputForm] <> "]; Put[0, " <> ToString[marker["answering-answered.wl"], InputForm] <> "]; Pause[8];", "Text"];
+        result = runKernelScripts[{
+            <|"Script" -> hung, "Record" -> marker["hung-record.wl"], "Deadline" -> 120, "Stall" -> 100,
+              "FrontEndAsked" -> marker["hung-asked.wl"], "FrontEndAnswered" -> marker["hung-answered.wl"], "FrontEndLimit" -> 3|>,
+            <|"Script" -> answering, "Record" -> marker["answering-record.wl"], "Deadline" -> 120, "Stall" -> 100,
+              "FrontEndAsked" -> marker["answering-asked.wl"], "FrontEndAnswered" -> marker["answering-answered.wl"], "FrontEndLimit" -> 3|>
+        }, 2];
+        DeleteDirectory[dir, DeleteContents -> True];
+        Lookup[result, {hung, answering}]
+    ],
+    {"Stalled", "Finished"},
+    TestID -> "Archive: a process whose front end does not answer soon after it is asked for is stopped; one whose front end answers runs on"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], script},
+        script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}, {"/w/asked.wl", "/w/answered.wl"}];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {SyntaxQ[script], StringPosition[script, "asked.wl"][[1, 1]] < StringPosition[script, "UsingFrontEnd["][[1, 1]] < StringPosition[script, "answered.wl"][[1, 1]] < StringPosition[script, "DocumentationBuildNotebooks"][[1, 1]]}
+    ],
+    {True, True},
+    TestID -> "Archive: a page share asks for its front end after a marker and marks its answer before it builds"
+]
+
+VerificationTest[
     Module[{dir = localFixture[], script},
         script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}];
         DeleteDirectory[dir, DeleteContents -> True];
