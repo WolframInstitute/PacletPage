@@ -1791,6 +1791,22 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = localFixture[], plain = localFixture[], work = CreateDirectory[], got = {}, script},
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}],
+            "PacletObject[<|\"Name\" -> \"Pub/Name\", \"Version\" -> \"1.0.0\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"Pub`Name`\"}}|>]", "Text"];
+        Block[{runKernelScripts = Function[{runs, n, what}, AppendTo[got, {runs, n}]; <||>]},
+            pacletLoadedOnce[dir, {}, work, 60];
+            pacletLoadedOnce[plain, {}, work, 60]
+        ];
+        script = ReadString[got[[1, 1, 1, "Script"]]];
+        DeleteDirectory[#, DeleteContents -> True] & /@ {dir, plain, work};
+        {Length[got], got[[1, 2]], SyntaxQ[script], StringContainsQ[script, "Needs[\"Pub`Name`\"]"], StringFreeQ[script, "UsingFrontEnd"]}
+    ],
+    {1, 1, True, True, True},
+    TestID -> "Archive: before its shares start the paclet is loaded once, in one kernel with no front end, and a paclet with no context is not"
+]
+
+VerificationTest[
     Module[{dir = localFixture[], script},
         script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}];
         DeleteDirectory[dir, DeleteContents -> True];

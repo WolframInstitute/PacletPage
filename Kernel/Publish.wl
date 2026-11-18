@@ -2957,6 +2957,7 @@ buildPagesInParallel[source_String, docsDir_String, builtDocsDir_String, recordF
     work = CreateDirectory[];
     If[ ! DirectoryQ[builtDocsDir], CreateDirectory[builtDocsDir, CreateIntermediateDirectories -> True]];
     monitor["archive: " <> ToString[Length[changed]] <> " changed pages built in " <> ToString[n] <> " processes"];
+    pacletLoadedOnce[source, dependencies, work, limit];
     runs = pageShareRuns[source, docsDir, builtDocsDir, changed, n, limit, dependencies, work, "share"];
     runKernelScripts[runs, n, "archive: page shares"];
     unrecordedLogs[runs];
@@ -3017,6 +3018,24 @@ logTail[_, _] := "(no log)";
    documentation tree once, and two keep every process busy to the end; a share that has built
    none of its pages for a page's time and ten minutes, the time the stock build takes to read the
    tree first, has stalled *)
+(* The paclet loaded once, in a kernel of its own, before the shares start: each share loads it before
+   its front end, and a first load on a pod, which may write what later loads read and take the most
+   memory, is then never made by the shares side by side. Nothing where the paclet has no context. *)
+pacletLoadedOnce[source_String, dependencies_List, work_String, limit_] := With[{context = pacletContext[source], base = FileNameJoin[{work, "load"}]},
+    If[ StringQ[context],
+        Export[base <> ".wl", StringJoin[
+            $quietKernelCode,
+            "$ProgressReporting = False;\n",
+            "$Output = $Messages = {OpenWrite[", wlString[base <> ".log"], "]};\n",
+            dependencyLoadCode[dependencies],
+            "PacletDirectoryLoad[", wlString[source], "];\n",
+            "Needs[", wlString[context], "];\n",
+            $endScriptCode
+        ], "Text"];
+        runKernelScripts[{<|"Script" -> base <> ".wl", "Deadline" -> limit + 600, "Label" -> "archive: the paclet loaded once before its shares"|>}, 1, "archive: the paclet's first load"]
+    ]
+];
+
 pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_Integer, limit_, dependencies_List, work_String, kind_String, size_ : Automatic] := With[
     {shares = Partition[pages, UpTo[If[IntegerQ[size], size, Max[1, Ceiling[Length[pages] / (2 n)]]]]]},
     MapIndexed[
