@@ -3018,22 +3018,25 @@ logTail[_, _] := "(no log)";
    documentation tree once, and two keep every process busy to the end; a share that has built
    none of its pages for a page's time and ten minutes, the time the stock build takes to read the
    tree first, has stalled *)
-(* The paclet loaded once, in a kernel of its own, before the shares start: each share loads it before
-   its front end, and a first load on a pod, which may write what later loads read and take the most
-   memory, is then never made by the shares side by side. Nothing where the paclet has no context. *)
+(* What the shares load before their front ends, loaded once, in a kernel of its own, before they
+   start: the build's packages and the paclet. On a user base no kernel has used, loading them
+   installs paclets from the paclet server (DocumentationBuild's CloudObject, PLI and WFRCrosslinks,
+   and what the paclet's own loading pulls in), and kernels that install the same paclets at the same
+   moment crash: one maps a library another is still writing. This kernel installs them alone, in the
+   build's own process tree and user base, and the shares find them installed. *)
 pacletLoadedOnce[source_String, dependencies_List, work_String, limit_] := With[{context = pacletContext[source], base = FileNameJoin[{work, "load"}]},
-    If[ StringQ[context],
-        Export[base <> ".wl", StringJoin[
-            $quietKernelCode,
-            "$ProgressReporting = False;\n",
-            "$Output = $Messages = {OpenWrite[", wlString[base <> ".log"], "]};\n",
-            dependencyLoadCode[dependencies],
-            "PacletDirectoryLoad[", wlString[source], "];\n",
-            "Needs[", wlString[context], "];\n",
-            $endScriptCode
-        ], "Text"];
-        runKernelScripts[{<|"Script" -> base <> ".wl", "Deadline" -> limit + 600, "Label" -> "archive: the paclet loaded once before its shares"|>}, 1, "archive: the paclet's first load"]
-    ]
+    Export[base <> ".wl", StringJoin[
+        $quietKernelCode,
+        "$ProgressReporting = False;\n",
+        "$Output = $Messages = {OpenWrite[", wlString[base <> ".log"], "]};\n",
+        dependencyLoadCode[dependencies],
+        "PacletDirectoryLoad[", wlString[source], "];\n",
+        "Needs[\"PacletTools`\"];\n",
+        "Needs[\"DocumentationBuild`\"];\n",
+        If[StringQ[context], "Needs[" <> wlString[context] <> "];\n", ""],
+        $endScriptCode
+    ], "Text"];
+    runKernelScripts[{<|"Script" -> base <> ".wl", "Deadline" -> limit + 600, "Label" -> "archive: the build's packages and the paclet loaded once before its shares"|>}, 1, "archive: the first loads"]
 ];
 
 pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_Integer, limit_, dependencies_List, work_String, kind_String, size_ : Automatic] := With[

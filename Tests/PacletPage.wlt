@@ -1791,19 +1791,24 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{dir = localFixture[], plain = localFixture[], work = CreateDirectory[], got = {}, script},
+    Module[{dir = localFixture[], plain = localFixture[], work = CreateDirectory[], other = CreateDirectory[], got = {}, scripts},
         Export[FileNameJoin[{dir, "PacletInfo.wl"}],
             "PacletObject[<|\"Name\" -> \"Pub/Name\", \"Version\" -> \"1.0.0\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"Pub`Name`\"}}|>]", "Text"];
         Block[{runKernelScripts = Function[{runs, n, what}, AppendTo[got, {runs, n}]; <||>]},
             pacletLoadedOnce[dir, {}, work, 60];
-            pacletLoadedOnce[plain, {}, work, 60]
+            pacletLoadedOnce[plain, {}, other, 60]
         ];
-        script = ReadString[got[[1, 1, 1, "Script"]]];
-        DeleteDirectory[#, DeleteContents -> True] & /@ {dir, plain, work};
-        {Length[got], got[[1, 2]], SyntaxQ[script], StringContainsQ[script, "Needs[\"Pub`Name`\"]"], StringFreeQ[script, "UsingFrontEnd"]}
+        scripts = ReadString[#[[1, 1, "Script"]]] & /@ got;
+        DeleteDirectory[#, DeleteContents -> True] & /@ {dir, plain, work, other};
+        {
+            got[[All, 2]], SyntaxQ /@ scripts,
+            StringContainsQ[#, "Needs[\"DocumentationBuild`\"]"] & /@ scripts,
+            StringContainsQ[#, "Needs[\"Pub`Name`\"]"] & /@ scripts,
+            StringFreeQ[#, "UsingFrontEnd"] & /@ scripts
+        }
     ],
-    {1, 1, True, True, True},
-    TestID -> "Archive: before its shares start the paclet is loaded once, in one kernel with no front end, and a paclet with no context is not"
+    {{1, 1}, {True, True}, {True, True}, {True, False}, {True, True}},
+    TestID -> "Archive: before its shares start the build's packages and the paclet are loaded once, in one kernel with no front end"
 ]
 
 VerificationTest[
