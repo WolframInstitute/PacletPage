@@ -1747,6 +1747,23 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = localFixture[], plain = localFixture[], script, bare},
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}],
+            "PacletObject[<|\"Name\" -> \"Pub/Name\", \"Version\" -> \"1.0.0\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"Pub`Name`\"}}|>]", "Text"];
+        script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}, {"/w/asked.wl", "/w/answered.wl"}];
+        bare = pageShareScript[plain, FileNameJoin[{plain, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}, {"/w/asked.wl", "/w/answered.wl"}];
+        DeleteDirectory[dir, DeleteContents -> True]; DeleteDirectory[plain, DeleteContents -> True];
+        {
+            SyntaxQ[script],
+            StringPosition[script, "Needs[\"Pub`Name`\"]"] =!= {} && StringPosition[script, "Needs[\"Pub`Name`\"]"][[1, 1]] < StringPosition[script, "asked.wl"][[1, 1]] < StringPosition[script, "UsingFrontEnd["][[1, 1]],
+            StringFreeQ[bare, "Needs[\"Pub"]
+        }
+    ],
+    {True, True, True},
+    TestID -> "Archive: a page share loads the paclet's context before it asks for its front end, and a paclet with no context loads nothing"
+]
+
+VerificationTest[
     Module[{dir = localFixture[], script},
         script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}];
         DeleteDirectory[dir, DeleteContents -> True];

@@ -2713,6 +2713,9 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "pages = {", StringRiffle[wlString /@ pages, ", "], "};\n",
     "paclet = PacletObject[File[", wlString[source], "]];\n",
     "inputDir = ExpandFileName[", wlString[docsDir], "];\n",
+    (* the paclet loads before the front end starts, so that what its loading prints goes to the
+       log with no front end attached *)
+    Replace[pacletContext[source], {context_String :> "Needs[" <> wlString[context] <> "];\n", _ -> ""}],
     Replace[markers, {{asked_String, _String} :> "Put[0, " <> wlString[asked] <> "];\n", _ -> ""}],
     "result = UsingFrontEnd[",
     Replace[markers, {{_String, answered_String} :> "Rasterize[Graphics[{}], ImageSize -> 1]; Put[0, " <> wlString[answered] <> "]; ", _ -> ""}],
