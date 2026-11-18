@@ -434,6 +434,33 @@ VerificationTest[
 
 VerificationTest[
     {
+        strippedTitle /@ {"1. Basics", "2.3 Data", "4) Plots", "5: Sets", "06 - Notes", "3D Graphics", "2048 Games", "Basics", "7."},
+        SortBy[{"10. Ten", "2. Two", "1. One", "9. Nine"}, naturalKey]
+    },
+    {{"Basics", "Data", "Plots", "Sets", "Notes", "3D Graphics", "2048 Games", "Basics", "7."}, {"1. One", "2. Two", "9. Nine", "10. Ten"}},
+    TestID -> "Site: a title's numbering is a number and a dot, a parenthesis, a colon or a dash before it, and a title's digits order as its numbers"
+]
+
+VerificationTest[
+    With[{catalog = MapAt[
+            Join[#, <|
+                "tutorial/Ten" -> fixturePage["tutorial", "Ten", "10. Tenth Steps", "https://s.example/obj/store/N/ten.nb"],
+                "tutorial/Two" -> fixturePage["tutorial", "Two", "2. Second Steps", "https://s.example/obj/store/N/two.nb"],
+                "tutorial/One" -> fixturePage["tutorial", "One", "1. First Steps", "https://s.example/obj/store/N/one.nb"]|>] &,
+            repositoryCatalog, Key["Pages"]]},
+        {
+            StringCases[sidebarHTML[catalog, <||>], "data-id=\"" ~~ id : ("tutorial/" ~~ Except["\""] ..) ~~ "\"" :> id],
+            StringContainsQ[sidebarHTML[catalog, <||>], "href=\"#tutorial/Ten\">Tenth Steps</a>"],
+            StringContainsQ[sidebarHTML[catalog, <||>, True, False], "href=\"#tutorial/Ten\">10. Tenth Steps</a>"],
+            {StringContainsQ[PacletPageFiles[catalog]["index.html"], "10. Tenth Steps"], StringContainsQ[PacletPageFiles[catalog, "StripTitleNumbers" -> False]["index.html"], "10. Tenth Steps"]}
+        }
+    ],
+    {{"tutorial/One", "tutorial/Two", "tutorial/Ten", "tutorial/Intro", "tutorial/Use"}, True, True, {False, True}},
+    TestID -> "Site: numbered tutorials in the order of their numbers, 10 after 2, shown without the numbering unless \"StripTitleNumbers\" -> False"
+]
+
+VerificationTest[
+    {
         tutorialKey[fixturePage["tutorial", "Overview", "Zebra", ""]][[1]],
         railPage[Join[fixturePage["tutorial", "Tour", "A Name Overview", ""], <|"Overview" -> True|>]]["Title"],
         railPage[fixturePage["tutorial", "Intro", "Intro", ""]]["Title"],

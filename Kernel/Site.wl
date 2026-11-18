@@ -93,8 +93,27 @@ symbolKey[page_Association] := {StringStartsQ[page["Name"], "$"], ToLowerCase[pa
    the Overview template gives it *)
 overviewQ[page_Association] := TrueQ[Lookup[page, "Overview", False]] || (page["Kind"] === "tutorial" && page["Name"] === "Overview");
 
-(* the tutorials in the order of their titles, an Overview page first *)
-tutorialKey[page_Association] := {If[overviewQ[page], 0, 1], ToLowerCase[page["Title"]], page["Title"]};
+(* the tutorials in the order of their titles, an Overview page first, a title's digits read as its
+   numbers: a tutorial numbered 10 comes after one numbered 9 *)
+tutorialKey[page_Association] := {If[overviewQ[page], 0, 1], naturalKey[page["Title"]], page["Title"]};
+
+(* the guides no guide reaches, in the order of their titles *)
+guideKey[page_Association] := {naturalKey[page["Title"]], page["Title"]};
+
+(* a title in an order that reads each run of digits as its number: the runs padded to one width,
+   so that their characters compare as their values do *)
+naturalKey[s_String] := StringReplace[ToLowerCase[s], d : DigitCharacter .. :> IntegerString[FromDigits[d], 10, Max[12, StringLength[d]]]];
+
+(* A title's numbering: a number, or numbers joined by dots, before the title proper, parted from it
+   by a dot, a parenthesis, a colon or a dash and a space, as in "1. ", "2.3 ", "4) ", "5: " or "06 - ".
+   A number that is part of the title, as in "3D Graphics" or "2048 Games", is not one. *)
+$titleNumbering = RegularExpression["^\\s*(?:\\d+(?:\\.\\d+)*[.):]|\\d+(?:\\.\\d+)+|\\d+\\s*[-\\x{2013}\\x{2014}])\\s+(?=\\S)"];
+
+strippedTitle[title_String] := StringReplace[title, $titleNumbering -> "", 1];
+
+(* a tutorial or a guide as the rail shows it: its title without its numbering *)
+shownPage[page_Association] /; MemberQ[{"tutorial", "guide"}, page["Kind"]] && StringQ[page["Title"]] := Append[page, "Title" -> strippedTitle[page["Title"]]];
+shownPage[page_] := page;
 
 (* a page as the rail lists it: an Overview is labelled Overview, since the Overview template titles
    it after the paclet, as its root guide is, unless its title says Overview already *)
@@ -106,13 +125,16 @@ railPage[page_Association] := If[ overviewQ[page] && ! StringContainsQ[page["Tit
 (* the left rail: the resource's definition notebook, the root guide, unless rootGuide is False,
    and its tree, the guides it does not reach under a label of their own, then the tutorials and
    the applications (tutorials with the keyword "application") *)
-sidebarHTML[catalog_Association, notebooks_Association, rootGuide_ : True] := Module[
+sidebarHTML[catalog_Association, notebooks_Association, rootGuide_ : True, strip_ : True] := Module[
     {pages = catalog["Pages"], root = catalog["RootGuide"], tree, reached, others, tutorials, list, definitions},
     definitions = Select[Keys[pages], StringStartsQ[#, "resource/"] &];
     tree = If[KeyExistsQ[pages, root], guideTree[pages, root, {}], Nothing];
     reached = If[AssociationQ[tree], treeIDs[tree], {}];
-    others = Select[Keys[pages], StringStartsQ[#, "guide/"] && ! MemberQ[reached, #] &];
+    others = SortBy[Select[Keys[pages], StringStartsQ[#, "guide/"] && ! MemberQ[reached, #] &], guideKey[pages[#]] &];
     tutorials = SortBy[Select[Keys[pages], StringStartsQ[#, "tutorial/"] &], tutorialKey[pages[#]] &];
+    (* ordered by their numbered titles, the tutorials and guides are shown without the numbering
+       unless strip is False *)
+    If[TrueQ[strip], pages = Map[shownPage, pages]];
     list[ids_List, label_String, class_String] := If[ ids === {},
         "",
         StringJoin["<div class=\"nav-label\">", label, "</div><ul class=\"nav-tutorials\">",
@@ -277,7 +299,8 @@ Options[PacletPageFiles] = {
     "AllFeedbackLink" -> True,
     "VersionLabel" -> False,
     "Footer" -> False,
-    "RootGuide" -> True
+    "RootGuide" -> True,
+    "StripTitleNumbers" -> True
 };
 
 (* The label under the site's name: the version given, or with True the catalog's "Version", the
@@ -383,7 +406,7 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
             "resource" -> esc[catalog["Resource"]],
             "resourceLabel" -> Switch[kind, "cloud", "Resource page", "local", "Open page", _, "Paclet Repository"],
             "css" -> css,
-            "sidebar" -> sidebarHTML[catalog, notebooks, OptionValue["RootGuide"]],
+            "sidebar" -> sidebarHTML[catalog, notebooks, OptionValue["RootGuide"], OptionValue["StripTitleNumbers"]],
             "symbols" -> symbolsHTML[catalog, notebooks],
             "config" -> toJSON[shellConfig],
             "js" -> readAsset["site.js"]
