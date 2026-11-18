@@ -1757,6 +1757,29 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = localFixture[], nb, first, second, text, again, got},
+        nb = FileNameJoin[{dir, "ResourceDefinition.nb"}];
+        Export[nb, Notebook[{Cell[CellGroupData[{
+            Cell["Paclet Manifest", "Section", TaggingRules -> {"TemplateGroupName" -> "PacletManifest"}],
+            Cell[BoxData[TemplateBox[{}, "PacletDirectoryChooserTemplate"]], "PacletDirectoryChooser"]
+        }, Open]]}], "NB"];
+        first = fillPacletManifest[nb, dir];
+        text = ByteArrayToString[ReadByteArray[nb], "UTF-8"];
+        second = fillPacletManifest[nb, dir];
+        again = ByteArrayToString[ReadByteArray[nb], "UTF-8"];
+        got = Get[nb];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {
+            first, second,
+            StringContainsQ[text, "FileNameJoin[{NotebookDirectory[], \"PacletInfo.wl\"}]"], StringFreeQ[text, "pacletManifestPath"], text === again,
+            Count[got, Cell[_, "FileManagerTopSpacer", ___, CellTags -> {"FileManagerCell", "FileManager-PacletFiles"}, ___], Infinity]
+        }
+    ],
+    {True, True, True, True, True, 1},
+    TestID -> "Build: a definition notebook from markdown lists the paclet's files after its directory chooser, by paths relative to the notebook, the same each build"
+]
+
+VerificationTest[
     Module[{dir = localFixture[], built = CreateDirectory[], page = FileNameJoin[{"English", "Guides", "Name.nb"}], script, file, tidied, again},
         script = pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], built, {page}, "/w/r.wl", "/w/log.txt", {}];
         file = FileNameJoin[{built, page}];

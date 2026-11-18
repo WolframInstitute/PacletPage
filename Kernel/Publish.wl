@@ -1275,6 +1275,8 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
             Scan[DeleteFile, stale]; stale],
         {}
     ];
+    (* the definition notebook lists the paclet's files, as a front end's refresh of its template does *)
+    Scan[fillPacletManifest[#["Out"], dir] &, Select[ok, #Page === "ResourceDefinition" && FileExistsQ[#["Out"]] &]];
     flagged = flaggedPages[target];
     If[ flagged =!= <||>, Message[BuildPacletDocumentation::flagged, Length[flagged], Take[Normal[flagged], UpTo[10]]]];
     <|
@@ -1291,6 +1293,47 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
         "Unevaluated" -> unevaluated
     |>
 ];
+
+(* The paclet's files in the definition notebook's PacletManifest section, as a front end lists them
+   when it opens the notebook in the paclet folder: DefinitionNotebookClient's file tree of the folder
+   after the section's directory chooser, tagged FileManager-PacletFiles as the chooser tags it, each
+   path relative to the notebook's directory, FileNameJoin[{NotebookDirectory[], ...}]. A notebook
+   converted from markdown has the chooser alone, which leaves the resource page without the list and
+   the repository's check without a file cell for PacletInfo.wl. A path is made a placeholder of the
+   tree's own, pacletManifestPath[parts...], and written out as text, since a TemplateBox holds no argument
+   and NotebookDirectory[] needs a front end. True where the section was filled. *)
+fillPacletManifest[nbFile_String, dir_String] := Module[{nb, root = ExpandFileName[dir], tree, filled, text},
+    Needs["DefinitionNotebookClient`"];
+    nb = Get[nbFile];
+    tree = DefinitionNotebookClient`FileTreeCells["Paclet", root, "PacletFiles", "FilePathFunction" -> (manifestPathOf[root, #] &)];
+    If[ ! MatchQ[tree, Cell[_CellGroupData, ___]], Return[False, Module]];
+    tree = treeCellIDs[tree];
+    filled = ReplaceAll[nb,
+        CellGroupData[{header : Cell[_, "Section", ___, TaggingRules -> {___, "TemplateGroupName" -> "PacletManifest", ___}, ___], body___}, open_] :>
+            CellGroupData[{header, Sequence @@ DeleteCases[{body}, Cell[CellGroupData[{Cell[_, "FileManagerTopSpacer", ___], ___}, ___], ___]], tree}, open]
+    ];
+    If[ filled === nb, Return[False, Module]];
+    Export[nbFile, filled, "NB"];
+    text = ByteArrayToString[ReadByteArray[nbFile], "UTF-8"];
+    text = StringReplace[text,
+        ("WolframInstitute`PacletPage`Private`" | "") ~~ "pacletManifestPath[" ~~ args : Shortest[Except["]"] ..] ~~ "]" :>
+            "FileNameJoin[{NotebookDirectory[], " <> StringTrim[args] <> "}]"
+    ];
+    With[{stream = OpenWrite[nbFile, CharacterEncoding -> "UTF-8"]}, WriteString[stream, text]; Close[stream]];
+    True
+];
+(* each cell of the tree its ExpressionUUID from its place in the tree and its content, so that a
+   build writes the same notebook as the last, where Export would give a cell without one a new one;
+   a cell that only groups others has none, as Export gives a group's options to its first cell *)
+treeCellIDs[tree_] := Module[{k = 0},
+    Replace[tree, Cell[c : Except[_CellGroupData], o___] :> With[{rest = DeleteCases[{o}, ExpressionUUID -> _]},
+        Cell[c, Sequence @@ rest, ExpressionUUID -> hashUUID[{++k, c, rest}]]], All]
+];
+hashUUID[x_] := StringInsert[IntegerString[Hash[x, "MD5"], 16, 32], "-", {9, 13, 17, 21}];
+
+manifestPathOf[root_String, File[path_String]] := pacletManifestPath @@ FileNameSplit[StringDrop[path, StringLength[root] + 1]] /;
+    StringStartsQ[path, root <> $PathnameSeparator];
+manifestPathOf[_, other_] := other;
 
 (* ==================== deploying the paclet resource ==================== *)
 
@@ -3589,15 +3632,14 @@ submitPacletResource[dir_String, opts : OptionsPattern[SubmitPacletResource]] :=
     (* ResourceSubmit checks the PublisherID against $PublisherID, which is None until set *)
     $PublisherID = publisher;
     (* the repository refuses a definition notebook with errors, so they stop the submission
-       before the build; a definition notebook built from markdown has no file-manager cell
-       listing PacletInfo.wl, an error the scrape makes up for by attaching the built paclet *)
+       before the build; the build lists the paclet's files in it, PacletInfo.wl among them *)
     (* the check and the scrape reach the resource system, which needs a cloud session; an offline
        dry run builds and loads the archive only *)
     issues = If[ offline, {}, UsingFrontEnd @ Module[{notebook, check},
         notebook = NotebookOpen[definition, Visible -> False];
         check = DefinitionNotebookClient`CheckDefinitionNotebook[notebook];
         NotebookClose[notebook];
-        Select[Normal[check], #Level === "Error" && #Tag =!= "NoPacletInfoFileCell" &]
+        Select[Normal[check], #Level === "Error" &]
     ]
 ];
     If[ issues =!= {}, Message[SubmitPacletResource::check, Lookup[issues, "Tag"]]; Throw[$Failed, "submit"]];
