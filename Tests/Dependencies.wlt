@@ -123,6 +123,20 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{owner = testDependencyOwner[{"PacletTools"}, {"PacletPageTest/Absent"}]},
+        {UninstallPacletDependencies[owner, All], First[UninstallPacletDependencies[owner, "PacletTools"]["PacletTools"]],
+            Keys[UninstallPacletDependencies[testDependencyOwner[{"PacletTools"}, {}], All]]}],
+    {<|"PacletPageTest/Absent" -> Null|>, "RequiredDependency", {}},
+    TestID -> "Dependencies: bulk removal selects optional libraries and explicit required removals are protected"
+]
+
+VerificationTest[
+    dependencyRowActions /@ {<|"Required" -> True, "InstalledVersion" -> "1.0"|>,
+        <|"Required" -> False, "InstalledVersion" -> "1.0"|>, <|"Required" -> True, "InstalledVersion" -> Missing[]|>},
+    {{"Update"}, {"Update", "Uninstall"}, {"Install"}}, TestID -> "Dependencies: dialog actions protect required installations"
+]
+
+VerificationTest[
     Module[{source = CreateDirectory[], name = "Test" <> StringDelete[CreateUUID[], "-"]},
         WithCleanup[
             Put[PacletObject[<|"Name" -> name, "Version" -> "1.0"|>], FileNameJoin[{source, "PacletInfo.wl"}]];

@@ -64,7 +64,7 @@ InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] inst
 
 UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks the declared sources and upgrades the selected installed dependencies when a newer compatible version is available."
 
-UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes the selected dependencies from the current user's paclet repository."
+UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes selected optional dependencies from the current user's paclet repository. All selects every optional dependency."
 
 PacletDependencyDialog::usage = "PacletDependencyDialog[owner] opens a desktop dialog for checking, installing, updating and removing the owner's dependencies."
 

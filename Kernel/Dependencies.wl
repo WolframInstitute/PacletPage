@@ -70,8 +70,8 @@ withDependencySelection[ownerSpec_, selection_, action_] := Module[{owner = depe
     Block[{$refreshDependencySites = True}, action[owner, AssociationThread[names, Lookup[entries, names]]]]
 ]
 
-dependencyMap[action_, ownerSpec_, selection_] := withDependencySelection[ownerSpec, selection,
-    Function[{owner, entries}, If[dependencyCancelledQ[], dependencyCancelled[], action[owner, #]] & /@ entries]]
+dependencyMap[action_, ownerSpec_, selection_, filter_: Identity] := withDependencySelection[ownerSpec, selection,
+    Function[{owner, entries}, If[dependencyCancelledQ[], dependencyCancelled[], action[owner, #]] & /@ filter[entries]]]
 
 (* Exact-name lookups are cheaper for a small selection. For a long one the paclet manager can
    enumerate the same local index once. Keep its own version and directory precedence in each group. *)
@@ -138,7 +138,7 @@ InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), nam
 UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
     dependencyMap[dependencyInstall[#1, #2, True] &, owner, names]
 UninstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
-    dependencyMap[dependencyUninstall, owner, names]
+    dependencyMap[dependencyUninstall, owner, names, If[names === All, Select[! #["Required"] &], Identity]]
 
 dependencyChecked[owner_, entry_, paclet_] := Module[{readiness},
     If[KeyExistsQ[$dependencyRestarts, entry["Name"]] || ! KeyExistsQ[entry, "Check"], Return[paclet]];
@@ -170,7 +170,8 @@ dependencyInstall[owner_, entry_, update_] := Module[{name = entry["Name"], inst
     dependencyChecked[owner, entry, result]
 ]
 
-dependencyUninstall[_, entry_] := Module[{name = entry["Name"], userCopies, loaded, result},
+dependencyUninstall[owner_, entry_] := Module[{name = entry["Name"], userCopies, loaded, result},
+    If[entry["Required"], Return[dependencyFailure["RequiredDependency", "`1` requires `2`.", owner["Name"], name]]];
     userCopies = PacletFind[name, "Location" -> FileNameJoin[{$UserBasePacletsDirectory, "Repository"}],
         "WolframVersion" -> All, "SystemID" -> All, "Enabled" -> All];
     If[userCopies === {}, Return[If[PacletFind[name] === {}, Null,

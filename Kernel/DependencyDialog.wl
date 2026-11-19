@@ -43,6 +43,12 @@ dependencyVersions[row_] := StringRiffle[{
     Switch[Lookup[row, "LatestVersion", None], _String, "Latest " <> row["LatestVersion"], _Failure, "Latest unavailable", _, Nothing]
 }, "    "]
 
+dependencyRowActions[row_] := Which[
+    ! StringQ[row["InstalledVersion"]], {"Install"},
+    TrueQ[row["Required"]], {"Update"},
+    True, {"Update", "Uninstall"}
+]
+
 (* Redraw the rows only when their data change. Progress updates touch just the footer. *)
 dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
     {rows = initial, notices = <||>, copied = None, busy = False, cancelled = False, stage = "", fraction = None,
@@ -91,17 +97,17 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
                 StringQ[rows[name]["InstalledVersion"]] && action === "Update", "Update check complete.",
                 True, "Installation complete."];
             copied = None]];
-        rowPanel[name_, row_] := With[{installed = StringQ[row["InstalledVersion"]], supported = row["Status"] =!= "Unsupported"},
+        rowPanel[name_, row_] := With[{actions = dependencyRowActions[row], supported = row["Status"] =!= "Unsupported"},
             Grid[{{Pane[dependencyDetails[row], ImageSize -> Full, Alignment -> Left],
                 Column[DeleteCases[{
                     Style[row["Status"], Bold], Replace[dependencyVersions[row], "" -> Nothing],
                     Row[Riffle[Map[Function[action, Button[action, perform[name, action], Method -> "Queued",
                         Enabled -> Dynamic[! busy && (supported || action === "Uninstall")]]],
-                        If[installed, {"Update", "Uninstall"}, {"Install"}]], Spacer[6]]],
-                    With[{action = If[installed, "Uninstall", "Install"]},
+                        actions], Spacer[6]]],
+                    With[{action = Last[actions]},
                         Button[If[copied === name, "Copied", "Copy " <> ToLowerCase[action] <> " command"],
                             CopyToClipboard[dependencyCommand[commandOwner, action, name]]; copied = name,
-                            Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[! busy && (supported || installed)]]],
+                            Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[! busy && (supported || action === "Uninstall")]]],
                     Lookup[notices, name, Which[
                         FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"],
                         FailureQ[row["LatestVersion"]], row["LatestVersion"]["Message"], True, Nothing]]
