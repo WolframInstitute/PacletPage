@@ -59,21 +59,32 @@ dependencyDialogRows[rows_] := With[{counts = Counts[dependencyShortName /@ Keys
         name -> dependencyDialogRow[row, If[counts[short] === 1, short, name]]]], rows]
 ]
 
+dependencyReadinessSummary[rows_] := Module[{states, passed, failed, skipped},
+    states = #["Status"] & /@ Values[Select[rows, AssociationQ]];
+    passed = Count[states, "Ready"];
+    failed = Count[states, "Needs setup"];
+    skipped = Length[states] - passed - failed;
+    If[states === {}, "No libraries to check.", StringRiffle[{
+        If[passed > 0, ToString[passed] <> " passed", Nothing],
+        If[failed > 0, ToString[failed] <> " failed", Nothing],
+        If[skipped > 0, ToString[skipped] <> " skipped", Nothing]}, ", "]]
+]
+
 (* Both buttons occupy the same space while idle, checking, and stopping. *)
 SetAttributes[dependencyCheckControl, HoldRest]
 dependencyCheckControl[label_String, hint_String, start_, operation_, cancelled_] := PaneSelector[{
     False -> Tooltip[Button[label, start, Enabled -> Dynamic[operation === None], Method -> "Queued",
-        ImageSize -> {128, 26}], hint],
+        ImageSize -> {140, 26}], hint],
     True -> Tooltip[Button[Row[{ProgressIndicator[Appearance -> "Necklace", ImageSize -> {14, 14}], Spacer[6],
             Dynamic[If[cancelled, "Stopping…", "Cancel check"]]}],
-        cancelled = True, Enabled -> Dynamic[! cancelled], Method -> "Preemptive", ImageSize -> {128, 26}],
+        cancelled = True, Enabled -> Dynamic[! cancelled], Method -> "Preemptive", ImageSize -> {140, 26}],
         "Stop after the current library."]
 }, Dynamic[operation === label], ImageSize -> All]
 
 (* Redraw the rows only when their data change. Progress updates touch just the footer. *)
 dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
         initialRows = dependencyDialogRows[initial], heading = dependencyDialogHeading[initial], packageFile = FileNameJoin[{$packageDirectory, "PacletPage.wl"}]}, DynamicModule[
-    {rows = initialRows, notices = <||>, copied = None, operation = None, cancelled = False, stage = "", fraction = None,
+    {rows = initialRows, notices = <||>, copied = None, feedback = "", operation = None, cancelled = False, stage = "", fraction = None,
         run, refresh, perform, rowPanel},
     Framed[Column[{
         Column[{Style[heading, 18, Bold], "Install, upgrade, or remove libraries as needed."}, Alignment -> Left, Spacings -> .6],
@@ -86,11 +97,12 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
             Button["Cancel", cancelled = True; cancelDependencyDownload[], Method -> "Preemptive",
                 Enabled -> Dynamic[! cancelled && MemberQ[{"Checking release", "Downloading", "Retrying"}, stage]]]}], Spacer[{0, 0}]],
             TrackedSymbols :> {operation, stage, fraction}],
-        Grid[{{Row[{
+        Grid[{{Grid[{{
             dependencyCheckControl["Check readiness", "Test whether installed libraries work in this kernel.",
-                refresh[True], operation, cancelled], Spacer[8],
+                refresh[True], operation, cancelled],
             dependencyCheckControl["Check for updates", "Look up the latest compatible versions.",
-                refresh[False], operation, cancelled]}],
+                refresh[False], operation, cancelled],
+            dependencyMetaStyle[Dynamic[feedback, TrackedSymbols :> {feedback}]]}}, Alignment -> {Left, Center}, Spacings -> {.6, 0}],
             DefaultButton["Close", cancelled = True; If[operation =!= None, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
             ItemSize -> {{Scaled[.72], Scaled[.28]}}, Alignment -> {{Left, Right}, Center}]
     }, ItemSize -> {{Scaled[1]}}, Spacings -> 1.3, Alignment -> Left, Dividers -> {False, {False, False, False, GrayLevel[.85], False}}], FrameMargins -> 16, FrameStyle -> None],
@@ -98,7 +110,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
         If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Get[packageFile]]];
         SetAttributes[run, HoldRest];
         run[caption_, expr_] := If[operation === None, WithCleanup[
-            operation = caption; cancelled = False; stage = caption; fraction = None; FinishDynamic[];
+            operation = caption; cancelled = False; feedback = ""; stage = caption; fraction = None; FinishDynamic[];
             Block[{dependencyCancelledQ = Function[Null, cancelled],
                     $dependencyProgress = Function[{step, value}, stage = step; fraction = value; FinishDynamic[]]}, expr],
             operation = None; stage = ""; fraction = None; FinishDynamic[]]];
@@ -109,7 +121,9 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                         If[! AssociationQ[new], old, dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], new,
                             If[! probe && new["Status"] === "Installed" && old["InstalledVersion"] === new["InstalledVersion"],
                                 KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]]]]], Keys[fresh]];
-                    notices = (#["Message"] & /@ Select[fresh, FailureQ[#] && First[#] =!= "DependencyCancelled" &]) ]]];
+                    notices = (#["Message"] & /@ Select[fresh, FailureQ[#] && First[#] =!= "DependencyCancelled" &]);
+                    feedback = Which[cancelled, "Check stopped.", probe, dependencyReadinessSummary[fresh], True, ""],
+                    If[FailureQ[fresh], feedback = fresh["Message"]]]]];
         perform[name_, action_] := run[action, Module[{result, fresh},
             result = dependencyAction[action][owner, name];
             result = If[AssociationQ[result], result[name], result];
@@ -118,14 +132,15 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
             If[rows[name]["Status"] === "Installed" && KeyExistsQ[rows[name], "Check"],
                 Which[MatchQ[result, Failure["DependencySetupRequired", _]], rows[name] = Append[rows[name], "Status" -> "Needs setup"],
                     MatchQ[result, _PacletObject], rows[name] = Append[rows[name], "Status" -> "Ready"]]];
-            notices[name] = Which[FailureQ[result], result["Message"], action === "Uninstall", "Removed from the user repository.",
+            notices[name] = Which[FailureQ[result], result["Message"],
+                rows[name]["Status"] === "Restart required", "Restart the kernel to use the changed library.",
+                action === "Uninstall", "Removed from the user repository.",
                 StringQ[rows[name]["InstalledVersion"]] && action === "Update", "Update check complete.",
                 True, "Installation complete."];
             copied = None]];
         rowPanel[name_, row_] := With[{actions = row["Actions"], supported = row["Status"] =!= "Unsupported"},
             Grid[{{Pane[row["Details"], ImageSize -> Full, Alignment -> Left],
                 Column[DeleteCases[{
-                    row["Status"],
                     Row[Riffle[Map[Function[action, Button[If[action === "Update", "Upgrade", action], perform[name, action], ImageSize -> {100, Automatic}, Method -> "Queued",
                         Enabled -> Dynamic[operation === None && (supported || action === "Uninstall")]]],
                         actions], Spacer[6]]],
@@ -135,7 +150,9 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                             Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[operation === None && (supported || action === "Uninstall")]]]],
                     Lookup[notices, name, Which[
                         FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"],
-                        FailureQ[row["LatestVersion"]], row["LatestVersion"]["Message"], True, Nothing]]
+                        FailureQ[row["LatestVersion"]], row["LatestVersion"]["Message"],
+                        ! supported, "No release for " <> $SystemID <> ".",
+                        row["Status"] === "Restart required", "Restart the kernel to use the changed library.", True, Nothing]]
                 }, Nothing], Alignment -> Right, Spacings -> .5]}}, ItemSize -> {{Scaled[.65], Scaled[.35]}}, Alignment -> {{Left, Right}, Top}]]
     ),
     Deinitialization :> (cancelled = True; If[operation =!= None, cancelDependencyDownload[]]),

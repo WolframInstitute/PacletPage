@@ -245,6 +245,13 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{rows = AssociationMap[<|"Status" -> #|> &, {"Ready", "Needs setup", "Not installed", "Version mismatch", "Installed"}]},
+        dependencyReadinessSummary /@ {<||>, KeyTake[rows, {"Ready"}], KeyDrop[rows, {"Ready", "Needs setup"}], rows}],
+    {"No libraries to check.", "1 passed", "3 skipped", "1 passed, 1 failed, 3 skipped"},
+    TestID -> "Dependencies: the readiness summary counts actual probes and distinguishes skipped libraries"
+]
+
+VerificationTest[
     Module[{source = CreateDirectory[], name = "Test" <> StringDelete[CreateUUID[], "-"]},
         WithCleanup[
             Put[PacletObject[<|"Name" -> name, "Version" -> "1.0"|>], FileNameJoin[{source, "PacletInfo.wl"}]];
