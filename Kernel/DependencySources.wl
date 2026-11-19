@@ -11,6 +11,8 @@ dependencyArchivePath[owner_, path_String] := If[StringStartsQ[path, "/" | "\\"]
     File[FileNameJoin[{owner["Location"], path}]]
 ]
 
+$dependencyInternetMessage = "Wolfram internet access is disabled. Enable it in Internet & Mail Settings, then try again."
+
 (* The lightweight cloud metadata contains the version. Fetch the larger description and the
    archive only after the version comparison. Keep public requests independent of cloud sign-in. *)
 dependencyResourceMetadata[url_] := Block[{$ProgressReporting = False, CloudConnect = ($Failed &)},
@@ -29,6 +31,7 @@ dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup
                 Return[dependencyFailure["DependencyArchive", "The archive `1` does not contain `2`.", archive, name]]];
             <|"Version" -> p["Version"], "Archive" -> archive|>,
         KeyExistsQ[entry, "Resource"],
+            If[$AllowInternet === False, Return[dependencyFailure["DependencyInternetDisabled", $dependencyInternetMessage]]];
             meta = dependencyResourceMetadata[entry["Resource"]];
             If[! AssociationQ[meta] || Lookup[meta, "Name"] =!= name || Lookup[meta, "ResourceType"] =!= "Paclet" ||
                     ! MatchQ[Lookup[meta, "ResourceLocation"], CloudObject[_String, ___]],

@@ -159,6 +159,21 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{name = "PacletPageTest/Remote", resource = "https://www.wolframcloud.com/obj/demo/library", owner, lookups = 0, offline, online},
+        owner = testDependencyOwner[{}, {<|"Name" -> name, "Resource" -> resource|>}];
+        Block[{dependencyResourceMetadata = Function[url, lookups++;
+                <|"Name" -> name, "ResourceType" -> "Paclet", "PacletVersion" -> "2.0", "ResourceLocation" -> CloudObject[resource]|>]},
+            offline = Block[{$AllowInternet = False},
+                {First[PacletDependencyInformation[owner, name, "CheckUpdates" -> True][name]["LatestVersion"]],
+                 First[InstallPacletDependencies[owner, name][name]], lookups}];
+            online = Block[{$AllowInternet = True, $AllowDataUpdates = False},
+                PacletDependencyInformation[owner, name, "CheckUpdates" -> True][name]["LatestVersion"]]];
+        {offline, online, lookups}],
+    {{"DependencyInternetDisabled", "DependencyInternetDisabled", 0}, "2.0", 1},
+    TestID -> "Dependencies: an offline cloud check or install makes no request and an explicit retry works with automatic updates disabled"
+]
+
+VerificationTest[
     Module[{owner = testDependencyOwner[{}, {"Demo/First", "Demo/Second"}]},
         Block[{dependencyRelease = Function[{p, entry}, If[entry["Name"] === "Demo/First", dependencyFailure["Network", "Offline."], <|"Version" -> "1.0"|>]]},
             With[{rows = PacletDependencyInformation[owner, "CheckUpdates" -> True]},
@@ -377,7 +392,7 @@ VerificationTest[
             DeleteFile[offered];
             With[{repeat = InstallPacletDependencies[owner, name][name]},
                 selectVersion["1.10.0"];
-                With[{offeredVersion = PacletDependencyInformation[owner, name, "CheckUpdates" -> True][name]["LatestVersion"],
+                With[{offeredVersion = Block[{$AllowInternet = False}, PacletDependencyInformation[owner, name, "CheckUpdates" -> True][name]["LatestVersion"]],
                       updated = UpdatePacletDependencies[owner, name][name]},
                     selectVersion["1.9.0"];
                     With[{retained = UpdatePacletDependencies[owner, name][name]},

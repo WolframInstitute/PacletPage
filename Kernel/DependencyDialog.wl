@@ -104,7 +104,9 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
     {rows = initialRows, notices = <||>, copied = None, operation = None, cancelled = False, stage = "", fraction = None,
         run, startCheck, refresh, perform, rowPanel},
     Framed[Column[{
-        Column[{Style[heading, 18, Bold], "Install, upgrade, or remove libraries as needed."}, Alignment -> Left, Spacings -> .6],
+        Column[{Style[heading, 18, Bold], PaneSelector[{True -> $dependencyInternetMessage},
+            Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyInternetDisabled"}]],
+            "Install, upgrade, or remove libraries as needed."]}, Alignment -> Left, Spacings -> .6],
         Dynamic[If[rows === <||>, "This paclet declares no dependencies.",
             Pane[Column[KeyValueMap[rowPanel, rows],
                     ItemSize -> {{Scaled[1]}}, Spacings -> 1.2],
@@ -152,10 +154,14 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                         If[! probe && new["Status"] === "Installed" && old["InstalledVersion"] === new["InstalledVersion"],
                             KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]];
                     If[KeyExistsQ[new, "LatestVersion"],
-                        CurrentValue[nb, {TaggingRules, "DependencyVersions", name}] = Replace[new["LatestVersion"], _Failure -> "Unavailable"]];
+                        CurrentValue[nb, {TaggingRules, "DependencyVersions", name}] = Replace[new["LatestVersion"],
+                            {Failure["DependencyInternetDisabled", _] -> "Offline", _Failure -> "Unavailable"}]];
                     KeyDropFrom[notices, name],
                     {name, Keys[entries]}]
             ]]];
+            If[! probe && MemberQ[Notebooks[], nb],
+                CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] =
+                    MemberQ[Lookup[Values[rows], "LatestVersion", None], Failure["DependencyInternetDisabled", _]]];
             Which[FailureQ[outcome], outcome["Message"], cancelled, "Check stopped.",
                 probe, dependencyReadinessSummary[rows], True, ""]
         ];
@@ -185,7 +191,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                             Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[operation === None && (supported || action === "Uninstall")]]]],
                     Lookup[notices, name, Which[
                         FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"],
-                        FailureQ[row["LatestVersion"]], row["LatestVersion"]["Message"],
+                        MatchQ[row["LatestVersion"], Failure[Except["DependencyInternetDisabled"], _]], row["LatestVersion"]["Message"],
                         ! supported, "No release for " <> $SystemID <> ".",
                         row["Status"] === "Restart required", "Restart the kernel to use the changed library.", True, Nothing]]
                 }, Nothing], Alignment -> Right, Spacings -> .5]}}, ItemSize -> {{Scaled[.65], Scaled[.35]}}, Alignment -> {{Left, Right}, Top}]]
@@ -206,7 +212,7 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope :
     If[scope === "Optional", rows = Select[rows, ! TrueQ[#["Required"]] &]];
     dialog = With[{name = owner["Name"], location = key}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows],
         WindowTitle -> dependencyShortName[name] <> ": " <> dependencyDialogHeading[rows], WindowSize -> {740, All}, WindowFrame -> "Normal",
-        WindowFrameElements -> {"CloseBox", "ResizeArea"}, TaggingRules -> <|"DependencyCheck" -> None, "DependencyCheckFeedback" -> "",
+        WindowFrameElements -> {"CloseBox", "ResizeArea"}, TaggingRules -> <|"DependencyCheck" -> None, "DependencyCheckFeedback" -> "", "DependencyInternetDisabled" -> False,
             "DependencyVersions" -> AssociationMap["Not checked" &, Keys[rows]]|>,
         NotebookEventActions -> {"WindowClose" :> (dependencyRemember[name]; KeyDropFrom[$dependencyDialogs, {location}]), PassEventsDown -> True}]];
     If[MatchQ[dialog, _NotebookObject], AssociateTo[$dependencyDialogs, key -> dialog]];
