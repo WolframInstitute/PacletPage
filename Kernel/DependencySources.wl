@@ -1,27 +1,29 @@
 (* ::Package:: *)
 
-$dependencyProgress = (Null &);
-dependencyCancelledQ[] := False;
-cancelDependencyDownload[] := Null;
-dependencyCancelled[] := dependencyFailure["DependencyCancelled", "The operation was cancelled."];
+$dependencyProgress = (Null &)
+dependencyCancelledQ[] := False
+cancelDependencyDownload[] := Null
+dependencyCancelled[] := dependencyFailure["DependencyCancelled", "The operation was cancelled."]
 
 dependencyArchivePath[owner_, path_String] := If[StringStartsQ[path, "/" | "\\"] || StringContainsQ[path, ":"] ||
         MemberQ[FileNameSplit[path], ".."] || ! StringQ[owner["Location"]],
     dependencyFailure["DependencyArchive", "Give a .paclet archive relative to the consumer directory."],
     File[FileNameJoin[{owner["Location"], path}]]
-];
+]
 
 (* The lightweight cloud metadata contains the version. Fetch the larger description and the
    archive only after the version comparison. Keep public requests independent of cloud sign-in. *)
 dependencyResourceMetadata[url_] := Block[{$ProgressReporting = False, CloudConnect = ($Failed &)},
     Quiet[TimeConstrained[Association[MetaInformation /. Options[CloudObject[url], MetaInformation]], 20, $Failed]]
-];
+]
 
 dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup[entry, "Version", All], release, archive, p, meta, candidates},
     release = Which[
         KeyExistsQ[entry, "Archive"],
             archive = dependencyArchivePath[owner, entry["Archive"]];
             If[FailureQ[archive], Return[archive]];
+            If[FileType[First[archive]] =!= File || ToLowerCase[FileExtension[First[archive]]] =!= "paclet",
+                Return[dependencyFailure["DependencyArchive", "The paclet archive `1` could not be found.", archive]]];
             p = Quiet[PacletObject[archive]];
             If[! MatchQ[p, _PacletObject] || p["Name"] =!= name,
                 Return[dependencyFailure["DependencyArchive", "The archive `1` does not contain `2`.", archive, name]]];
@@ -41,15 +43,15 @@ dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup
     ];
     If[dependencyVersionQ[release["Version"]] && dependencyCompatibleQ[release["Version"], spec], release,
         dependencyFailure["DependencyVersion", "Release `1` of `2` does not satisfy the requested version `3`.", release["Version"], name, spec]]
-];
+]
 
 (* Resolve only literal fields, keeping all other publisher expressions held. Platform resources
    published for bundled libraries select a record by $SystemID before constructing ResourceObject. *)
-dependencyResourceRecord[HoldComplete[ResourceObject[a_Association]], _] := HoldComplete[a];
+dependencyResourceRecord[HoldComplete[ResourceObject[a_Association]], _] := HoldComplete[a]
 dependencyResourceRecord[HoldPattern[HoldComplete[If[KeyExistsQ[_Association, $SystemID],
         ResourceObject[(entries_Association)[$SystemID]], _]]], system_] :=
-    FirstCase[HoldComplete[entries], HoldPattern[Rule[system, a_Association]] :> HoldComplete[a], None, {2}];
-dependencyResourceRecord[_, _] := None;
+    FirstCase[HoldComplete[entries], HoldPattern[Rule[system, a_Association]] :> HoldComplete[a], None, {2}]
+dependencyResourceRecord[_, _] := None
 
 dependencyArchiveURL[text_String, name_, version_, system_] := Module[{held, record, strings, platforms, archives},
     held = Block[{$Context = "WolframInstitute`PacletPage`ResourceDescription`", $ContextPath = {"System`"}}, Quiet[ToExpression[text, InputForm, HoldComplete]]];
@@ -63,7 +65,7 @@ dependencyArchiveURL[text_String, name_, version_, system_] := Module[{held, rec
                 MatchQ[platforms, {HoldComplete[{___String}]}] && MemberQ[First[platforms], system, {2}]) &&
             MatchQ[archives, {_String?dependencyHTTPQ}], First[archives],
         dependencyFailure["DependencyRelease", "The published archive does not match `1` `2` on `3`.", name, version, system]]
-];
+]
 
 (* A deployed resource may put files elsewhere under the same publisher's cloud directory. *)
 dependencyPublisherURLQ[resource_, url_] := Module[{base = URLParse[resource], target = URLParse[url], path},
@@ -71,7 +73,7 @@ dependencyPublisherURLQ[resource_, url_] := Module[{base = URLParse[resource], t
     If[MatchQ[path, {"obj" | "env", _String, ___}], path = Take[path, 2], path = {}];
     dependencyHTTPQ[url] && KeyTake[base, {"Scheme", "Domain", "Port", "User"}] === KeyTake[target, {"Scheme", "Domain", "Port", "User"}] &&
         ! MemberQ[target["Path"], ".." | "."] && Take[Rest[target["Path"]], UpTo[Length[path]]] === path
-];
+]
 
 dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text, url, resource, desc},
     Which[
@@ -89,7 +91,7 @@ dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text
             If[! dependencyPublisherURLQ[resource, url], Return[dependencyFailure["DependencyPublisher", "Unexpected archive address for `1`.", name]]];
             dependencyDownloadInstall[url, name, release["Version"]]
     ]
-];
+]
 
 dependencyInstallFile[source_, name_, version_] := Module[{p, result},
     p = If[MatchQ[source, _PacletObject], source, Quiet[PacletObject[source]]];
@@ -100,7 +102,7 @@ dependencyInstallFile[source_, name_, version_] := Module[{p, result},
     result = Quiet[PacletInstall[source]];
     Which[FailureQ[result], result, MatchQ[result, _PacletObject] && result["Name"] === name && result["Version"] === version, result,
         True, dependencyFailure["DependencyInstallFailed", "Could not install `1` `2`.", name, version]]
-];
+]
 
 (* TaskWait wakes on cancellation even if a stalled server never sends a progress event. *)
 dependencyDownloadAttempt[url_, file_] := Module[{response = <||>, task},
@@ -119,7 +121,7 @@ dependencyDownloadAttempt[url_, file_] := Module[{response = <||>, task},
             True, File[file]],
         If[MatchQ[task, _TaskObject] && task["TaskStatus"] =!= "Removed", TaskRemove[task]]
     ]
-];
+]
 
 dependencyDownloadInstall[url_, name_, version_] := Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["paclet-"] <> ".paclet"}], download},
     WithCleanup[
@@ -130,4 +132,4 @@ dependencyDownloadInstall[url_, name_, version_] := Module[{file = FileNameJoin[
         If[FailureQ[download], download, dependencyInstallFile[download, name, version]],
         If[FileExistsQ[file], DeleteFile[file]]
     ]
-];
+]

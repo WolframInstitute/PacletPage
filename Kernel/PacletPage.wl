@@ -58,13 +58,13 @@ graph of the uses.";
 PacletPageDependencies::usage = "PacletPageDependencies[dir, file] gives what a markdown page of the paclet in dir depends \
 on: the symbols it names, every symbol those reach, and the code its cache key holds.";
 
-PacletDependencyInformation::usage = "PacletDependencyInformation[owner] lists the dependencies in the owner's PacletInfo.wl and their local status. PacletDependencyInformation[owner, names] selects specific dependencies.";
+PacletDependencyInformation::usage = "PacletDependencyInformation[owner] lists the dependencies in the owner's PacletInfo.wl and their local status. PacletDependencyInformation[owner, names] selects specific dependencies."
 
-InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] installs the selected dependencies and checks their readiness. Give one name, a list of names, or All.";
+InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] installs the selected dependencies and checks their readiness. Give one name, a list of names, or All."
 
-UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks the declared sources and upgrades the selected installed dependencies when a newer compatible version is available.";
+UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks the declared sources and upgrades the selected installed dependencies when a newer compatible version is available."
 
-UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes the selected dependencies from the current user's paclet repository.";
+UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes the selected dependencies from the current user's paclet repository."
 
 
 BuildPacletDocumentation::usage = "BuildPacletDocumentation[dir] converts the markdown documentation of the paclet in \
