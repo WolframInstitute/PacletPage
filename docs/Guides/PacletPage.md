@@ -7,7 +7,8 @@ Paclet: WolframInstitute/PacletPage
 URI: WolframInstitute/PacletPage/guide/PacletPage
 Description: Build, publish and maintain a paclet's documentation, from markdown to a site around its published pages.
 Keywords: [paclet, documentation, website, Paclet Repository, cloud, feedback, permissions, markdown, submission]
-RelatedTutorials: [PublishingADocumentationSite, CachingADocumentationBuild]
+RelatedGuides: [PacletDependencyManagement]
+RelatedTutorials: [PublishingADocumentationSite, CachingADocumentationBuild, DependencyManagement]
 ---
 
 ## Abstract
@@ -40,3 +41,8 @@ PacletPage takes a paclet from the markdown in its `docs/` folder to a published
 ### Maintenance
 - `SetPacletPagePermissions` set permissions on a cloud directory tree, directory by directory
 - `CheckPacletPage` check that a site, its pages and its feedback form are reachable
+
+### [Paclet Dependency Management](paclet:WolframInstitute/PacletPage/guide/PacletDependencyManagement)
+
+- `PacletDependencyInformation` read the required and optional libraries declared by a paclet
+- `PacletDependencyDialog` manage them in a desktop notebook
