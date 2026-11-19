@@ -2156,6 +2156,33 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], file, done, after},
+        file = FileNameJoin[{dir, "page.md"}];
+        Export[file, "page", "Text"];
+        done = convertPage[Function[{source, work}, Abort[]], <|"File" -> file, "Work" -> FileNameJoin[{dir, "page.nb"}], "UseCache" -> False, "Options" -> {}|>, 60];
+        after = "went on";
+        DeleteDirectory[dir, DeleteContents -> True];
+        {done["OK"], done["Result"], after}
+    ],
+    {False, $Aborted, "went on"},
+    TestID -> "Build: an abort in a page's conversion ends as that page's failure, and the build goes on"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], log, out = {}},
+        log = FileNameJoin[{dir, "share-3.log"}];
+        Export[log, StringRiffle[Table["line " <> IntegerString[i], {i, 250}], "\n"], "Text"];
+        Block[{monitor = Function[s, AppendTo[out, s]]},
+            unrecordedLogs[{<|"Label" -> "archive: share 3 of 8", "Pages" -> {"a.nb", "b.nb"}, "Record" -> FileNameJoin[{dir, "none.wl"}], "Log" -> log|>}]
+        ];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {Length[out], out[[2]], out[[3]], Last[out]}
+    ],
+    {202, "archive: share 3 of 8 left: a.nb, b.nb", "archive: share 3 of 8 log: line 51", "archive: share 3 of 8 log: line 250"},
+    TestID -> "Archive: a share that recorded none of its pages names them and prints the end of its log a line each"
+]
+
+VerificationTest[
     Module[{dir = localFixture[], work = CreateDirectory[], runs, alone},
         runs = pageShareRuns[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", Table["p" <> IntegerString[i] <> ".nb", {i, 100}], 4, 900, {}, work, "share"];
         alone = pageShareRuns[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {"a.nb", "b.nb", "c.nb"}, 4, 900, {}, work, "alone", 1];

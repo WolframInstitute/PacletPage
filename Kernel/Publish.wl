@@ -847,7 +847,9 @@ closeEvaluationKernels[] := With[{own = Select[Keys[$evaluationKernels], First[#
 convertPage[convert_, task_Association, limit_] := globalsClearedAfter[globalState[], Module[
     {work = task["Work"], run, result, evaluation = Lookup[task, "Evaluation", None], kernel = None},
     If[ FileExistsQ[work], DeleteFile[work]];
-    run = EvaluationData[TimeConstrained[
+    (* an abort in a page, from its examples or from the converter, ends as that page's failure rather
+       than the build's: caught outside the page's time limit, so that a time-out stays one *)
+    run = EvaluationData[CheckAbort[TimeConstrained[
         withExampleStore[task, If[ AssociationQ[evaluation],
             Catch[
                 kernel = pageEvaluationKernel[evaluation];
@@ -857,17 +859,17 @@ convertPage[convert_, task_Association, limit_] := globalsClearedAfter[globalSta
             convert[task["File"], work, "UseCache" -> task["UseCache"], Sequence @@ task["Options"]]
         ]],
         limit, $TimedOut
-    ]
+    ], $Aborted]
 ];
     result = run["Result"];
     If[ AssociationQ[evaluation], pageEvaluationDone[evaluation, kernel, ! MatchQ[result, _?FailureQ | $TimedOut | $Aborted]]];
     <|
         "OK" -> Which[
-            FailureQ[result], False,
+            FailureQ[result] || result === $Aborted, False,
             result === $TimedOut, FileExistsQ[work] && SyntaxQ[ReadString[work]],
             True, FileExistsQ[work]
         ],
-        "Result" -> If[FailureQ[result] || result === $TimedOut, result, Null],
+        "Result" -> If[FailureQ[result] || result === $TimedOut || result === $Aborted, result, Null],
         "Unevaluated" -> sectionReports[run["MessagesExpressions"]]
     |>
 ]];
@@ -3002,13 +3004,24 @@ unrecordedLogs[runs_List] := Scan[
     Function[run, With[{left = Complement[run["Pages"], Keys[readRecord[run["Record"]]]]},
         If[ left =!= {},
             monitor[run["Label"] <> " recorded " <> ToString[Length[run["Pages"]] - Length[left]] <> " of " <> ToString[Length[run["Pages"]]] <> " pages; its log ends: " <>
-                logTail[run["Log"], 12]]]
+                logTail[run["Log"], 12]];
+            (* the pages it left and the end of its log, a line each, in the build's own output: a
+               build on a pod that is gone once it ends keeps no work directory to read them from *)
+            monitor[run["Label"] <> " left: " <> StringRiffle[Take[left, UpTo[50]], ", "] <> If[Length[left] > 50, ", and " <> ToString[Length[left] - 50] <> " more", ""]];
+            Scan[monitor[run["Label"] <> " log: " <> #] &, logLines[run["Log"], 200]]
+        ]
     ]],
     runs
 ];
-logTail[file_String, n_Integer] := If[ ! FileExistsQ[file], "(no log)",
+(* the last n lines of a log that are not blank, each up to 300 characters *)
+logLines[file_String, n_Integer] := If[ ! FileExistsQ[file], {},
     With[{lines = Select[StringSplit[ByteArrayToString[Replace[ReadByteArray[file], Except[_ByteArray] -> ByteArray[{}]], "ISO8859-1"], "\n"], StringLength[StringTrim[#]] > 0 &]},
-        If[ lines === {}, "(empty)", StringRiffle[StringTake[#, UpTo[300]] & /@ Take[lines, -Min[n, Length[lines]]], " | "]]]
+        StringTake[#, UpTo[300]] & /@ Take[lines, -Min[n, Length[lines]]]
+    ]
+];
+logLines[_, _] := {};
+logTail[file_String, n_Integer] := If[ ! FileExistsQ[file], "(no log)",
+    Replace[logLines[file, n], {{} -> "(empty)", lines_ :> StringRiffle[lines, " | "]}]
 ];
 logTail[_, _] := "(no log)";
 
