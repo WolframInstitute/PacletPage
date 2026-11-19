@@ -276,6 +276,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{installed = PacletObject[<|"Name" -> "Demo/Library", "Version" -> "1.1"|>],
+            row = <|"InstalledVersion" -> "1.1", "Status" -> "Installed"|>, unconfirmed},
+        unconfirmed = dependencyActionNotice["Install", $Failed, row];
+        {StringStartsQ[unconfirmed, "Could not confirm"], dependencyActionNotice["Uninstall", $Failed, row] === unconfirmed,
+            dependencyActionNotice["Install", installed, Missing["Unknown"]] === unconfirmed,
+            dependencyActionNotice["Install", installed, <|"InstalledVersion" -> Missing["NotInstalled"]|>] === unconfirmed,
+            dependencyActionNotice["Update", installed, row], dependencyActionNotice["Uninstall", Null, row]}],
+    {True, True, True, True, "Version 1.1 is installed.", "Removed from the user repository."},
+    TestID -> "Dependencies: success feedback requires a confirmed action and local record"
+]
+
+VerificationTest[
     {First[UpdatePacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]],
         UninstallPacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]},
     {"DependencyNotInstalled", Null}, TestID -> "Dependencies: updating or removing an absent dependency"

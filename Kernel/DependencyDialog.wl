@@ -58,6 +58,19 @@ dependencyDialogAction[owner_, name_, action_, cancelledQ_, progress_] := Module
     {If[AssociationQ[result], result[name], result], If[AssociationQ[fresh], fresh[name], fresh]}
 ]
 
+dependencyActionNotice[action_, result_, fresh_] := Which[
+    MatchQ[result, Failure["DependencyCancelled", _]], "Cancelled.",
+    MatchQ[result, _Failure], result["Message"],
+    MatchQ[fresh, _Failure], fresh["Message"],
+    ! AssociationQ[fresh] || ! If[action === "Uninstall", result === Null,
+        MatchQ[result, _PacletObject] && StringQ[fresh["InstalledVersion"]]],
+        "Could not confirm the change. Reopen the dialog to check the installed version.",
+    fresh["Status"] === "Restart required", "Restart the kernel to use the changed library.",
+    action === "Uninstall", "Removed from the user repository.",
+    action === "Update", "Version " <> fresh["InstalledVersion"] <> " is installed.",
+    True, "Installation complete."
+]
+
 (* Prepare the display in the owning kernel, keeping the full identifier for each action. *)
 dependencyDialogRow[row_, label_] := Join[row, <|"Label" -> label, "Details" -> dependencyDetails[row, label],
     "Actions" -> dependencyRowActions[row]|>]
@@ -203,12 +216,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                     If[rows[name]["Status"] === "Installed" && KeyExistsQ[rows[name], "Check"],
                         Which[MatchQ[result, Failure["DependencySetupRequired", _]], rows[name] = Append[rows[name], "Status" -> "Needs setup"],
                             MatchQ[result, _PacletObject], rows[name] = Append[rows[name], "Status" -> "Ready"]]];
-                    notices[name] = Which[MatchQ[result, Failure["DependencyCancelled", _]], "Cancelled.",
-                        FailureQ[result], result["Message"], FailureQ[fresh], fresh["Message"],
-                        rows[name]["Status"] === "Restart required", "Restart the kernel to use the changed library.",
-                        action === "Uninstall", "Removed from the user repository.",
-                        action === "Update" && StringQ[rows[name]["InstalledVersion"]], "Version " <> rows[name]["InstalledVersion"] <> " is installed.",
-                        True, "Installation complete."],
+                    notices[name] = dependencyActionNotice[action, result, fresh],
                     operation = None; If[MemberQ[Notebooks[], nb], dependencySetActivity[nb, None]]]
             ]];
         rowPanel[name_, row_] := With[{actions = row["Actions"], supported = row["Status"] =!= "Unsupported",
