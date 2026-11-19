@@ -2169,6 +2169,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], tasks, lost},
+        Export[FileNameJoin[{dir, "a.nb"}], "Notebook[{}]", "Text"];
+        tasks = <|"File" -> # <> ".md", "Out" -> FileNameJoin[{dir, # <> ".nb"}]|> & /@ {"a", "b", "c"};
+        lost = unaccountedPages[tasks, {"c.md"}];
+        DeleteDirectory[dir, DeleteContents -> True];
+        lost
+    ],
+    {"b.md"},
+    TestID -> "Build: a planned page with no notebook that is not among the build's failures is lost, and a failed one is not"
+]
+
+VerificationTest[
     Module[{dir = CreateDirectory[], log, out = {}},
         log = FileNameJoin[{dir, "share-3.log"}];
         Export[log, StringRiffle[Table["line " <> IntegerString[i], {i, 250}], "\n"], "Text"];

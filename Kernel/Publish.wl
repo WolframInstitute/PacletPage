@@ -966,6 +966,10 @@ pageWatchdog[task_Association, limit_ ? NumericQ] /; $OperatingSystem =!= "Windo
 pageWatchdog[_, _] := None;
 clearTimeoutMarkers[tasks_List] := Scan[If[FileExistsQ[timeoutMarker[#]], DeleteFile[timeoutMarker[#]]] &, tasks];
 
+(* the markdown files of the planned pages that have no notebook after the build and are not among
+   its failures *)
+unaccountedPages[tasks_List, failed_List] := Lookup[Select[tasks, ! FileExistsQ[#["Out"]] && ! MemberQ[failed, #["File"]] &], "File", {}];
+
 (* The pages converted, in order: one by one in this kernel, or on the parallel kernels after the
    first, which this kernel converts so that whatever the converter installs is in place before
    they look for it; a page that fails on a parallel kernel is tried once more here. *)
@@ -1055,6 +1059,7 @@ Options[BuildPacletDocumentation] = {
 };
 
 BuildPacletDocumentation::dir = "`1` is not a paclet directory: it has no PacletInfo.wl.";
+BuildPacletDocumentation::lost = "`1` pages the build planned have no notebook and are not among its failures: `2`.";
 BuildPacletDocumentation::source = "`1` has no markdown documentation.";
 BuildPacletDocumentation::page = "`1` did not become a notebook: `2`.";
 BuildPacletDocumentation::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, from a Flag frontmatter key, a flag cell or the palette's flag buttons: `2`.";
@@ -1281,6 +1286,14 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     Scan[fillPacletManifest[#["Out"], dir] &, Select[ok, #Page === "ResourceDefinition" && FileExistsQ[#["Out"]] &]];
     flagged = flaggedPages[target];
     If[ flagged =!= <||>, Message[BuildPacletDocumentation::flagged, Length[flagged], Take[Normal[flagged], UpTo[10]]]];
+    (* a page the build planned that has no notebook and is not among its failures is lost: the build
+       fails, naming them, rather than report the pages it has as the whole *)
+    With[{lost = unaccountedPages[tasks, failed]},
+        If[ lost =!= {},
+            Message[BuildPacletDocumentation::lost, Length[lost], Take[lost, UpTo[20]]];
+            Return[Failure["LostPages", <|"MessageTemplate" :> BuildPacletDocumentation::lost, "MessageParameters" -> {Length[lost], Take[lost, UpTo[20]]}, "Pages" -> lost|>], Module]
+        ]
+    ];
     <|
         "Notebooks" -> Lookup[Select[ok, #Page =!= "ResourceDefinition" &], "Out", {}],
         "Definition" -> Replace[Lookup[Select[ok, #Page === "ResourceDefinition" &], "Out", {}], {{out_} :> out, _ -> None}],
@@ -3760,7 +3773,7 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$d
     If[ stopsQ[offlineDryRunQ[OptionValue["DryRun"]] || publishingAccountQ[PublishPacletPage, OptionValue["Account"]], TrueQ[OptionValue["DryRun"]] && ! TrueQ[OptionValue["Build"]]],
         Throw[$Failed, "publish"]];
     build = If[ TrueQ[OptionValue["Build"]], BuildPacletDocumentation[dir, Sequence @@ OptionValue["BuildOptions"], "Monitor" -> monitored], None];
-    If[ build === $Failed, Throw[$Failed, "publish"]];
+    If[ build === $Failed || FailureQ[build], Throw[build, "publish"]];
     (* the parallel kernels the deploy asks for serve the site's uploads too, so they stay until the
        site is published and checked *)
     withDeployKernels[Lookup[Association[Cases[Flatten[{OptionValue["ResourceOptions"]}], _Rule]], "Parallel", False], Function[kernels,
