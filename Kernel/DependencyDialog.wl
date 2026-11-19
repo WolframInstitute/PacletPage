@@ -1,7 +1,8 @@
 (* ::Package:: *)
 
 $dependencyDialogs = <||>
-dependencyDesktopQ[] := MatchQ[$FrontEnd, _FrontEndObject] && ! TrueQ[$CloudEvaluation] && $KernelID === 0
+dependencyDesktopQ[] := Block[{$AllowInternet = False, $AllowDataUpdates = False},
+    MatchQ[$FrontEnd, _FrontEndObject] && ! TrueQ[$CloudEvaluation] && $KernelID === 0]
 dependencyPreference[name_] := "WolframInstitute/PacletPage/DependencyDialog/" <> name
 dependencyRemember[name_] := (PersistentSymbol[dependencyPreference[name], "Local"] = True)
 
