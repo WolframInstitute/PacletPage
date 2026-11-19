@@ -2,6 +2,7 @@
 
 PacletDependencyReport[_, rows_Association][name_String] := rows[name]
 PacletDependencyReport /: Normal[PacletDependencyReport[_, rows_Association]] := rows
+PacletDependencyReport /: Length[PacletDependencyReport[_, rows_Association]] := Length[rows]
 PacletDependencyReport /: Keys[PacletDependencyReport[_, rows_Association]] := Keys[rows]
 PacletDependencyReport /: Values[PacletDependencyReport[_, rows_Association]] := Values[rows]
 

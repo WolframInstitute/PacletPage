@@ -70,8 +70,8 @@ VerificationTest[
     With[{owner = testDependencyOwner[{}, {"Demo/Test"}]},
         With[{report = PacletDependencyInformation[owner], raw = PacletDependencyInformation[owner, "Output" -> "Association"]},
             {Head[report], Normal[report] === raw, report["Demo/Test"] === raw["Demo/Test"], Values[report] === Values[raw],
-                MissingQ[report["Demo/Unknown"]], First[PacletDependencyInformation[owner, "Output" -> "Invalid"]]}]],
-    {PacletDependencyReport, True, True, True, True, "DependencyOutput"}, TestID -> "Dependencies: the report preserves access to raw records"
+                Length[report], MissingQ[report["Demo/Unknown"]], First[PacletDependencyInformation[owner, "Output" -> "Invalid"]]}]],
+    {PacletDependencyReport, True, True, True, 1, True, "DependencyOutput"}, TestID -> "Dependencies: the report preserves access to raw records"
 ]
 
 VerificationTest[

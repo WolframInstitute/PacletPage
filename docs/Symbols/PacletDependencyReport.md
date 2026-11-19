@@ -18,7 +18,7 @@ RelatedTutorials: [DependencyManagement]
 
 - A report for a single library shows its name, status and installed version. An update check also supplies the available version. Click the plus sign to see details.
 - A report for several libraries shows the owner and count. Expand it to compare the libraries. Opening a report displays the snapshot captured by the original call.
-- Use `report[name]` for one library, `Keys[report]` for the names, or `Normal[report]` for the entire association.
+- Use `report[name]` for one library, `Keys[report]` for the names, `Length[report]` for the count, or `Normal[report]` for the entire association.
 
 ## Basic Examples
 
