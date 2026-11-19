@@ -23,46 +23,51 @@ dependencyCommandOwner[_, owner_] := Replace[owner["Location"], Except[_String] 
 dependencyAction["Install"] = InstallPacletDependencies
 dependencyAction["Update"] = UpdatePacletDependencies
 dependencyAction["Uninstall"] = UninstallPacletDependencies
-dependencyCommand[owner_, action_, name_] := SymbolName[dependencyAction[action]] <> "[" <> ToString[owner, InputForm] <> ", " <> ToString[name, InputForm] <> "]"
+dependencyCommand[owner_, action_, name_] := ToString[dependencyAction[action], InputForm] <> "[" <> ToString[owner, InputForm] <> ", " <> ToString[name, InputForm] <> "]"
 
-dependencyCaption[row_] := Row[Riffle[DeleteCases[{
-    If[TrueQ[row["Required"]], "Required", "Optional"],
-    Replace[Lookup[row, "Version", All], {All | "*" -> Nothing, v_String :> "Requires " <> v}],
-    Replace[Lookup[row, "DownloadSize", None], {a_Association :> Lookup[a, $SystemID, Nothing], None -> Nothing}],
-    Lookup[row, "License", Nothing]}, Nothing], Spacer[12]]]
+dependencyDialogHeading[rows_] := If[AnyTrue[Values[rows], TrueQ[#["Required"]] &], "Library dependencies", "Optional libraries"]
+dependencyShortName[name_] := Last[StringSplit[name, "/"]]
+dependencyMetaStyle[expr_] := Style[expr, Small, LightDarkSwitched[GrayLevel[.35], GrayLevel[.72]]]
 
-dependencyDetails[row_] := Column[DeleteCases[{
-    Style[row["Name"], 14, Bold], Lookup[row, "Description", Nothing],
-    Style[dependencyCaption[row], Small],
-    Row[Riffle[Join[If[KeyExistsQ[row, "URL"], {Hyperlink["Setup instructions", row["URL"]]}, {}],
-        KeyValueMap[Hyperlink, Lookup[row, "SetupLinks", <||>]]], Spacer[10]]]
-}, Row[{}]], Alignment -> Left, Spacings -> .35]
-
-dependencyVersions[row_] := StringRiffle[{
-    If[StringQ[row["InstalledVersion"]], "Installed " <> row["InstalledVersion"], Nothing],
-    Switch[Lookup[row, "LatestVersion", None], _String, "Latest " <> row["LatestVersion"], _Failure, "Latest unavailable", _, Nothing]
-}, "    "]
-
-dependencyRowActions[row_] := Which[
-    ! StringQ[row["InstalledVersion"]], {"Install"},
-    dependencyRemovableQ[row], {"Update", "Uninstall"},
-    True, {"Update"}
+dependencyDetails[row_, label_] := Module[{size, license, requirement, links, versions, metadata},
+    size = Replace[Lookup[row, "DownloadSize", None], a_Association :> Lookup[a, $SystemID, None]];
+    license = Lookup[row, "License", None];
+    requirement = Lookup[row, "Version", All];
+    versions = Row[{"Installed: ", Replace[row["InstalledVersion"], _Missing -> "Not installed"], Spacer[16],
+        "Latest: ", Switch[Lookup[row, "LatestVersion", None], _String, row["LatestVersion"], _Failure, "Unavailable", _, "Not checked"]}];
+    metadata = {If[StringQ[size], "Download: " <> size, Nothing], If[StringQ[license], "License: " <> license, Nothing],
+        If[TrueQ[row["Required"]], "Required", Nothing], If[StringQ[requirement] && requirement =!= "*", "Requires " <> requirement, Nothing]};
+    links = Join[If[StringQ[row["URL"]], {Hyperlink["Setup instructions", row["URL"]]}, {}],
+        KeyValueMap[Hyperlink, Lookup[row, "SetupLinks", <||>]]];
+    Column[{Tooltip[Style[label, 14, Bold], row["Name"]], dependencyMetaStyle[versions], Lookup[row, "Description", Nothing],
+        If[metadata === {}, Nothing, dependencyMetaStyle[Row[Riffle[metadata, Spacer[12]]]]],
+        If[links === {}, Nothing, Row[Riffle[links, Spacer[12]]]]}, Alignment -> Left, Spacings -> .5]
 ]
 
-(* Prepare these fields in the owning kernel so a notebook can paint its first frame immediately. *)
-dependencyDialogRow[row_] := Join[row, <|"Details" -> dependencyDetails[row], "Versions" -> dependencyVersions[row],
+dependencyRowActions[row_] := If[! StringQ[row["InstalledVersion"]], {"Install"}, {
+    If[dependencyRemovableQ[row], "Uninstall", Nothing],
+    If[row["Status"] =!= "Unsupported" && StringQ[row["LatestVersion"]] &&
+        PacletNewerQ[row["LatestVersion"], row["InstalledVersion"]], "Update", Nothing]}]
+
+(* Prepare the display in the owning kernel, keeping the full identifier for each action. *)
+dependencyDialogRow[row_, label_] := Join[row, <|"Label" -> label, "Details" -> dependencyDetails[row, label],
     "Actions" -> dependencyRowActions[row]|>]
+
+dependencyDialogRows[rows_] := With[{counts = Counts[dependencyShortName /@ Keys[rows]]},
+    Association@KeyValueMap[Function[{name, row}, With[{short = dependencyShortName[name]},
+        name -> dependencyDialogRow[row, If[counts[short] === 1, short, name]]]], rows]
+]
 
 (* Redraw the rows only when their data change. Progress updates touch just the footer. *)
 dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
-        initialRows = dependencyDialogRow /@ initial, packageFile = FileNameJoin[{$packageDirectory, "PacletPage.wl"}]}, DynamicModule[
+        initialRows = dependencyDialogRows[initial], heading = dependencyDialogHeading[initial], packageFile = FileNameJoin[{$packageDirectory, "PacletPage.wl"}]}, DynamicModule[
     {rows = initialRows, notices = <||>, copied = None, busy = False, cancelled = False, stage = "", fraction = None,
         run, refresh, perform, rowPanel},
     Framed[Column[{
-        Style[owner["Name"], 18, Bold],
+        Column[{Style[heading, 18, Bold], "Install, upgrade, or remove libraries as needed."}, Alignment -> Left, Spacings -> .6],
         Dynamic[If[rows === <||>, "This paclet declares no dependencies.",
-            Pane[Column[KeyValueMap[rowPanel, Join[Select[rows, ! StringQ[#["InstalledVersion"]] &], Select[rows, StringQ[#["InstalledVersion"]] &]]],
-                    ItemSize -> {{Scaled[1]}}, Dividers -> Center, Spacings -> 1.2],
+            Pane[Column[KeyValueMap[rowPanel, rows],
+                    ItemSize -> {{Scaled[1]}}, Spacings -> 1.2],
                 ImageSize -> {Full, UpTo[400]}, Scrollbars -> {False, Automatic}]], TrackedSymbols :> {rows, notices, copied}],
         Dynamic[If[busy, Row[{stage, Spacer[12], If[NumberQ[fraction], ProgressIndicator[fraction, {0, 1}],
                 ProgressIndicator[Appearance -> "Indeterminate"]], Spacer[12],
@@ -71,11 +76,11 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
             TrackedSymbols :> {busy, stage, fraction}],
         Grid[{{Row[{Button["Check readiness", refresh[True, False], Enabled -> Dynamic[! busy], Method -> "Queued"], Spacer[8],
             Button["Check for updates", refresh[False, True], Enabled -> Dynamic[! busy], Method -> "Queued"]}],
-            DefaultButton["Close", cancelled = True; If[busy, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], Method -> "Preemptive"]}},
+            DefaultButton["Close", cancelled = True; If[busy, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
             ItemSize -> {{Scaled[.72], Scaled[.28]}}, Alignment -> {{Left, Right}, Center}]
-    }, ItemSize -> {{Scaled[1]}}, Spacings -> 1.15, Alignment -> Left], FrameMargins -> 14, FrameStyle -> None],
+    }, ItemSize -> {{Scaled[1]}}, Spacings -> 1.3, Alignment -> Left, Dividers -> {False, {False, False, False, GrayLevel[.85], False}}], FrameMargins -> 16, FrameStyle -> None],
     Initialization :> (
-        If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath}, Get[packageFile]]];
+        If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Get[packageFile]]];
         SetAttributes[run, HoldRest];
         run[caption_, expr_] := If[! busy, WithCleanup[
             busy = True; cancelled = False; stage = caption; fraction = None; FinishDynamic[];
@@ -83,18 +88,18 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                     $dependencyProgress = Function[{step, value}, stage = step; fraction = value; FinishDynamic[]]}, expr],
             busy = False; stage = ""; fraction = None]];
         refresh[probe_, updates_] := run[If[updates, "Checking for updates", "Checking readiness"],
-            With[{fresh = PacletDependencyInformation[owner, "CheckReadiness" -> probe, "CheckUpdates" -> updates, "Output" -> "Association"]},
+            With[{fresh = PacletDependencyInformation[owner, Keys[rows], "CheckReadiness" -> probe, "CheckUpdates" -> updates, "Output" -> "Association"]},
                 If[AssociationQ[fresh],
                     rows = AssociationMap[Function[name, With[{old = rows[name], new = fresh[name]},
                         If[! AssociationQ[new], old, dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], new,
                             If[! probe && new["Status"] === "Installed" && old["InstalledVersion"] === new["InstalledVersion"],
-                                KeyTake[old, {"Status"}], <||>]]]]]], Keys[fresh]];
+                                KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]]]]], Keys[fresh]];
                     notices = (#["Message"] & /@ Select[fresh, FailureQ]) ]]];
         perform[name_, action_] := run[action, Module[{result, fresh},
             result = dependencyAction[action][owner, name];
             result = If[AssociationQ[result], result[name], result];
             fresh = PacletDependencyInformation[owner, name, "Output" -> "Association"];
-            If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[KeyTake[rows[name], {"LatestVersion", "Description"}], fresh[name]]]];
+            If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[KeyTake[rows[name], {"LatestVersion", "Description"}], fresh[name]], rows[name]["Label"]]];
             If[rows[name]["Status"] === "Installed" && KeyExistsQ[rows[name], "Check"],
                 Which[MatchQ[result, Failure["DependencySetupRequired", _]], rows[name] = Append[rows[name], "Status" -> "Needs setup"],
                     MatchQ[result, _PacletObject], rows[name] = Append[rows[name], "Status" -> "Ready"]]];
@@ -105,36 +110,37 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
         rowPanel[name_, row_] := With[{actions = row["Actions"], supported = row["Status"] =!= "Unsupported"},
             Grid[{{Pane[row["Details"], ImageSize -> Full, Alignment -> Left],
                 Column[DeleteCases[{
-                    Style[row["Status"], Bold], Replace[row["Versions"], "" -> Nothing],
-                    Row[Riffle[Map[Function[action, Button[action, perform[name, action], Method -> "Queued",
+                    row["Status"],
+                    Row[Riffle[Map[Function[action, Button[If[action === "Update", "Upgrade", action], perform[name, action], ImageSize -> {100, Automatic}, Method -> "Queued",
                         Enabled -> Dynamic[! busy && (supported || action === "Uninstall")]]],
                         actions], Spacer[6]]],
-                    With[{action = Last[actions]},
+                    If[actions === {}, Nothing, With[{action = First[actions]},
                         Button[If[copied === name, "Copied", "Copy " <> ToLowerCase[action] <> " command"],
                             CopyToClipboard[dependencyCommand[commandOwner, action, name]]; copied = name,
-                            Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[! busy && (supported || action === "Uninstall")]]],
+                            Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[! busy && (supported || action === "Uninstall")]]]],
                     Lookup[notices, name, Which[
                         FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"],
                         FailureQ[row["LatestVersion"]], row["LatestVersion"]["Message"], True, Nothing]]
-                }, Nothing], Alignment -> Right, Spacings -> .35]}}, ItemSize -> {{Scaled[.65], Scaled[.35]}}, Alignment -> {{Left, Right}, Top}]]
+                }, Nothing], Alignment -> Right, Spacings -> .5]}}, ItemSize -> {{Scaled[.65], Scaled[.35]}}, Alignment -> {{Left, Right}, Top}]]
     ),
     Deinitialization :> (cancelled = True; If[busy, cancelDependencyDownload[]]),
     SynchronousInitialization -> True
 ]]
 
-PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject)] := Module[{owner, key, dialog, rows},
+PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope : (All | "Optional") : All] := Module[{owner, key, dialog, rows},
     If[! dependencyDesktopQ[], Return[dependencyFailure["NotebookRequired", "Open a desktop notebook to use the dependency dialog. Scripts can use PacletDependencyInformation and the install, update and uninstall functions."]]];
     owner = dependencyOwner[spec];
     If[! MatchQ[owner, _PacletObject], Return[owner]];
-    key = dependencyCommandOwner[owner, owner];
-    dialog = Lookup[$dependencyDialogs, key, None];
+    key = {dependencyCommandOwner[owner, owner], scope};
+    dialog = $dependencyDialogs[key];
     If[MemberQ[Notebooks[], dialog], SetSelectedNotebook[dialog]; Return[dialog]];
     rows = PacletDependencyInformation[owner, "Output" -> "Association"];
     If[FailureQ[rows], Return[rows]];
+    If[scope === "Optional", rows = Select[rows, ! TrueQ[#["Required"]] &]];
     dialog = With[{name = owner["Name"], location = key}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows],
-        WindowTitle -> name <> " dependencies", WindowSize -> {680, All}, WindowFrame -> "Normal",
+        WindowTitle -> dependencyShortName[name] <> ": " <> dependencyDialogHeading[rows], WindowSize -> {740, All}, WindowFrame -> "Normal",
         WindowFrameElements -> {"CloseBox", "ResizeArea"},
-        NotebookEventActions -> {"WindowClose" :> (dependencyRemember[name]; KeyDropFrom[$dependencyDialogs, location]), PassEventsDown -> True}]];
+        NotebookEventActions -> {"WindowClose" :> (dependencyRemember[name]; KeyDropFrom[$dependencyDialogs, {location}]), PassEventsDown -> True}]];
     If[MatchQ[dialog, _NotebookObject], AssociateTo[$dependencyDialogs, key -> dialog]];
     dialog
 ]

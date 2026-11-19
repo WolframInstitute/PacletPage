@@ -202,13 +202,30 @@ VerificationTest[
         With[{owner = testDependencyOwner[{}, {manager}]},
             {UninstallPacletDependencies[owner, All], First[UninstallPacletDependencies[owner, manager][manager]],
                 dependencyRowActions[PacletDependencyInformation[owner][manager]]}]],
-    {<||>, "DependencyManagerInUse", {"Update"}}, TestID -> "Dependencies: even an optional manager cannot uninstall itself"
+    {<||>, "DependencyManagerInUse", {}}, TestID -> "Dependencies: even an optional manager cannot uninstall itself"
 ]
 
 VerificationTest[
     dependencyRowActions /@ {<|"Required" -> True, "InstalledVersion" -> "1.0"|>,
         <|"Required" -> False, "InstalledVersion" -> "1.0"|>, <|"Required" -> True, "InstalledVersion" -> Missing[]|>},
-    {{"Update"}, {"Update", "Uninstall"}, {"Install"}}, TestID -> "Dependencies: dialog actions protect required installations"
+    {{}, {"Uninstall"}, {"Install"}}, TestID -> "Dependencies: dialog actions protect required installations"
+]
+
+VerificationTest[
+    With[{row = <|"Name" -> "Demo/Library", "InstalledVersion" -> "1.9", "Status" -> "Installed", "Required" -> False|>},
+        dependencyRowActions /@ {row, Append[row, "LatestVersion" -> "1.9"], Append[row, "LatestVersion" -> "1.8"],
+            Append[row, "LatestVersion" -> "1.10"], Join[row, <|"LatestVersion" -> "1.10", "Required" -> True|>],
+            Join[row, <|"LatestVersion" -> "1.10", "Status" -> "Unsupported"|>]}],
+    {{"Uninstall"}, {"Uninstall"}, {"Uninstall"}, {"Uninstall", "Update"}, {"Update"}, {"Uninstall"}},
+    TestID -> "Dependencies: upgrade appears only for a confirmed newer supported release"
+]
+
+VerificationTest[
+    With[{owner = testDependencyOwner[{}, {"First/Shared", "Demo/Other", "Second/Shared"}]},
+        With[{rows = dependencyDialogRows[PacletDependencyInformation[owner, "Output" -> "Association"]]},
+            {Keys[rows], Lookup[Values[rows], "Label"], dependencyDialogHeading[rows]}]],
+    {{"First/Shared", "Demo/Other", "Second/Shared"}, {"First/Shared", "Other", "Second/Shared"}, "Optional libraries"},
+    TestID -> "Dependencies: dialog keeps declaration order and distinguishes matching short names"
 ]
 
 VerificationTest[
@@ -265,6 +282,25 @@ VerificationTest[
 VerificationTest[
     dependencyCommand["Demo/Consumer", "Update", "Demo/A"],
     "UpdatePacletDependencies[\"Demo/Consumer\", \"Demo/A\"]", TestID -> "Dependencies: copy the same public command used by scripts"
+]
+
+VerificationTest[
+    Block[{$ContextPath = {"System`", "Global`"}},
+        ToExpression[dependencyCommand["Demo/Consumer", "Install", "Demo/A"], InputForm, HoldComplete]],
+    HoldComplete[InstallPacletDependencies["Demo/Consumer", "Demo/A"]],
+    TestID -> "Dependencies: a copied command also works when only the consumer is on the context path"
+]
+
+VerificationTest[
+    With[{owner = testDependencyOwner[{"Demo/Required"}, {"Demo/Optional"}]},
+        Block[{dependencyDesktopQ = (True &), Notebooks = ({} &), $dependencyDialogs = <||>,
+                dependencyRelease = (Throw["Unexpected release lookup"] &), dependencyReadiness = (Throw["Unexpected readiness check"] &),
+                PacletSiteUpdate = (Throw["Unexpected site update"] &), PacletFindRemote = (Throw["Unexpected remote lookup"] &),
+                URLRead = (Throw["Unexpected request"] &), URLSubmit = (Throw["Unexpected request"] &),
+                dependencyDialogContent = Function[{paclet, command, rows}, Keys[rows]], CreateDialog = Function[Null, First[{##}]]},
+            Catch[{PacletDependencyDialog[owner, "Optional"], PacletDependencyDialog[owner]}]]],
+    {{"Demo/Optional"}, {"Demo/Required", "Demo/Optional"}},
+    TestID -> "Dependencies: opening either dialog reads local metadata and leaves readiness and updates to its buttons"
 ]
 
 VerificationTest[
