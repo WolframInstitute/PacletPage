@@ -74,7 +74,7 @@ PacletDependencyInformation["Demo/Consumer", "WolframInstitute/TypeTheory", "Che
 
 ## Install and update
 
-From a desktop notebook, open the consumer's dialog. It reads local state first. Checking for updates reads release metadata. The dialog shows progress during a cloud archive transfer and lets the user cancel it.
+Open the dialog from a desktop notebook. It reads local state first. Click **Check for updates** to look up release versions. The footer names the library being checked, and each row shows its result as it finishes. A version lookup that times out after ten seconds shows **Unavailable**, and the check continues with the next library. **Cancel check** stops after the current library and keeps the completed results. The dialog also shows progress during a cloud archive transfer and lets you cancel the download.
 
 ```wl
 #| eval: false

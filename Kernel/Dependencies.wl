@@ -105,6 +105,7 @@ dependencyLocalStatus[entry_, installed_] := Which[
     True, "Installed"
 ]
 
+$dependencyVersionTimeout = 10
 Options[PacletDependencyInformation] = {"CheckReadiness" -> False, "CheckUpdates" -> False, "Output" -> "Report"}
 
 PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject)] :=
@@ -132,7 +133,8 @@ dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{resu
         If[readiness === True, result["Status"] = "Ready",
             AssociateTo[result, {"Status" -> "Needs setup", "ReadinessFailure" -> readiness}]]];
     If[updates && dependencySupportedQ[entry],
-        latest = dependencyRelease[owner, entry];
+        latest = TimeConstrained[dependencyRelease[owner, entry], $dependencyVersionTimeout,
+            dependencyFailure["DependencyTimeout", "The version check for `1` timed out. Try checking for updates again.", entry["Name"]]];
         result["LatestVersion"] = If[FailureQ[latest], latest, latest["Version"]]];
     If[StringTrim[Lookup[entry, "Description", ""]] === "",
         sources = {First[installed, None], If[AssociationQ[latest], Lookup[latest, "SitePaclet", None], None]};

@@ -115,7 +115,8 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                 startCheck[True, ButtonNotebook[]], operation, cancelled],
             dependencyCheckControl["Check for updates", "Look up the latest compatible versions.",
                 startCheck[False, ButtonNotebook[]], operation, cancelled],
-            dependencyMetaStyle[Dynamic[feedback, TrackedSymbols :> {feedback}]]}}, Alignment -> {Left, Center}, Spacings -> {.6, 0}],
+            dependencyMetaStyle[Dynamic[If[MemberQ[{"Check readiness", "Check for updates"}, operation], stage, feedback],
+                TrackedSymbols :> {operation, stage, feedback}]]}}, Alignment -> {Left, Center}, Spacings -> {.6, 0}],
             DefaultButton["Close", cancelled = True; If[operation =!= None, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
             ItemSize -> {{Scaled[.72], Scaled[.28]}}, Alignment -> {{Left, Right}, Center}]
     }, ItemSize -> {{Scaled[1]}}, Spacings -> 1.3, Alignment -> Left, Dividers -> {False, {False, False, False, GrayLevel[.85], False}}], FrameMargins -> 16, FrameStyle -> None],
@@ -130,18 +131,27 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
         startCheck[probe_, nb_NotebookObject] := If[operation === None, With[{label = If[probe, "Check readiness", "Check for updates"]},
             dependencyRunCheck[nb, label,
                 operation = label; cancelled = False; feedback = "";
-                Block[{dependencyCancelledQ = Function[Null, cancelled]}, refresh[probe]],
-                operation = None]
+                Block[{dependencyCancelledQ = Function[Null, cancelled || ! MemberQ[Notebooks[], nb]]}, refresh[probe]],
+                operation = None; stage = ""]
         ]];
-        refresh[probe_] := With[{fresh = PacletDependencyInformation[owner, Keys[rows], "CheckReadiness" -> probe, "CheckUpdates" -> ! probe, "Output" -> "Association"]},
-                If[AssociationQ[fresh],
-                    rows = AssociationMap[Function[name, With[{old = rows[name], new = fresh[name]},
-                        If[! AssociationQ[new], old, dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], new,
-                            If[! probe && new["Status"] === "Installed" && old["InstalledVersion"] === new["InstalledVersion"],
-                                KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]]]]], Keys[fresh]];
-                    notices = (#["Message"] & /@ Select[fresh, FailureQ[#] && First[#] =!= "DependencyCancelled" &]);
-                    feedback = Which[cancelled, "Check stopped.", probe, dependencyReadinessSummary[fresh], True, ""],
-                    If[FailureQ[fresh], feedback = fresh["Message"]]]];
+        refresh[probe_] := Module[{outcome},
+            outcome = withDependencySelection[owner, Keys[rows], Function[{paclet, entries}, Module[{installed, old, new},
+                installed = dependencyInstallations[Keys[entries]];
+                Do[
+                    If[dependencyCancelledQ[], Break[]];
+                    old = rows[name];
+                    stage = "Checking " <> old["Label"] <> "…";
+                    FinishDynamic[];
+                    new = dependencyInfo[paclet, entries[name], installed[name], probe, ! probe];
+                    rows[name] = dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], new,
+                        If[! probe && new["Status"] === "Installed" && old["InstalledVersion"] === new["InstalledVersion"],
+                            KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]];
+                    KeyDropFrom[notices, name],
+                    {name, Keys[entries]}]
+            ]]];
+            feedback = Which[FailureQ[outcome], outcome["Message"], cancelled, "Check stopped.",
+                probe, dependencyReadinessSummary[rows], True, ""]
+        ];
         perform[name_, action_] := run[action, Module[{result, fresh},
             result = dependencyAction[action][owner, name];
             result = If[AssociationQ[result], result[name], result];

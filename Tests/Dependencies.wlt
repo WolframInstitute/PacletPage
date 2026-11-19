@@ -167,6 +167,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {"Demo/Slow", "Demo/Fast"}], calls = {}, latest},
+        Block[{$dependencyVersionTimeout = 0.15, PacletFindRemote = Function[{name, refresh},
+                AppendTo[calls, {name, Last[refresh]}];
+                If[name === "Demo/Slow", Pause[5]];
+                {PacletObject[<|"Name" -> name, "Version" -> "2.0"|>]}]},
+            latest = Lookup[Values[PacletDependencyInformation[owner, "CheckUpdates" -> True, "Output" -> "Association"]], "LatestVersion"]];
+        {First[First[latest]], Last[latest], calls}],
+    {"DependencyTimeout", "2.0", {{"Demo/Slow", True}, {"Demo/Fast", False}}},
+    TestID -> "Dependencies: a slow version lookup times out and the next library reuses the site index"
+]
+
+VerificationTest[
     {dependencyCompatibleQ["1.10.0", "1.9+"], dependencyCompatibleQ["1.9", "1.10+"],
         dependencyCompatibleQ["1.0.0", "1.0"], dependencyCompatibleQ["0.10.2", "0.1.*"],
         dependencyCompatibleQ["0.1.25", "0.1.*"], dependencyCompatibleQ["0.1", "0.1.*"]},
