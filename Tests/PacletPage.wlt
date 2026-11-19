@@ -1822,6 +1822,20 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = localFixture[], scripts, own},
+        scripts = {
+            pageShareScript[dir, FileNameJoin[{dir, "Documentation"}], "/b/Documentation", {FileNameJoin[{"English", "Guides", "Name.nb"}]}, "/w/r.wl", "/w/log.txt", {}],
+            pacletBuildScript[dir, "/b", {}]
+        };
+        own = "Get[" <> wlString[FileNameJoin[{$packageDirectory, "PacletPage.wl"}]] <> "]";
+        DeleteDirectory[dir, DeleteContents -> True];
+        {StringContainsQ[#, own] & /@ scripts, StringFreeQ[#, "Needs[\"WolframInstitute`PacletPage`\"]"] & /@ scripts}
+    ],
+    {{True, True}, {True, True}},
+    TestID -> "Archive: a script for another kernel loads the PacletPage that wrote it, by its file, not the newest one installed"
+]
+
+VerificationTest[
     Module[{dir = localFixture[], nb, first, second, text, again, got},
         nb = FileNameJoin[{dir, "ResourceDefinition.nb"}];
         Export[nb, Notebook[{Cell[CellGroupData[{

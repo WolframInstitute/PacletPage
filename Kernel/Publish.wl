@@ -2592,8 +2592,7 @@ pacletBuildScript[source_String, buildDir_String, dependencies_List : {}] := Str
     $quietKernelCode,
     "$ProgressReporting = False;\n",
     dependencyLoadCode[dependencies],
-    "PacletDirectoryLoad[", wlString[ParentDirectory[$packageDirectory]], "];\n",
-    "Needs[\"WolframInstitute`PacletPage`\"];\n",
+    $pacletPageLoadCode,
     "Needs[\"PacletTools`\"];\n",
     $pageKernelCode,
     "handlers = PacletTools`$PacletExtensionHandlers;\n",
@@ -2727,8 +2726,7 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "Put[Association[KeyValueMap[\n",
     "    With[{page = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[MemberQ[pages, page], page -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
     "    Replace[processed, Except[_Association] -> <||>]]], ", wlString[recordOut], "];\n",
-    "PacletDirectoryLoad[", wlString[ParentDirectory[$packageDirectory]], "];\n",
-    "Needs[\"WolframInstitute`PacletPage`\"];\n",
+    $pacletPageLoadCode,
     "Scan[WolframInstitute`PacletPage`Private`tidyBuiltPage, Select[FileNameJoin[{", wlString[builtDocsDir], ", #}] & /@ pages, FileExistsQ]];\n",
     $endScriptCode
 ];
@@ -3276,6 +3274,11 @@ loadResourceTools[] := (
    And the end of every script run as a separate kernel process: Processes.wl read into it, then its
    endScript[], which ends what the script started and closes its kernels. *)
 $pageKernelCode = "LaunchKernels[1];\n";
+
+(* the code that loads this very copy of PacletPage in another kernel: a Get of its own file, so that
+   a version a build pins by Get is the one its processes run, where Needs would take the newest
+   version the paclet manager knows of, an installed one included *)
+$pacletPageLoadCode := StringJoin["Get[", wlString[FileNameJoin[{$packageDirectory, "PacletPage.wl"}]], "];\n"];
 
 $endScriptCode = StringJoin["Get[", wlString[FileNameJoin[{$packageDirectory, "Processes.wl"}]], "];\nendScript[];\n"];
 

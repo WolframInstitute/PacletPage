@@ -115,10 +115,9 @@ localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit
 localTitle[nb_Notebook, name_String] := FirstCase[nb, Cell[c_, "ObjectName" | "GuideTitle" | "Title" | "TechNoteTitle", ___] :> cellText[c], name, Infinity];
 localTitle[_, name_String] := name;
 
-(* what a page's render is made from: its notebook, and the versions that render it *)
-renderKey[file_String] := digest[
-    {FileHash[file, "SHA256", "HexString"], $VersionNumber, Replace[PacletFind["WolframInstitute/PacletPage"], {{paclet_, ___} :> paclet["Version"], _ -> None}]}
-];
+(* what a page's render is made from: its notebook, and the versions that render it, the PacletPage
+   running rather than the newest installed *)
+renderKey[file_String] := digest[{FileHash[file, "SHA256", "HexString"], $VersionNumber, $pacletPageVersion}];
 
 (* where a page's render lands: html/<kind>/<name>.html, and its images in html/<kind>/Files/<name>.en *)
 renderPage[stage_String, id_String] := FileNameJoin[{stage, "html", pageKind[id], pageName[id] <> ".html"}];
