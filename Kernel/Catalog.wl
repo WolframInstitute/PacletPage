@@ -28,7 +28,7 @@ resourceSpec[name_String] /; pacletNameQ[name] := <|
 
 resourceSpec[URL[url_String]] := resourceSpec[url];
 
-resourceSpec[CloudObject[url_String, ___]] := resourceSpec[url];
+resourceSpec[HoldPattern[CloudObject[url_String, ___]]] := resourceSpec[url];
 
 resourceSpec[url_String] /; StringStartsQ[url, $repositoryBase] := With[
     {segments = StringSplit[StringDrop[url, StringLength[$repositoryBase]], "/"]},

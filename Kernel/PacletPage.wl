@@ -68,7 +68,7 @@ UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks
 
 UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes selected optional dependencies from the current user's paclet repository. All selects the removable optional dependencies. PacletPage protects its own installation."
 
-PacletDependencyDialog::usage = "PacletDependencyDialog[owner] opens a desktop dialog for checking, installing, updating and removing the owner's dependencies."
+PacletDependencyDialog::usage = "PacletDependencyDialog[owner] opens a desktop dialog for checking, installing, updating and removing the owner's dependencies. PacletDependencyDialog[owner, \"Optional\"] shows only optional libraries."
 
 BuildPacletDocumentation::usage = "BuildPacletDocumentation[dir] converts the markdown documentation of the paclet in \
 dir into documentation notebooks under Documentation/English, and its ResourceDefinition.md into the definition \
@@ -112,9 +112,9 @@ $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web
 $pacletPageVersion := $pacletPageVersion = Replace[PacletObject[File[ParentDirectory[$packageDirectory]]], {p_PacletObject :> p["Version"], _ -> None}];
 $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage";
 
-Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl"}];
-
-refreshStaleSites[];
+(* Reading definitions in a fresh kernel must use locally available paclets. *)
+Block[{$AllowInternet = False, $AllowDataUpdates = False},
+    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl"}]];
 
 End[]
 
