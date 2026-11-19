@@ -222,14 +222,14 @@ VerificationTest[
 ]
 
 VerificationTest[
-    With[{boxes = ToBoxes[dependencyCheckControl["Check readiness", "Test readiness.", testStart[], None, testCancelled]]},
+    With[{boxes = ToBoxes[dependencyCheckControl["Check readiness", "Test readiness.", testStart[], testCancelled]]},
         Cases[boxes, ButtonBox[_, opts___] /; ! FreeQ[HoldComplete[opts], testStart | testCancelled] :>
             FirstCase[HoldComplete[opts], HoldPattern[Method -> m_] :> m, None, {1}], Infinity]],
     {"Queued", "Preemptive"}, TestID -> "Dependencies: a check uses the main evaluation queue and cancellation uses the preemptive link"
 ]
 
 VerificationTest[
-    UsingFrontEnd[Module[{nb = CreateDocument[{}, Visible -> False], tag = {TaggingRules, "DependencyCheck"}, seen, cleaned, run},
+    UsingFrontEnd[Module[{nb = CreateDocument[{}, Visible -> False], tag = {TaggingRules, "DependencyActivity", "Target"}, seen, cleaned, run},
         WithCleanup[
             SetAttributes[run, HoldRest];
             run[label_, expr_] := (seen = None; cleaned = False;
@@ -248,6 +248,31 @@ VerificationTest[
         {First[result], AssociationQ[row], row["Name"], row["Status"], dependencyRowActions[row]}],
     {"DependencyCancelled", True, "PacletPageTest/Absent", "Not installed", {"Install"}},
     TestID -> "Dependencies: cancelling a row action still reads its local record and restores Install"
+]
+
+VerificationTest[
+    Table[Values[dependencyProgressState["Downloading", fraction]], {fraction, {None, -1/10, 3/8, 1, 2}}],
+    {{"Downloading…", None, True}, {"Downloading 0%", 0, True}, {"Downloading 37%", 37, True},
+        {"Downloading 100%", 100, True}, {"Downloading 100%", 100, True}},
+    TestID -> "Dependencies: transfer progress shows a percentage only for a measured download"
+]
+
+VerificationTest[
+    With[{stages = {"Preparing", "Checking release", "Retrying", "Installing", "Checking readiness", "Uninstalling", "Cancelling"}},
+        Lookup[dependencyProgressState[#, None] & /@ stages, "Cancellable"]],
+    {True, True, True, False, False, False, False},
+    TestID -> "Dependencies: Cancel is available until the change to the installed library begins"
+]
+
+VerificationTest[
+    Module[{name = "Demo/Upgrade", installed, owner, result, row},
+        installed = PacletObject[<|"Name" -> name, "Version" -> "1.0"|>];
+        owner = testDependencyOwner[{}, {name}];
+        Block[{dependencyInstallations = Function[names, AssociationMap[Function[key, {installed}], names]]},
+            {result, row} = dependencyDialogAction[owner, name, "Update", (True &), (Null &)]];
+        {First[result], row["InstalledVersion"], dependencyRowActions[Append[row, "LatestVersion" -> "1.1"]]}],
+    {"DependencyCancelled", "1.0", {"Uninstall", "Update"}},
+    TestID -> "Dependencies: a cancelled upgrade preserves the installed version and a retry is available"
 ]
 
 VerificationTest[

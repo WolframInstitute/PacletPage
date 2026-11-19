@@ -115,9 +115,10 @@ dependencyInstallFile[source_, name_, version_] := Module[{p, result, installed}
 dependencyDownloadAttempt[url_, file_] := Module[{response = <||>, task},
     WithCleanup[
         task = URLDownloadSubmit[url, file, TimeConstraint -> <|"Connecting" -> 30, "Reading" -> Infinity|>, ProgressReporting -> False,
-            HandlerFunctions -> <|"TaskProgress" -> Function[event, $dependencyProgress["Downloading", event["FractionComplete"]]],
+            HandlerFunctions -> <|"TaskProgress" -> Function[event, With[{bytes = event["ByteCountDownloaded"], total = event["ByteCountTotal"]},
+                    $dependencyProgress["Downloading", If[NumberQ[bytes] && TrueQ[total > 0], bytes / total, None]]]],
                 "TaskFinished" -> Function[event, response = event]|>,
-            HandlerFunctionsKeys -> {"StatusCode", "Failure", "FractionComplete", "ByteCountDownloaded", "ByteCountTotal"}];
+            HandlerFunctionsKeys -> {"StatusCode", "Failure", "ByteCountDownloaded", "ByteCountTotal"}];
         If[MatchQ[task, _TaskObject], Block[{cancelDependencyDownload = Function[Null, If[task["TaskStatus"] =!= "Removed", TaskRemove[task]]]},
             If[! dependencyCancelledQ[], TaskWait[task]]]];
         Which[
@@ -132,7 +133,7 @@ dependencyDownloadAttempt[url_, file_] := Module[{response = <||>, task},
 
 dependencyDownloadInstall[url_, name_, version_] := Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["paclet-"] <> ".paclet"}], download},
     WithCleanup[
-        $dependencyProgress["Downloading", 0];
+        $dependencyProgress["Downloading", None];
         download = NestWhile[Function[previous, $dependencyProgress["Retrying", None]; dependencyDownloadAttempt[url, file]],
             dependencyDownloadAttempt[url, file],
             Function[result, MatchQ[result, Failure["DependencyDownload", _]] && ! TrueQ[400 <= Lookup[result["Response"], "StatusCode", 0] < 500]], 1, 2];
