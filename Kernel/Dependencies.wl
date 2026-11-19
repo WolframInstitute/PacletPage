@@ -105,7 +105,7 @@ dependencyLocalStatus[entry_, installed_] := Which[
     True, "Installed"
 ]
 
-Options[PacletDependencyInformation] = {"CheckReadiness" -> False, "CheckUpdates" -> False}
+Options[PacletDependencyInformation] = {"CheckReadiness" -> False, "CheckUpdates" -> False, "Output" -> "Report"}
 
 PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject)] :=
     PacletDependencyInformation[owner, All]
@@ -115,12 +115,16 @@ PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject),
     PacletDependencyInformation[owner, All, first, rest]
 
 PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
-    With[{probe = TrueQ[OptionValue["CheckReadiness"]], updates = TrueQ[OptionValue["CheckUpdates"]]},
-        withDependencySelection[owner, names, Function[{paclet, entries}, With[{installed = dependencyInstallations[Keys[entries]]},
-            Map[If[dependencyCancelledQ[], dependencyCancelled[], dependencyInfo[paclet, #, installed[#["Name"]], probe, updates]] &, entries]]]]
+    With[{probe = TrueQ[OptionValue["CheckReadiness"]], updates = TrueQ[OptionValue["CheckUpdates"]], output = OptionValue["Output"]},
+        If[! MemberQ[{"Report", "Association"}, output], Return[dependencyFailure["DependencyOutput", "Choose Report or Association for the output."]]];
+        withDependencySelection[owner, names, Function[{paclet, entries}, Module[{installed, rows},
+            installed = dependencyInstallations[Keys[entries]];
+            rows = If[dependencyCancelledQ[], dependencyCancelled[], dependencyInfo[paclet, #, installed[#["Name"]], probe, updates]] & /@ entries;
+            If[output === "Association", rows, PacletDependencyReport[paclet["Name"], rows]]
+        ]]]
     ]
 
-dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{result, readiness, latest},
+dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{result, readiness, latest, sources, description},
     result = Join[entry, <|"Status" -> dependencyLocalStatus[entry, installed],
         "InstalledVersion" -> If[installed === {}, Missing["NotInstalled"], First[installed]["Version"]]|>];
     If[probe && result["Status"] === "Installed" && KeyExistsQ[entry, "Check"],
@@ -130,6 +134,10 @@ dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{resu
     If[updates && dependencySupportedQ[entry],
         latest = dependencyRelease[owner, entry];
         result["LatestVersion"] = If[FailureQ[latest], latest, latest["Version"]]];
+    If[StringTrim[Lookup[entry, "Description", ""]] === "",
+        sources = {First[installed, None], If[AssociationQ[latest], Lookup[latest, "SitePaclet", None], None]};
+        description = SelectFirst[Cases[sources, p_PacletObject :> p["Description"]], StringQ[#] && StringTrim[#] =!= "" &, None];
+        If[StringQ[description], result["Description"] = description]];
     result
 ]
 

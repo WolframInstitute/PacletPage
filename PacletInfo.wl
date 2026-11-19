@@ -27,6 +27,7 @@ PacletObject[<|
                 "WolframInstitute`PacletPage`PacletDefinitionScan",
                 "WolframInstitute`PacletPage`PacletPageDependencies",
                 "WolframInstitute`PacletPage`PacletDependencyInformation",
+                "WolframInstitute`PacletPage`PacletDependencyReport",
                 "WolframInstitute`PacletPage`InstallPacletDependencies",
                 "WolframInstitute`PacletPage`UpdatePacletDependencies",
                 "WolframInstitute`PacletPage`UninstallPacletDependencies",

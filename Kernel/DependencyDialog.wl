@@ -11,7 +11,7 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), "Notify
     owner = dependencyOwner[spec];
     If[! MatchQ[owner, _PacletObject], Return[owner]];
     If[! TrueQ[PersistentSymbol[dependencyPreference[owner["Name"]], "Local"]],
-        rows = PacletDependencyInformation[owner];
+        rows = PacletDependencyInformation[owner, "Output" -> "Association"];
         If[FailureQ[rows], Return[rows]];
         If[AnyTrue[Values[rows], ! #["Required"] && #["Status"] === "Not installed" &],
             Message[PacletDependencyDialog::available, owner["Name"], ToString[dependencyCommandOwner[spec, owner], InputForm]]]];
@@ -49,9 +49,14 @@ dependencyRowActions[row_] := Which[
     True, {"Update", "Uninstall"}
 ]
 
+(* Prepare these fields in the owning kernel so a notebook can paint its first frame immediately. *)
+dependencyDialogRow[row_] := Join[row, <|"Details" -> dependencyDetails[row], "Versions" -> dependencyVersions[row],
+    "Actions" -> dependencyRowActions[row]|>]
+
 (* Redraw the rows only when their data change. Progress updates touch just the footer. *)
-dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
-    {rows = initial, notices = <||>, copied = None, busy = False, cancelled = False, stage = "", fraction = None,
+dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
+        initialRows = dependencyDialogRow /@ initial, packageFile = FileNameJoin[{$packageDirectory, "PacletPage.wl"}]}, DynamicModule[
+    {rows = initialRows, notices = <||>, copied = None, busy = False, cancelled = False, stage = "", fraction = None,
         run, refresh, perform, rowPanel},
     Framed[Column[{
         Style[owner["Name"], 18, Bold],
@@ -70,7 +75,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
             ItemSize -> {{Scaled[.72], Scaled[.28]}}, Alignment -> {{Left, Right}, Center}]
     }, ItemSize -> {{Scaled[1]}}, Spacings -> 1.15, Alignment -> Left], FrameMargins -> 14, FrameStyle -> None],
     Initialization :> (
-        Needs["WolframInstitute`PacletPage`"];
+        If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath}, Get[packageFile]]];
         SetAttributes[run, HoldRest];
         run[caption_, expr_] := If[! busy, WithCleanup[
             busy = True; cancelled = False; stage = caption; fraction = None; FinishDynamic[];
@@ -78,18 +83,18 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
                     $dependencyProgress = Function[{step, value}, stage = step; fraction = value; FinishDynamic[]]}, expr],
             busy = False; stage = ""; fraction = None]];
         refresh[probe_, updates_] := run[If[updates, "Checking for updates", "Checking readiness"],
-            With[{fresh = PacletDependencyInformation[owner, "CheckReadiness" -> probe, "CheckUpdates" -> updates]},
+            With[{fresh = PacletDependencyInformation[owner, "CheckReadiness" -> probe, "CheckUpdates" -> updates, "Output" -> "Association"]},
                 If[AssociationQ[fresh],
                     rows = AssociationMap[Function[name, With[{old = rows[name], new = fresh[name]},
-                        If[! AssociationQ[new], old, Join[KeyTake[old, {"LatestVersion"}], new,
+                        If[! AssociationQ[new], old, dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], new,
                             If[! probe && new["Status"] === "Installed" && old["InstalledVersion"] === new["InstalledVersion"],
-                                KeyTake[old, {"Status"}], <||>]]]]], Keys[fresh]];
+                                KeyTake[old, {"Status"}], <||>]]]]]], Keys[fresh]];
                     notices = (#["Message"] & /@ Select[fresh, FailureQ]) ]]];
         perform[name_, action_] := run[action, Module[{result, fresh},
             result = dependencyAction[action][owner, name];
             result = If[AssociationQ[result], result[name], result];
-            fresh = PacletDependencyInformation[owner, name];
-            If[AssociationQ[fresh], rows[name] = Join[KeyTake[rows[name], {"LatestVersion"}], fresh[name]]];
+            fresh = PacletDependencyInformation[owner, name, "Output" -> "Association"];
+            If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[KeyTake[rows[name], {"LatestVersion", "Description"}], fresh[name]]]];
             If[rows[name]["Status"] === "Installed" && KeyExistsQ[rows[name], "Check"],
                 Which[MatchQ[result, Failure["DependencySetupRequired", _]], rows[name] = Append[rows[name], "Status" -> "Needs setup"],
                     MatchQ[result, _PacletObject], rows[name] = Append[rows[name], "Status" -> "Ready"]]];
@@ -97,10 +102,10 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
                 StringQ[rows[name]["InstalledVersion"]] && action === "Update", "Update check complete.",
                 True, "Installation complete."];
             copied = None]];
-        rowPanel[name_, row_] := With[{actions = dependencyRowActions[row], supported = row["Status"] =!= "Unsupported"},
-            Grid[{{Pane[dependencyDetails[row], ImageSize -> Full, Alignment -> Left],
+        rowPanel[name_, row_] := With[{actions = row["Actions"], supported = row["Status"] =!= "Unsupported"},
+            Grid[{{Pane[row["Details"], ImageSize -> Full, Alignment -> Left],
                 Column[DeleteCases[{
-                    Style[row["Status"], Bold], Replace[dependencyVersions[row], "" -> Nothing],
+                    Style[row["Status"], Bold], Replace[row["Versions"], "" -> Nothing],
                     Row[Riffle[Map[Function[action, Button[action, perform[name, action], Method -> "Queued",
                         Enabled -> Dynamic[! busy && (supported || action === "Uninstall")]]],
                         actions], Spacer[6]]],
@@ -115,7 +120,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
     ),
     Deinitialization :> (cancelled = True; If[busy, cancelDependencyDownload[]]),
     SynchronousInitialization -> True
-]
+]]
 
 PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject)] := Module[{owner, key, dialog, rows},
     If[! dependencyDesktopQ[], Return[dependencyFailure["NotebookRequired", "Open a desktop notebook to use the dependency dialog. Scripts can use PacletDependencyInformation and the install, update and uninstall functions."]]];
@@ -124,7 +129,7 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject)] := Modu
     key = dependencyCommandOwner[owner, owner];
     dialog = Lookup[$dependencyDialogs, key, None];
     If[MemberQ[Notebooks[], dialog], SetSelectedNotebook[dialog]; Return[dialog]];
-    rows = PacletDependencyInformation[owner];
+    rows = PacletDependencyInformation[owner, "Output" -> "Association"];
     If[FailureQ[rows], Return[rows]];
     dialog = With[{name = owner["Name"], location = key}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows],
         WindowTitle -> name <> " dependencies", WindowSize -> {680, All}, WindowFrame -> "Normal",

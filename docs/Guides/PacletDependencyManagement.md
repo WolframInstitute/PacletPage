@@ -20,6 +20,7 @@ A paclet can offer additional computations through optional libraries. Its `Pacl
 ### Discovering libraries
 
 - `PacletDependencyInformation` read declarations, versions and readiness for one consumer
+- `PacletDependencyReport` expand a snapshot in a notebook or extract its records
 - `PacletDependencyDialog` review and manage its libraries in a desktop notebook
 
 ### Managing installations

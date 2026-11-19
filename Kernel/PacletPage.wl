@@ -58,7 +58,9 @@ graph of the uses.";
 PacletPageDependencies::usage = "PacletPageDependencies[dir, file] gives what a markdown page of the paclet in dir depends \
 on: the symbols it names, every symbol those reach, and the code its cache key holds.";
 
-PacletDependencyInformation::usage = "PacletDependencyInformation[owner] lists the dependencies in the owner's PacletInfo.wl and their local status. PacletDependencyInformation[owner, names] selects specific dependencies."
+PacletDependencyInformation::usage = "PacletDependencyInformation[owner] gives a report of declared libraries and their status. PacletDependencyInformation[owner, names] selects libraries. Use \"Output\" -> \"Association\" for the underlying records."
+
+PacletDependencyReport::usage = "PacletDependencyReport[owner, records] displays a dependency snapshot. report[name] gives one library's record and Normal[report] gives the association of all records."
 
 InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] installs the selected dependencies and checks their readiness. Give one name, a list of names, or All."
 
@@ -110,7 +112,7 @@ $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web
 $pacletPageVersion := $pacletPageVersion = Replace[PacletObject[File[ParentDirectory[$packageDirectory]]], {p_PacletObject :> p["Version"], _ -> None}];
 $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage";
 
-Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyDialog.wl"}];
+Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl"}];
 
 refreshStaleSites[];
 

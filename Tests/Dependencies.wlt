@@ -24,15 +24,15 @@ testDependencyOwner[required_, optional_] := PacletObject[<|
     "Dependencies" -> required, "OptionalDependencies" -> optional|>]
 
 VerificationTest[
-    PacletDependencyInformation[testDependencyOwner[{}, {}]],
+    Normal[PacletDependencyInformation[testDependencyOwner[{}, {}]]],
     <||>, TestID -> "Dependencies: empty manifest"
 ]
 
 VerificationTest[
     Module[{owner = testDependencyOwner[{"PacletTools", "Demo/A" -> "2.0.*"}, {<|"Name" -> "Demo/B", "Version" -> "1.2+"|>}]},
-        {Keys[PacletDependencyInformation[owner]], Values[PacletDependencyInformation[owner][[All, "Required"]]],
+        {Keys[PacletDependencyInformation[owner]], Values[Normal[PacletDependencyInformation[owner]][[All, "Required"]]],
             Keys[PacletDependencyInformation[owner, {"Demo/B", "PacletTools", "Demo/B"}]],
-            PacletDependencyInformation[owner, {}]}],
+            Normal[PacletDependencyInformation[owner, {}]]}],
     {{"PacletTools", "Demo/A", "Demo/B"}, {True, True, False}, {"Demo/B", "PacletTools"}, <||>},
     TestID -> "Dependencies: records and standard declarations preserve order and selection"
 ]
@@ -40,8 +40,39 @@ VerificationTest[
 VerificationTest[
     Module[{names = Join[{"PacletTools"}, Table["Demo/Optional" <> IntegerString[index], {index, 30}]], owner},
         owner = testDependencyOwner[{}, names];
-        PacletDependencyInformation[owner] === Join @@ (PacletDependencyInformation[owner, #] & /@ names)],
+        Normal[PacletDependencyInformation[owner]] === Join @@ (PacletDependencyInformation[owner, #, "Output" -> "Association"] & /@ names)],
     True, TestID -> "Dependencies: a bulk snapshot preserves the result and order of individual lookups"
+]
+
+VerificationTest[
+    With[{owner = testDependencyOwner[{}, {"Demo/Test"}]},
+        With[{report = PacletDependencyInformation[owner], raw = PacletDependencyInformation[owner, "Output" -> "Association"]},
+            {Head[report], Normal[report] === raw, report["Demo/Test"] === raw["Demo/Test"], Values[report] === Values[raw],
+                MissingQ[report["Demo/Unknown"]], First[PacletDependencyInformation[owner, "Output" -> "Invalid"]]}]],
+    {PacletDependencyReport, True, True, True, True, "DependencyOutput"}, TestID -> "Dependencies: the report preserves access to raw records"
+]
+
+VerificationTest[
+    With[{report = PacletDependencyInformation[testDependencyOwner[{}, {"Demo/Library"}]]},
+        With[{boxes = ToBoxes[report, StandardForm]},
+            {! FreeQ[boxes, _InterpretationBox], ToExpression[boxes, StandardForm] === report}]],
+    {True, True}, TestID -> "Dependencies: a notebook summary round-trips to the complete report"
+]
+
+VerificationTest[
+    With[{local = PacletObject[<|"Name" -> "Demo/Library", "Version" -> "1.0", "Description" -> "Installed description."|>]},
+        Block[{dependencyInstallations = Function[names, AssociationMap[Function[name, {local}], names]],
+                dependencyRelease = Function[Null, Throw["unexpected release lookup"]]},
+            {PacletDependencyInformation[testDependencyOwner[{}, {"Demo/Library"}]]["Demo/Library"]["Description"],
+                PacletDependencyInformation[testDependencyOwner[{}, {<|"Name" -> "Demo/Library", "Description" -> "Consumer description."|>}]]["Demo/Library"]["Description"]}]],
+    {"Installed description.", "Consumer description."}, TestID -> "Dependencies: installed metadata supplies a description when the consumer omits one"
+]
+
+VerificationTest[
+    With[{site = PacletObject[<|"Name" -> "Demo/Library", "Version" -> "1.1", "Description" -> "A release description."|>]},
+        Block[{dependencyRelease = Function[Null, <|"Version" -> "1.1", "SitePaclet" -> site|>]},
+            PacletDependencyInformation[testDependencyOwner[{}, {"Demo/Library"}], "CheckUpdates" -> True]["Demo/Library"]["Description"]]],
+    "A release description.", TestID -> "Dependencies: an explicit update lookup can supply a library description before installation"
 ]
 
 VerificationTest[
