@@ -219,10 +219,10 @@ VerificationTest[
             SetAttributes[run, HoldRest];
             run[label_, expr_] := (seen = None; cleaned = False;
                 CheckAbort[Catch[dependencyRunCheck[nb, label, seen = CurrentValue[nb, tag]; expr, cleaned = True]], Null];
-                {seen, cleaned, CurrentValue[nb, tag]});
-            {run["Check for updates", Null], run["Check readiness", Throw["interrupted"]], run["Check for updates", Abort[]]},
+                {seen, cleaned, CurrentValue[nb, tag], CurrentValue[nb, {TaggingRules, "DependencyCheckFeedback"}]});
+            {run["Check readiness", "1 passed"], run["Check readiness", Throw["interrupted"]], run["Check for updates", Abort[]]},
             NotebookClose[nb]]]],
-    {{"Check for updates", True, None}, {"Check readiness", True, None}, {"Check for updates", True, None}},
+    {{"Check readiness", True, None, "1 passed"}, {"Check readiness", True, None, ""}, {"Check for updates", True, None, ""}},
     TestID -> "Dependencies: the notebook clears its active check on completion, throw and abort"
 ]
 
