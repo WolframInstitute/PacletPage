@@ -2746,6 +2746,17 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     $endScriptCode
 ];
 
+(* the environment a run's process starts with: this kernel's, with the run's own temporary
+   directory where it has one, which the front end and the helpers it starts inherit, so that
+   processes side by side never share a temporary file *)
+runEnvironment[run_Association] := With[{tmp = Lookup[run, "TemporaryDirectory", None]},
+    If[ StringQ[tmp],
+        If[ ! DirectoryQ[tmp], CreateDirectory[tmp, CreateIntermediateDirectories -> True]];
+        Join[Association[GetEnvironment[]], <|"TMPDIR" -> tmp, "TMP" -> tmp, "TEMP" -> tmp|>],
+        Inherited
+    ]
+];
+
 (* Scripts run as separate kernel processes, at most n at a time, each one killed past its
    deadline, when its front end has not answered "FrontEndLimit" seconds after it asked for one,
    or when none of its "Record" and "Progress" files has changed for "Stall" seconds:
@@ -2760,7 +2771,7 @@ runKernelScripts[runs_List, n_Integer, what_String : "processes"] := Module[
     While[ queue =!= {} || running =!= {},
         While[ Length[running] < n && queue =!= {},
             AppendTo[running, Append[First[queue], {
-                "Process" -> StartProcess[kernelScriptCommand[kernel, First[queue]["Script"], Lookup[First[queue], "Arguments", {}]]],
+                "Process" -> StartProcess[kernelScriptCommand[kernel, First[queue]["Script"], Lookup[First[queue], "Arguments", {}]], ProcessEnvironment -> runEnvironment[First[queue]]],
                 "Start" -> AbsoluteTime[]
             }]];
             queue = Rest[queue]
@@ -3021,11 +3032,20 @@ unrecordedLogs[runs_List] := Scan[
             (* the pages it left and the end of its log, a line each, in the build's own output: a
                build on a pod that is gone once it ends keeps no work directory to read them from *)
             monitor[run["Label"] <> " left: " <> StringRiffle[Take[left, UpTo[50]], ", "] <> If[Length[left] > 50, ", and " <> ToString[Length[left] - 50] <> " more", ""]];
+            monitor[run["Label"] <> " built before it stopped: " <> Replace[builtThisRun[run], {{} -> "none", pages_ :> StringRiffle[pages, ", "]}]];
             Scan[monitor[run["Label"] <> " log: " <> #] &, logLines[run["Log"], 200]]
         ]
     ]],
     runs
 ];
+(* the pages of a run whose built page is newer than its script: built by it, so that the page it
+   stopped at is among the others *)
+builtThisRun[run_Association] := With[{script = Lookup[run, "Script", None], progress = Lookup[run, "Progress", {}]},
+    If[ ! StringQ[script] || ! FileExistsQ[script] || Length[progress] =!= Length[run["Pages"]], {},
+        Pick[run["Pages"], (FileExistsQ[#] && AbsoluteTime[FileDate[#]] >= AbsoluteTime[FileDate[script]]) & /@ progress]
+    ]
+];
+
 (* the last n lines of a log that are not blank, each up to 300 characters *)
 logLines[file_String, n_Integer] := If[ ! FileExistsQ[file], {},
     With[{lines = Select[StringSplit[ByteArrayToString[Replace[ReadByteArray[file], Except[_ByteArray] -> ByteArray[{}]], "ISO8859-1"], "\n"], StringLength[StringTrim[#]] > 0 &]},
@@ -3069,7 +3089,7 @@ pageShareRuns[source_String, docsDir_String, builtDocsDir_String, pages_List, n_
         Function[{share, index}, With[{base = FileNameJoin[{work, kind <> "-" <> IntegerString[First[index]]}]},
             Export[base <> ".wl", pageShareScript[source, docsDir, builtDocsDir, share, base <> "-record.wl", base <> ".log", dependencies, {base <> "-asked.wl", base <> "-answered.wl"}], "Text"];
             <|"Script" -> base <> ".wl", "Record" -> base <> "-record.wl", "Log" -> base <> ".log", "Pages" -> share, "Progress" -> (FileNameJoin[{builtDocsDir, #}] & /@ share),
-              "Deadline" -> limit * Length[share] + 600, "Stall" -> limit + 600,
+              "Deadline" -> limit * Length[share] + 600, "Stall" -> limit + 600, "TemporaryDirectory" -> base <> "-tmp",
               "FrontEndAsked" -> base <> "-asked.wl", "FrontEndAnswered" -> base <> "-answered.wl", "FrontEndLimit" -> $frontEndLimit,
               "Label" -> "archive: " <> kind <> " " <> IntegerString[First[index]] <> " of " <> IntegerString[Length[shares]] <> " (" <> If[Length[share] === 1, FileBaseName[First[share]], IntegerString[Length[share]] <> " pages"] <> ")"|>
         ]],

@@ -2188,10 +2188,40 @@ VerificationTest[
             unrecordedLogs[{<|"Label" -> "archive: share 3 of 8", "Pages" -> {"a.nb", "b.nb"}, "Record" -> FileNameJoin[{dir, "none.wl"}], "Log" -> log|>}]
         ];
         DeleteDirectory[dir, DeleteContents -> True];
-        {Length[out], out[[2]], out[[3]], Last[out]}
+        {Length[out], out[[2]], out[[3]], out[[4]], Last[out]}
     ],
-    {202, "archive: share 3 of 8 left: a.nb, b.nb", "archive: share 3 of 8 log: line 51", "archive: share 3 of 8 log: line 250"},
+    {203, "archive: share 3 of 8 left: a.nb, b.nb", "archive: share 3 of 8 built before it stopped: none", "archive: share 3 of 8 log: line 51", "archive: share 3 of 8 log: line 250"},
     TestID -> "Archive: a share that recorded none of its pages names them and prints the end of its log a line each"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], script, old, new, built},
+        old = FileNameJoin[{dir, "b.nb"}]; Export[old, "Notebook[{}]", "Text"];
+        Pause[1.2];
+        script = FileNameJoin[{dir, "share-1.wl"}]; Export[script, "1", "Text"];
+        Pause[1.2];
+        new = FileNameJoin[{dir, "a.nb"}]; Export[new, "Notebook[{}]", "Text"];
+        built = builtThisRun[<|"Script" -> script, "Pages" -> {"a.nb", "b.nb", "c.nb"}, "Progress" -> {new, old, FileNameJoin[{dir, "c.nb"}]}|>];
+        DeleteDirectory[dir, DeleteContents -> True];
+        built
+    ],
+    {"a.nb"},
+    TestID -> "Archive: the pages a share built before it stopped are those newer than its script"
+]
+
+VerificationTest[
+    Module[{work = CreateDirectory[], tmp, script, out, seen},
+        tmp = FileNameJoin[{work, "share-1-tmp"}];
+        out = FileNameJoin[{work, "seen.wl"}];
+        script = FileNameJoin[{work, "share-1.wl"}];
+        Export[script, "Put[$TemporaryDirectory, " <> ToString[out, InputForm] <> "];", "Text"];
+        runKernelScripts[{<|"Script" -> script, "Deadline" -> 120, "TemporaryDirectory" -> tmp|>}, 1];
+        seen = If[FileExistsQ[out], Get[out], None];
+        DeleteDirectory[work, DeleteContents -> True];
+        {runEnvironment[<||>], StringQ[seen] && FileNameSplit[ExpandFileName[seen]][[-1]] === "share-1-tmp"}
+    ],
+    {Inherited, True},
+    TestID -> "Archive: a share's process has a temporary directory of its own, and a run without one inherits this kernel's environment"
 ]
 
 VerificationTest[
