@@ -140,7 +140,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
         Dynamic[If[rows === <||>, "This paclet declares no dependencies.",
             Pane[Column[KeyValueMap[rowPanel, rows],
                     ItemSize -> {{Scaled[1]}}, Spacings -> 1.2],
-                ImageSize -> {Full, UpTo[400]}, Scrollbars -> {False, Automatic}]], TrackedSymbols :> {rows, notices, copied}],
+                ImageSize -> {Full, UpTo[400]}, Scrollbars -> {False, Automatic}, AppearanceElements -> None]], TrackedSymbols :> {rows, notices, copied}],
         Grid[{{Grid[{{
             dependencyCheckControl["Check readiness", "Test whether installed libraries work in this kernel.",
                 startCheck[True, ButtonNotebook[]], cancelled],
@@ -207,7 +207,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                         FailureQ[result], result["Message"], FailureQ[fresh], fresh["Message"],
                         rows[name]["Status"] === "Restart required", "Restart the kernel to use the changed library.",
                         action === "Uninstall", "Removed from the user repository.",
-                        StringQ[rows[name]["InstalledVersion"]] && action === "Update", "Update check complete.",
+                        action === "Update" && StringQ[rows[name]["InstalledVersion"]], "Version " <> rows[name]["InstalledVersion"] <> " is installed.",
                         True, "Installation complete."],
                     operation = None; If[MemberQ[Notebooks[], nb], dependencySetActivity[nb, None]]]
             ]];
