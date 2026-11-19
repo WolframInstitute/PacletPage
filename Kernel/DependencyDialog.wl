@@ -59,10 +59,21 @@ dependencyDialogRows[rows_] := With[{counts = Counts[dependencyShortName /@ Keys
         name -> dependencyDialogRow[row, If[counts[short] === 1, short, name]]]], rows]
 ]
 
+(* Both buttons occupy the same space while idle, checking, and stopping. *)
+SetAttributes[dependencyCheckControl, HoldRest]
+dependencyCheckControl[label_String, hint_String, start_, operation_, cancelled_] := PaneSelector[{
+    False -> Tooltip[Button[label, start, Enabled -> Dynamic[operation === None], Method -> "Queued",
+        ImageSize -> {128, 26}], hint],
+    True -> Tooltip[Button[Row[{ProgressIndicator[Appearance -> "Necklace", ImageSize -> {14, 14}], Spacer[6],
+            Dynamic[If[cancelled, "Stopping…", "Cancel check"]]}],
+        cancelled = True, Enabled -> Dynamic[! cancelled], Method -> "Preemptive", ImageSize -> {128, 26}],
+        "Stop after the current library."]
+}, Dynamic[operation === label], ImageSize -> All]
+
 (* Redraw the rows only when their data change. Progress updates touch just the footer. *)
 dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
         initialRows = dependencyDialogRows[initial], heading = dependencyDialogHeading[initial], packageFile = FileNameJoin[{$packageDirectory, "PacletPage.wl"}]}, DynamicModule[
-    {rows = initialRows, notices = <||>, copied = None, busy = False, cancelled = False, stage = "", fraction = None,
+    {rows = initialRows, notices = <||>, copied = None, operation = None, cancelled = False, stage = "", fraction = None,
         run, refresh, perform, rowPanel},
     Framed[Column[{
         Column[{Style[heading, 18, Bold], "Install, upgrade, or remove libraries as needed."}, Alignment -> Left, Spacings -> .6],
@@ -70,32 +81,35 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
             Pane[Column[KeyValueMap[rowPanel, rows],
                     ItemSize -> {{Scaled[1]}}, Spacings -> 1.2],
                 ImageSize -> {Full, UpTo[400]}, Scrollbars -> {False, Automatic}]], TrackedSymbols :> {rows, notices, copied}],
-        Dynamic[If[busy, Row[{stage, Spacer[12], If[NumberQ[fraction], ProgressIndicator[fraction, {0, 1}],
+        Dynamic[If[MemberQ[{"Install", "Update", "Uninstall"}, operation], Row[{stage, Spacer[12], If[NumberQ[fraction], ProgressIndicator[fraction, {0, 1}],
                 ProgressIndicator[Appearance -> "Indeterminate"]], Spacer[12],
             Button["Cancel", cancelled = True; cancelDependencyDownload[], Method -> "Preemptive",
-                Enabled -> Dynamic[! cancelled && MemberQ[{"Checking release", "Checking for updates", "Downloading", "Retrying"}, stage]]]}], Spacer[{0, 0}]],
-            TrackedSymbols :> {busy, stage, fraction}],
-        Grid[{{Row[{Button["Check readiness", refresh[True, False], Enabled -> Dynamic[! busy], Method -> "Queued"], Spacer[8],
-            Button["Check for updates", refresh[False, True], Enabled -> Dynamic[! busy], Method -> "Queued"]}],
-            DefaultButton["Close", cancelled = True; If[busy, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
+                Enabled -> Dynamic[! cancelled && MemberQ[{"Checking release", "Downloading", "Retrying"}, stage]]]}], Spacer[{0, 0}]],
+            TrackedSymbols :> {operation, stage, fraction}],
+        Grid[{{Row[{
+            dependencyCheckControl["Check readiness", "Test whether installed libraries work in this kernel.",
+                refresh[True], operation, cancelled], Spacer[8],
+            dependencyCheckControl["Check for updates", "Look up the latest compatible versions.",
+                refresh[False], operation, cancelled]}],
+            DefaultButton["Close", cancelled = True; If[operation =!= None, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
             ItemSize -> {{Scaled[.72], Scaled[.28]}}, Alignment -> {{Left, Right}, Center}]
     }, ItemSize -> {{Scaled[1]}}, Spacings -> 1.3, Alignment -> Left, Dividers -> {False, {False, False, False, GrayLevel[.85], False}}], FrameMargins -> 16, FrameStyle -> None],
     Initialization :> (
         If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Get[packageFile]]];
         SetAttributes[run, HoldRest];
-        run[caption_, expr_] := If[! busy, WithCleanup[
-            busy = True; cancelled = False; stage = caption; fraction = None; FinishDynamic[];
+        run[caption_, expr_] := If[operation === None, WithCleanup[
+            operation = caption; cancelled = False; stage = caption; fraction = None; FinishDynamic[];
             Block[{dependencyCancelledQ = Function[Null, cancelled],
                     $dependencyProgress = Function[{step, value}, stage = step; fraction = value; FinishDynamic[]]}, expr],
-            busy = False; stage = ""; fraction = None]];
-        refresh[probe_, updates_] := run[If[updates, "Checking for updates", "Checking readiness"],
-            With[{fresh = PacletDependencyInformation[owner, Keys[rows], "CheckReadiness" -> probe, "CheckUpdates" -> updates, "Output" -> "Association"]},
+            operation = None; stage = ""; fraction = None; FinishDynamic[]]];
+        refresh[probe_] := run[If[probe, "Check readiness", "Check for updates"],
+            With[{fresh = PacletDependencyInformation[owner, Keys[rows], "CheckReadiness" -> probe, "CheckUpdates" -> ! probe, "Output" -> "Association"]},
                 If[AssociationQ[fresh],
                     rows = AssociationMap[Function[name, With[{old = rows[name], new = fresh[name]},
                         If[! AssociationQ[new], old, dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], new,
                             If[! probe && new["Status"] === "Installed" && old["InstalledVersion"] === new["InstalledVersion"],
                                 KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]]]]], Keys[fresh]];
-                    notices = (#["Message"] & /@ Select[fresh, FailureQ]) ]]];
+                    notices = (#["Message"] & /@ Select[fresh, FailureQ[#] && First[#] =!= "DependencyCancelled" &]) ]]];
         perform[name_, action_] := run[action, Module[{result, fresh},
             result = dependencyAction[action][owner, name];
             result = If[AssociationQ[result], result[name], result];
@@ -113,18 +127,18 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                 Column[DeleteCases[{
                     row["Status"],
                     Row[Riffle[Map[Function[action, Button[If[action === "Update", "Upgrade", action], perform[name, action], ImageSize -> {100, Automatic}, Method -> "Queued",
-                        Enabled -> Dynamic[! busy && (supported || action === "Uninstall")]]],
+                        Enabled -> Dynamic[operation === None && (supported || action === "Uninstall")]]],
                         actions], Spacer[6]]],
                     If[actions === {}, Nothing, With[{action = First[actions]},
                         Button[If[copied === name, "Copied", "Copy " <> ToLowerCase[action] <> " command"],
                             CopyToClipboard[dependencyCommand[commandOwner, action, name]]; copied = name,
-                            Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[! busy && (supported || action === "Uninstall")]]]],
+                            Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[operation === None && (supported || action === "Uninstall")]]]],
                     Lookup[notices, name, Which[
                         FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"],
                         FailureQ[row["LatestVersion"]], row["LatestVersion"]["Message"], True, Nothing]]
                 }, Nothing], Alignment -> Right, Spacings -> .5]}}, ItemSize -> {{Scaled[.65], Scaled[.35]}}, Alignment -> {{Left, Right}, Top}]]
     ),
-    Deinitialization :> (cancelled = True; If[busy, cancelDependencyDownload[]]),
+    Deinitialization :> (cancelled = True; If[operation =!= None, cancelDependencyDownload[]]),
     SynchronousInitialization -> True
 ]]
 

@@ -180,6 +180,21 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{names = {"Demo/First", "Demo/Second"}, owner, libraries, exercise},
+        owner = testDependencyOwner[{}, <|"Name" -> #, "Check" -> "Demo`Consumer`readyQ"|> & /@ names];
+        libraries = PacletObject[<|"Name" -> #, "Version" -> "1.0"|>] & /@ names;
+        exercise[probe_] := Module[{stopped = False, calls = 0, rows},
+            Block[{dependencyInstallations = (AssociationThread[names, List /@ libraries] &), dependencyCancelledQ = (stopped &),
+                    dependencyReadiness = Function[Null, calls++; stopped = True; True],
+                    dependencyRelease = Function[Null, calls++; stopped = True; <|"Version" -> "1.1"|>]},
+                rows = PacletDependencyInformation[owner, "CheckReadiness" -> probe, "CheckUpdates" -> ! probe, "Output" -> "Association"]];
+            {calls, rows[First[names]][If[probe, "Status", "LatestVersion"]], First[rows[Last[names]]]}];
+        exercise /@ {True, False}],
+    {{1, "Ready", "DependencyCancelled"}, {1, "1.1", "DependencyCancelled"}},
+    TestID -> "Dependencies: cancelling either check completes the active library and skips the next probe or lookup"
+]
+
+VerificationTest[
     {First[UpdatePacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]],
         UninstallPacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]},
     {"DependencyNotInstalled", Null}, TestID -> "Dependencies: updating or removing an absent dependency"
