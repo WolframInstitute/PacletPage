@@ -195,18 +195,23 @@ VerificationTest[
 ]
 
 VerificationTest[
-    UsingFrontEnd[Module[{nb = CreateDocument[{}, Visible -> False], observed, finished, exercise, task, result},
+    With[{boxes = ToBoxes[dependencyCheckControl["Check readiness", "Test readiness.", testStart[], None, testCancelled]]},
+        Cases[boxes, ButtonBox[_, opts___] /; ! FreeQ[HoldComplete[opts], testStart | testCancelled] :>
+            FirstCase[HoldComplete[opts], HoldPattern[Method -> m_] :> m, None, {1}], Infinity]],
+    {"Queued", "Preemptive"}, TestID -> "Dependencies: a check uses the main evaluation queue and cancellation uses the preemptive link"
+]
+
+VerificationTest[
+    UsingFrontEnd[Module[{nb = CreateDocument[{}, Visible -> False], tag = {TaggingRules, "DependencyCheck"}, seen, cleaned, run},
         WithCleanup[
-            exercise[label_] := (observed = None; finished = False;
-                task = dependencyScheduleCheck[nb, label, Function[Null, observed = CurrentValue[nb, {TaggingRules, "DependencyCheck"}]],
-                    Function[Null, finished = True]];
-                TaskWait[task]; {observed, finished, CurrentValue[nb, {TaggingRules, "DependencyCheck"}]});
-            result = exercise /@ {"Check readiness", "Check for updates"};
-            Block[{SessionSubmit = Function[Null, $Failed, HoldAll]}, finished = False;
-                dependencyScheduleCheck[nb, "Check readiness", (Throw["Unexpected work"] &), Function[Null, finished = True]]];
-            {result, finished, CurrentValue[nb, {TaggingRules, "DependencyCheck"}]}, NotebookClose[nb]]]],
-    {{{"Check readiness", True, None}, {"Check for updates", True, None}}, True, None},
-    TestID -> "Dependencies: the live notebook displays each active check while it runs and returns to idle after completion or scheduling failure"
+            SetAttributes[run, HoldRest];
+            run[label_, expr_] := (seen = None; cleaned = False;
+                CheckAbort[Catch[dependencyRunCheck[nb, label, seen = CurrentValue[nb, tag]; expr, cleaned = True]], Null];
+                {seen, cleaned, CurrentValue[nb, tag]});
+            {run["Check for updates", Null], run["Check readiness", Throw["interrupted"]], run["Check for updates", Abort[]]},
+            NotebookClose[nb]]]],
+    {{"Check for updates", True, None}, {"Check readiness", True, None}, {"Check for updates", True, None}},
+    TestID -> "Dependencies: the notebook clears its active check on completion, throw and abort"
 ]
 
 VerificationTest[

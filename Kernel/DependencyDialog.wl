@@ -75,7 +75,7 @@ SetAttributes[dependencyCheckControl, HoldRest]
 dependencyCheckControl[label_String, hint_String, start_, operation_, cancelled_] := With[{
         spinner = ProgressIndicator[Appearance -> "Necklace", ImageSize -> {14, 14}], size = {140, 26}},
     PaneSelector[{
-        None -> Tooltip[Button[label, start, Enabled -> Dynamic[operation === None], Method -> "Preemptive", ImageSize -> size], hint],
+        None -> Tooltip[Button[label, start, Enabled -> Dynamic[operation === None], Method -> "Queued", ImageSize -> size], hint],
         label -> Tooltip[Button[Row[{spinner, Spacer[6], "Cancel check"}],
             cancelled = True; CurrentValue[ButtonNotebook[], {TaggingRules, "DependencyCheck"}] = "Stopping " <> label,
             Method -> "Preemptive", ImageSize -> size], "Stop after the current library."],
@@ -84,14 +84,14 @@ dependencyCheckControl[label_String, hint_String, start_, operation_, cancelled_
         Button[label, Null, Enabled -> False, ImageSize -> size], ImageSize -> All]
 ]
 
-(* Return to the front end before a remote lookup or native runtime check occupies the kernel. *)
-dependencyScheduleCheck[nb_NotebookObject, label_String, check_, finish_] := Module[{frontEnd = $FrontEnd, cleanup, task},
-    cleanup[] := (finish[]; If[MemberQ[Notebooks[], nb], CurrentValue[nb, {TaggingRules, "DependencyCheck"}] = None]);
-    CurrentValue[nb, {TaggingRules, "DependencyCheck"}] = label;
-    task = SessionSubmit[ScheduledTask[Block[{$FrontEnd = frontEnd},
-        WithCleanup[If[MemberQ[Notebooks[], nb], check[]], cleanup[]]], {0.05, 1}]];
-    If[! MatchQ[task, _TaskObject], cleanup[]];
-    task
+(* The start button runs on the main evaluation link. The front end can still paint the
+   selector and send Cancel on the preemptive link while the main kernel waits for I/O. *)
+SetAttributes[dependencyRunCheck, HoldRest]
+dependencyRunCheck[nb_NotebookObject, label_String, work_, finish_] := WithCleanup[
+    If[MemberQ[Notebooks[], nb],
+        CurrentValue[nb, {TaggingRules, "DependencyCheck"}] = label;
+        work],
+    finish; If[MemberQ[Notebooks[], nb], CurrentValue[nb, {TaggingRules, "DependencyCheck"}] = None]
 ]
 
 (* Redraw the rows only when their data change. Progress updates touch just the footer. *)
@@ -128,12 +128,10 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                     $dependencyProgress = Function[{step, value}, stage = step; fraction = value; FinishDynamic[]]}, expr],
             operation = None; stage = ""; fraction = None; FinishDynamic[]]];
         startCheck[probe_, nb_NotebookObject] := If[operation === None, With[{label = If[probe, "Check readiness", "Check for updates"]},
-            operation = label; cancelled = False; feedback = "";
-            With[{task = dependencyScheduleCheck[nb, label,
-                    Function[Null, If[cancelled, feedback = "Check stopped.", Block[{dependencyCancelledQ = Function[Null, cancelled]}, refresh[probe]]]],
-                    Function[Null, operation = None]]},
-                If[! MatchQ[task, _TaskObject], feedback = "Could not start this check. Try again."];
-                task]
+            dependencyRunCheck[nb, label,
+                operation = label; cancelled = False; feedback = "";
+                Block[{dependencyCancelledQ = Function[Null, cancelled]}, refresh[probe]],
+                operation = None]
         ]];
         refresh[probe_] := With[{fresh = PacletDependencyInformation[owner, Keys[rows], "CheckReadiness" -> probe, "CheckUpdates" -> ! probe, "Output" -> "Association"]},
                 If[AssociationQ[fresh],
