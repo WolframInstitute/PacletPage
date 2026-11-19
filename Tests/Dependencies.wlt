@@ -19,6 +19,28 @@ VerificationTest[
     {"DependencyManagerRequired", True}, TestID -> "Dependencies: a legacy release gives an explicit first-install command"
 ]
 
+VerificationTest[
+    Module[{root = CreateDirectory[], checkout = DirectoryName[$TestFileName, 2], source, resources, loader,
+            archive, consumer, packages = "WolframInstitute`PacletPage`", files = {}, reused, result},
+        WithCleanup[
+            source = CreateDirectory[FileNameJoin[{root, "manager", "Kernel"}]];
+            CopyFile[FileNameJoin[{checkout, "PacletInfo.wl"}], FileNameJoin[{DirectoryName[source], "PacletInfo.wl"}]];
+            CopyFile[FileNameJoin[{checkout, "Kernel", "PacletPage.wl"}], FileNameJoin[{source, "PacletPage.wl"}]];
+            resources = CreateDirectory[FileNameJoin[{root, "consumer", "Resources"}]];
+            Put[PacletObject[<|"Name" -> "Demo/Consumer", "Version" -> "1.0"|>], FileNameJoin[{DirectoryName[resources], "PacletInfo.wl"}]];
+            loader = CopyFile[FileNameJoin[{checkout, "Assets", "LoadDependencyManager.wl"}], FileNameJoin[{resources, "LoadDependencyManager.wl"}]];
+            archive = CreatePacletArchive[DirectoryName[source], root];
+            CopyFile[archive, FileNameJoin[{resources, "PacletPage.paclet"}]];
+            consumer = PacletObject[File[CreatePacletArchive[DirectoryName[resources], root]]];
+            Block[{$Packages = DeleteCases[$Packages, packages], $CacheBaseDirectory = root, PacletFind = ({} &),
+                    PacletDirectoryLoad = (Null &), Needs = Function[{context, file}, AppendTo[files, file]; Null]},
+                result = Get[loader];
+                reused = Block[{ExtractPacletArchive = (Throw["Unexpected second extraction"] &)}, Get[loader]]];
+            {consumer["Name"], result, reused, MatchQ[files, {_String, _String}] && SameQ @@ files && FileExistsQ[First[files]]},
+            DeleteDirectory[root, DeleteContents -> True]]],
+    {"Demo/Consumer", Null, Null, True}, TestID -> "Dependencies: a packaged offline consumer keeps its own identity and reuses its cached manager"
+]
+
 testDependencyOwner[required_, optional_] := PacletObject[<|
     "Name" -> "Demo/Consumer", "Version" -> "1.0", "PrimaryContext" -> "Demo`Consumer`",
     "Dependencies" -> required, "OptionalDependencies" -> optional|>]

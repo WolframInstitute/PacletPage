@@ -112,14 +112,14 @@ If[!DirectoryQ[resources], CreateDirectory[resources]];
 CopyFile[manager["AssetLocation", "DependencyLoader"], FileNameJoin[{resources, "LoadDependencyManager.wl"}]]
 ```
 
-To make setup work offline from the first run, also copy the unpacked PacletPage release into the consumer before packaging it. Use the installed release directory for this step.
+For offline setup, put the publisher's PacletPage release archive beside the loader and name it `PacletPage.paclet`. Here `archive` is the path to that release file.
 
 ```wl
 #| eval: false
-CopyDirectory[manager["Location"], FileNameJoin[{resources, "PacletPage"}]]
+CopyFile[archive, FileNameJoin[{resources, "PacletPage.paclet"}]]
 ```
 
-The loader prefers a compatible installed copy. If it finds only the bundled copy, it registers that directory for the session. It checks the functions the paclet supplies, so two builds with the same version can be distinguished. If neither copy supplies the manager, the returned failure gives the explicit publisher install command. A kernel that already loaded an older package receives a restart instruction.
+The loader prefers a compatible installed copy. On first use of a bundled archive, it extracts it into the user's cache and registers that directory for the session. Other consumers can reuse the same cached release. The loader checks the interface the paclet supplies, so two builds with the same version can be distinguished. If neither copy supplies the manager, the returned failure gives the publisher's install command. A kernel that already loaded an older package receives a restart instruction.
 
 ## Connect an existing consumer
 

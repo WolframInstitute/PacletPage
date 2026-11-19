@@ -1,23 +1,20 @@
-(* Copy this file into a consumer's Resources directory and Get it from its setup command.
-   An offline distribution can put an unpacked PacletPage release beside it in PacletPage/. *)
+(* Copy this loader into the consumer's Resources directory. For offline setup put a
+   compatible PacletPage.paclet archive beside it. Only an explicit setup call loads it. *)
 Module[{name = "WolframInstitute/PacletPage", context = "WolframInstitute`PacletPage`",
-        functions, providesManager, loadedManager, selected, bundled, file, command},
+        functions, report, providesManager, loadedManager, selected, bundled, cache, staging, unpacked, file, command},
     functions = context <> # & /@ {"PacletDependencyDialog", "PacletDependencyInformation", "InstallPacletDependencies",
         "UpdatePacletDependencies", "UninstallPacletDependencies"};
+    report = context <> "PacletDependencyReport";
     providesManager = Function[paclet, MatchQ[paclet, _PacletObject] && paclet["Name"] === name &&
         ContainsAll[Flatten[Cases[paclet["PacletInfo"]["Extensions"], {"Kernel", opts___} :>
-            Lookup[Association[opts], "Symbols", {}]]], functions]];
-    loadedManager = Function[Null, AllTrue[functions, NameQ[#] && ToExpression[#, InputForm, DownValues] =!= {} &]];
+            Lookup[Association[opts], "Symbols", {}]]], Append[functions, report]]];
+    loadedManager = Function[Null, NameQ[report] && ToExpression[report, InputForm, UpValues] =!= {} &&
+        AllTrue[functions, NameQ[#] && ToExpression[#, InputForm, DownValues] =!= {} &]];
     If[MemberQ[$Packages, context] && loadedManager[], Return[Null, Module]];
 
     selected = SelectFirst[PacletFind[name], providesManager, None];
-    If[selected === None,
-        bundled = FileNameJoin[{DirectoryName[$InputFileName], "PacletPage"}];
-        If[FileExistsQ[FileNameJoin[{bundled, "PacletInfo.wl"}]],
-            With[{paclet = PacletObject[File[bundled]]},
-                If[providesManager[paclet], selected = paclet; PacletDirectoryLoad[bundled]]]]
-    ];
-    If[selected === None,
+    bundled = FileNameJoin[{DirectoryName[$InputFileName], "PacletPage.paclet"}];
+    If[selected === None && ! (FileExistsQ[bundled] && providesManager[Quiet[PacletObject[File[bundled]]]]),
         command = "PacletInstall[ResourceObject[\"https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/PacletPage\"], ForceVersionInstall -> True]";
         Return[Failure["DependencyManagerRequired", <|
             "MessageTemplate" -> "Setup needs a PacletPage release with dependency management. Run `1`, then retry setup in a fresh kernel.",
@@ -26,7 +23,21 @@ Module[{name = "WolframInstitute/PacletPage", context = "WolframInstitute`Paclet
     If[MemberQ[$Packages, context], Return[Failure["DependencyManagerRestart", <|
         "MessageTemplate" -> "This kernel has an earlier PacletPage loaded. Restart the kernel and retry setup."|>], Module]];
 
-    (* A registered development copy can have the same version as an older installation. *)
+    If[selected === None,
+        (* Keep the consumer's archive intact. Several consumers or kernels can share the same extracted release. *)
+        cache = FileNameJoin[{$CacheBaseDirectory, "WolframInstitute", "PacletPage", "DependencyManager", FileHash[bundled, "SHA256", "HexString"]}];
+        If[! DirectoryQ[cache],
+            staging = Quiet[CreateDirectory[FileNameJoin[{DirectoryName[cache], CreateUUID["unpack-"]}]]];
+            If[StringQ[staging], WithCleanup[
+                unpacked = Quiet[ExtractPacletArchive[bundled, staging]];
+                If[StringQ[unpacked], Quiet[RenameDirectory[unpacked, cache]]],
+                DeleteDirectory[staging, DeleteContents -> True]]]
+        ];
+        If[! FileExistsQ[FileNameJoin[{cache, "Kernel", "PacletPage.wl"}]], Return[Failure["DependencyManagerBundle", <|
+            "MessageTemplate" -> "Could not unpack the bundled dependency manager into `1`.", "MessageParameters" -> {cache}|>], Module]];
+        PacletDirectoryLoad[cache];
+        selected = PacletObject[File[cache]]
+    ];
     file = FileNameJoin[{selected["Location"], "Kernel", "PacletPage.wl"}];
     Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Needs[context, file]];
     If[loadedManager[], Null, Failure["DependencyManagerLoad", <|
