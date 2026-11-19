@@ -50,6 +50,14 @@ dependencyRowActions[row_] := If[! StringQ[row["InstalledVersion"]], {"Install"}
     If[row["Status"] =!= "Unsupported" && StringQ[row["LatestVersion"]] &&
         PacletNewerQ[row["LatestVersion"], row["InstalledVersion"]], "Update", Nothing]}]
 
+(* Cancellation belongs to the action. Always read the local installation state afterwards. *)
+dependencyDialogAction[owner_, name_, action_, cancelledQ_, progress_] := Module[{result, fresh},
+    result = Block[{dependencyCancelledQ = cancelledQ, $dependencyProgress = progress},
+        dependencyAction[action][owner, name]];
+    fresh = PacletDependencyInformation[owner, name, "Output" -> "Association"];
+    {If[AssociationQ[result], result[name], result], If[AssociationQ[fresh], fresh[name], fresh]}
+]
+
 (* Prepare the display in the owning kernel, keeping the full identifier for each action. *)
 dependencyDialogRow[row_, label_] := Join[row, <|"Label" -> label, "Details" -> dependencyDetails[row, label],
     "Actions" -> dependencyRowActions[row]|>]
@@ -132,8 +140,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
             operation = caption; cancelled = False;
             CurrentValue[ButtonNotebook[], {TaggingRules, "DependencyCheckFeedback"}] = "";
             stage = caption; fraction = None; FinishDynamic[];
-            Block[{dependencyCancelledQ = Function[Null, cancelled],
-                    $dependencyProgress = Function[{step, value}, stage = step; fraction = value; FinishDynamic[]]}, expr],
+            expr,
             operation = None; stage = ""; fraction = None; FinishDynamic[]]];
         startCheck[probe_, nb_NotebookObject] := If[operation === None, With[{label = If[probe, "Check readiness", "Check for updates"]},
             dependencyRunCheck[nb, label,
@@ -166,14 +173,14 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                 probe, dependencyReadinessSummary[rows], True, ""]
         ];
         perform[name_, action_] := run[action, Module[{result, fresh},
-            result = dependencyAction[action][owner, name];
-            result = If[AssociationQ[result], result[name], result];
-            fresh = PacletDependencyInformation[owner, name, "Output" -> "Association"];
-            If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[KeyTake[rows[name], {"LatestVersion", "Description"}], fresh[name]], rows[name]["Label"]]];
+            {result, fresh} = dependencyDialogAction[owner, name, action, Function[Null, cancelled],
+                Function[{step, value}, stage = step; fraction = value; FinishDynamic[]]];
+            If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[KeyTake[rows[name], {"LatestVersion", "Description"}], fresh], rows[name]["Label"]]];
             If[rows[name]["Status"] === "Installed" && KeyExistsQ[rows[name], "Check"],
                 Which[MatchQ[result, Failure["DependencySetupRequired", _]], rows[name] = Append[rows[name], "Status" -> "Needs setup"],
                     MatchQ[result, _PacletObject], rows[name] = Append[rows[name], "Status" -> "Ready"]]];
-            notices[name] = Which[FailureQ[result], result["Message"],
+            notices[name] = Which[MatchQ[result, Failure["DependencyCancelled", _]], "Cancelled.",
+                FailureQ[result], result["Message"], FailureQ[fresh], fresh["Message"],
                 rows[name]["Status"] === "Restart required", "Restart the kernel to use the changed library.",
                 action === "Uninstall", "Removed from the user repository.",
                 StringQ[rows[name]["InstalledVersion"]] && action === "Update", "Update check complete.",

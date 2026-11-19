@@ -242,6 +242,15 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{name = "PacletPageTest/Absent", stopped = False, result, row},
+        Block[{dependencyInstall = Function[Null, stopped = True; If[dependencyCancelledQ[], dependencyCancelled[], $Failed]]},
+            {result, row} = dependencyDialogAction[testDependencyOwner[{}, {name}], name, "Install", Function[Null, stopped], (Null &)]];
+        {First[result], AssociationQ[row], row["Name"], row["Status"], dependencyRowActions[row]}],
+    {"DependencyCancelled", True, "PacletPageTest/Absent", "Not installed", {"Install"}},
+    TestID -> "Dependencies: cancelling a row action still reads its local record and restores Install"
+]
+
+VerificationTest[
     {First[UpdatePacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]],
         UninstallPacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]},
     {"DependencyNotInstalled", Null}, TestID -> "Dependencies: updating or removing an absent dependency"
