@@ -18,7 +18,7 @@ RelatedTutorials: [DependencyManagement]
 
 ## Details & Options
 
-- The dialog opens with local versions and statuses. Choose **Check readiness** to run consumer checks or **Check for updates** to look up releases. Select **Install** or **Update** for a library. Installed optional libraries also offer **Uninstall**.
+- The dialog opens with local versions and statuses. Choose **Check readiness** to run consumer checks or **Check for updates** to look up releases. Select **Install** or **Update** for a library. Installed optional libraries also offer **Uninstall**, except for PacletPage itself.
 - Each row shows the consumer's description or, when available, the description from the installed library. Authors can declare a description so users can read it before installation. Rows can also include the download size, license and setup links.
 - Use the copy control to take the corresponding install, update or uninstall command to another notebook.
 - An operation keeps the dialog open. A transfer shows progress and offers cancellation. Opening setup again selects the existing dialog for that consumer.

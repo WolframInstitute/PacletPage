@@ -198,6 +198,14 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{manager = "WolframInstitute/PacletPage"},
+        With[{owner = testDependencyOwner[{}, {manager}]},
+            {UninstallPacletDependencies[owner, All], First[UninstallPacletDependencies[owner, manager][manager]],
+                dependencyRowActions[PacletDependencyInformation[owner][manager]]}]],
+    {<||>, "DependencyManagerInUse", {"Update"}}, TestID -> "Dependencies: even an optional manager cannot uninstall itself"
+]
+
+VerificationTest[
     dependencyRowActions /@ {<|"Required" -> True, "InstalledVersion" -> "1.0"|>,
         <|"Required" -> False, "InstalledVersion" -> "1.0"|>, <|"Required" -> True, "InstalledVersion" -> Missing[]|>},
     {{"Update"}, {"Update", "Uninstall"}, {"Install"}}, TestID -> "Dependencies: dialog actions protect required installations"

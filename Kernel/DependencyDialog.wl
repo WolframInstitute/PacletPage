@@ -45,8 +45,8 @@ dependencyVersions[row_] := StringRiffle[{
 
 dependencyRowActions[row_] := Which[
     ! StringQ[row["InstalledVersion"]], {"Install"},
-    TrueQ[row["Required"]], {"Update"},
-    True, {"Update", "Uninstall"}
+    dependencyRemovableQ[row], {"Update", "Uninstall"},
+    True, {"Update"}
 ]
 
 (* Prepare these fields in the owning kernel so a notebook can paint its first frame immediately. *)

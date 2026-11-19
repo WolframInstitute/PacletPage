@@ -17,6 +17,7 @@ RelatedTutorials: [DependencyManagement]
 ## Details & Options
 
 - Give a full dependency name, a list, or `All`. `All` selects the owner's optional dependencies. Explicitly selecting a required dependency gives a `"RequiredDependency"` failure for that name.
+- PacletPage also protects its own installation during dependency management. An explicit request to remove an optional PacletPage dependency returns `"DependencyManagerInUse"`.
 - Each successfully removed or already absent optional dependency has the value `Null` in the result association.
 - Removal applies to the current user’s paclet repository. A dependency supplied solely by the Wolfram installation or a development directory gives `"ExternalInstallation"`.
 - Removing a user installation affects other paclets that use it. A system copy or a registered development copy can become visible after removal.

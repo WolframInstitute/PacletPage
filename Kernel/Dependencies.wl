@@ -145,8 +145,9 @@ InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), nam
     dependencyMap[dependencyInstall[#1, #2, False] &, owner, names]
 UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
     dependencyMap[dependencyInstall[#1, #2, True] &, owner, names]
+dependencyRemovableQ[entry_] := ! TrueQ[entry["Required"]] && entry["Name"] =!= "WolframInstitute/PacletPage"
 UninstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
-    dependencyMap[dependencyUninstall, owner, names, If[names === All, Select[! #["Required"] &], Identity]]
+    dependencyMap[dependencyUninstall, owner, names, If[names === All, Select[dependencyRemovableQ], Identity]]
 
 dependencyChecked[owner_, entry_, paclet_] := Module[{readiness},
     If[KeyExistsQ[$dependencyRestarts, entry["Name"]] || ! KeyExistsQ[entry, "Check"], Return[paclet]];
@@ -179,7 +180,9 @@ dependencyInstall[owner_, entry_, update_] := Module[{name = entry["Name"], inst
 ]
 
 dependencyUninstall[owner_, entry_] := Module[{name = entry["Name"], userCopies, loaded, result},
-    If[entry["Required"], Return[dependencyFailure["RequiredDependency", "`1` requires `2`.", owner["Name"], name]]];
+    If[! dependencyRemovableQ[entry], Return[If[entry["Required"],
+        dependencyFailure["RequiredDependency", "`1` requires `2`.", owner["Name"], name],
+        dependencyFailure["DependencyManagerInUse", "`1` is running this dependency manager.", name]]]];
     userCopies = PacletFind[name, "Location" -> FileNameJoin[{$UserBasePacletsDirectory, "Repository"}],
         "WolframVersion" -> All, "SystemID" -> All, "Enabled" -> All];
     If[userCopies === {}, Return[If[PacletFind[name] === {}, Null,
