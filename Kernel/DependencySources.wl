@@ -81,7 +81,7 @@ dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text
             resource = entry["Resource"];
             desc = release["DescriptionURL"];
             If[! dependencyPublisherURLQ[resource, desc], Return[dependencyFailure["DependencyPublisher", "Unexpected release description address for `1`.", name]]];
-            text = Block[{CloudConnect = ($Failed &)}, Quiet[TimeConstrained[Import[desc, "Text"], 60, $Failed]]];
+            text = Block[{CloudConnect = ($Failed &)}, Quiet[TimeConstrained[Import[CloudObject[desc], "Text"], 60, $Failed]]];
             If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
             If[! StringQ[text], Return[dependencyFailure["DependencyRelease", "Could not read the release description for `1`.", name]]];
             url = dependencyArchiveURL[text, name, release["Version"], $SystemID];
