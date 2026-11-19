@@ -76,34 +76,44 @@ dependencySupportedQ[entry_] := With[{systems = Lookup[entry, "Platforms", All]}
 $dependencyRestarts = <||>
 dependencyLoadedQ[p_PacletObject] := ! DisjointQ[$Packages, Flatten[{p["Context"]}]]
 
-dependencyReadyQ[owner_, entry_] := With[{check = Lookup[entry, "Check", None]},
-    check === None || Block[{$ContextPath = $ContextPath},
-        If[! NameQ[check], With[{context = SelectFirst[Flatten[{owner["PrimaryContext"], owner["Context"]}],
-                StringQ[#] && StringStartsQ[check, #] &, None]}, If[StringQ[context], Quiet[Needs[context]]]]];
-        NameQ[check] && TrueQ[Quiet[Check[Symbol[check][], False]]]
-    ]
+dependencyReadiness[owner_, entry_] := Module[{check = entry["Check"], context, result},
+    Block[{$ContextPath = $ContextPath},
+        If[! NameQ[check],
+            context = SelectFirst[Flatten[{owner["PrimaryContext"], owner["Context"]}],
+                StringQ[#] && StringStartsQ[check, #] &, None];
+            If[StringQ[context], Quiet[Needs[context]]]];
+        If[! NameQ[check], Return[dependencyFailure["DependencyCheckUnavailable", "The readiness function `1` could not be loaded.", check]]];
+        result = Quiet[Symbol[check][]]];
+    Which[result === True, True, FailureQ[result], result,
+        True, dependencyFailure["DependencyCheckFailed", "The readiness check `1` did not succeed.", check]]
 ]
 
-dependencyStatus[owner_, entry_, installed_, probe_] := Which[
+dependencyLocalStatus[entry_, installed_] := Which[
     ! dependencySupportedQ[entry], "Unsupported",
     installed === {}, "Not installed",
     KeyExistsQ[$dependencyRestarts, entry["Name"]], "Restart required",
     ! dependencyCompatibleQ[First[installed]["Version"], Lookup[entry, "Version", All]], "Version mismatch",
-    ! probe || ! KeyExistsQ[entry, "Check"], "Installed",
-    dependencyReadyQ[owner, entry], "Ready",
-    True, "Needs setup"
+    True, "Installed"
 ]
 
 Options[PacletDependencyInformation] = {"CheckReadiness" -> False, "CheckUpdates" -> False}
 
-PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject), opts : OptionsPattern[]] :=
-    PacletDependencyInformation[owner, All, opts]
+PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject)] :=
+    PacletDependencyInformation[owner, All]
+
+PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject),
+        first : (_Rule | _RuleDelayed | {(_Rule | _RuleDelayed) ..}), rest : OptionsPattern[]] :=
+    PacletDependencyInformation[owner, All, first, rest]
 
 PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
     With[{probe = TrueQ[OptionValue["CheckReadiness"]], release = TrueQ[OptionValue["CheckUpdates"]]},
-        dependencyMap[Function[{p, entry}, Module[{installed = PacletFind[entry["Name"]], result, latest},
-            result = Join[entry, <|"Status" -> dependencyStatus[p, entry, installed, probe],
+        dependencyMap[Function[{p, entry}, Module[{installed = PacletFind[entry["Name"]], result, readiness, latest},
+            result = Join[entry, <|"Status" -> dependencyLocalStatus[entry, installed],
                 "InstalledVersion" -> If[installed === {}, Missing["NotInstalled"], First[installed]["Version"]]|>];
+            If[probe && result["Status"] === "Installed" && KeyExistsQ[entry, "Check"],
+                readiness = dependencyReadiness[p, entry];
+                If[readiness === True, result["Status"] = "Ready",
+                    AssociateTo[result, {"Status" -> "Needs setup", "ReadinessFailure" -> readiness}]]];
             If[release && dependencySupportedQ[entry],
                 latest = dependencyRelease[p, entry];
                 AssociateTo[result, "LatestVersion" -> If[FailureQ[latest], latest, latest["Version"]]]];
@@ -118,8 +128,13 @@ UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject), name
 UninstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
     dependencyMap[dependencyUninstall, owner, names]
 
-dependencyChecked[owner_, entry_, p_] := If[KeyExistsQ[$dependencyRestarts, entry["Name"]] || dependencyReadyQ[owner, entry], p,
-    dependencyFailure["DependencySetupRequired", "`1` is installed and needs additional setup.", entry["Name"]]]
+dependencyChecked[owner_, entry_, paclet_] := Module[{readiness},
+    If[KeyExistsQ[$dependencyRestarts, entry["Name"]] || ! KeyExistsQ[entry, "Check"], Return[paclet]];
+    readiness = dependencyReadiness[owner, entry];
+    If[readiness === True, paclet, Failure["DependencySetupRequired", <|
+        "MessageTemplate" -> "`1` `2` needs setup. `3`", "MessageParameters" -> {entry["Name"], paclet["Version"], readiness["Message"]},
+        "InstalledVersion" -> paclet["Version"], "Cause" -> readiness|>]]
+]
 
 dependencyInstall[owner_, entry_, update_] := Module[{name = entry["Name"], installed, current, release, result, loaded},
     If[! dependencySupportedQ[entry], Return[dependencyFailure["UnsupportedSystem", "`1` is unavailable on `2`.", name, $SystemID]]];

@@ -1,0 +1,206 @@
+(* Offline regression tests for consumer dependency management. The installation test creates
+   a unique paclet, and removes only the copies it created. *)
+PacletDirectoryLoad[DirectoryName[$TestFileName, 2]]
+Needs["WolframInstitute`PacletPage`"]
+
+Begin["WolframInstitute`PacletPage`Private`"]
+
+testDependencyOwner[required_, optional_] := PacletObject[<|
+    "Name" -> "Demo/Consumer", "Version" -> "1.0", "PrimaryContext" -> "Demo`Consumer`",
+    "Dependencies" -> required, "OptionalDependencies" -> optional|>]
+
+VerificationTest[
+    PacletDependencyInformation[testDependencyOwner[{}, {}]],
+    <||>, TestID -> "Dependencies: empty manifest"
+]
+
+VerificationTest[
+    Module[{owner = testDependencyOwner[{"PacletTools", "Demo/A" -> "2.0.*"}, {<|"Name" -> "Demo/B", "Version" -> "1.2+"|>}]},
+        {Keys[PacletDependencyInformation[owner]], Values[PacletDependencyInformation[owner][[All, "Required"]]],
+            Keys[PacletDependencyInformation[owner, {"Demo/B", "PacletTools", "Demo/B"}]],
+            PacletDependencyInformation[owner, {}]}],
+    {{"PacletTools", "Demo/A", "Demo/B"}, {True, True, False}, {"Demo/B", "PacletTools"}, <||>},
+    TestID -> "Dependencies: records and standard declarations preserve order and selection"
+]
+
+VerificationTest[
+    Module[{ran = False, owner = testDependencyOwner[{}, {<|"Name" -> "PacletTools", "Check" -> "Demo`Consumer`TestReadyQ"|>}]},
+        Block[{Demo`Consumer`TestReadyQ = Function[Null, ran = True; True], dependencyRelease = Function[Null, Throw["network"]]},
+            {PacletDependencyInformation[owner]["PacletTools"]["Status"], ran,
+                PacletDependencyInformation[owner, "CheckReadiness" -> True]["PacletTools"]["Status"], ran}]],
+    {"Installed", False, "Ready", True}, TestID -> "Dependencies: listing has no release lookup or runtime check"
+]
+
+VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {<|"Name" -> "PacletTools", "Check" -> "Demo`Consumer`TestReadyQ"|>}]},
+        Block[{Demo`Consumer`TestReadyQ = Function[Null, False], dependencyRelease = Function[Null, Throw["network"]]},
+            {PacletDependencyInformation[owner, "CheckReadiness" -> True]["PacletTools"]["Status"],
+                First[InstallPacletDependencies[owner, "PacletTools"]["PacletTools"]]}]],
+    {"Needs setup", "DependencySetupRequired"}, TestID -> "Dependencies: installed runtime can require setup without reinstalling"
+]
+
+VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {<|"Name" -> "PacletTools", "Check" -> "Demo`Consumer`TestReadyQ"|>}],
+            reason = Failure["Toolchain", <|"MessageTemplate" -> "The local toolchain could not start."|>]},
+        Block[{Demo`Consumer`TestReadyQ = Function[Null, reason]},
+            {PacletDependencyInformation[owner, "CheckReadiness" -> True]["PacletTools"]["ReadinessFailure"] === reason,
+                InstallPacletDependencies[owner, All]["PacletTools"]["Cause"] === reason}]],
+    {True, True}, TestID -> "Dependencies: retain the consumer's readiness failure"
+]
+
+VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {"Demo/Real"}], ran = 0},
+        Block[{dependencyInstall = Function[Null, ran++]},
+            {First[InstallPacletDependencies[owner, {"Demo/Real", "Demo/Typo"}]], ran}]],
+    {"UnknownDependency", 0}, TestID -> "Dependencies: validate the entire selection before mutation"
+]
+
+VerificationTest[
+    First[PacletDependencyInformation[testDependencyOwner[{"Demo/A"}, {"Demo/A"}]]],
+    "DependencyManifest", TestID -> "Dependencies: duplicate names fail"
+]
+
+VerificationTest[
+    AllTrue[{"*", "Demo/?", "Demo/Consumer", "", "../Lib"}, FailureQ[PacletDependencyInformation[testDependencyOwner[{}, {#}]]] &],
+    True, TestID -> "Dependencies: reject patterns, paths and self-dependencies"
+]
+
+VerificationTest[
+    AllTrue[{
+        <|"Name" -> "Demo/Lib", "Version" -> "x"|>, <|"Name" -> "Demo/Lib", "Check" -> "System`Quit"|>,
+        <|"Name" -> "Demo/Lib", "Resource" -> "ftp://example.org/lib"|>, <|"Name" -> "Demo/Lib", "Resorce" -> "typo"|>,
+        <|"Name" -> "Demo/Lib", "SetupLinks" -> {"invalid"}|>,
+        <|"Name" -> "Demo/Lib", "Resource" -> "https://example.org/lib", "Archive" -> "lib.paclet"|>},
+        FailureQ[PacletDependencyInformation[testDependencyOwner[{}, {#}]]] &],
+    True, TestID -> "Dependencies: validate versions, source, links and owner-scoped readiness"
+]
+
+VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {<|"Name" -> "Demo/Lib", "Platforms" -> {"OtherSystem"}|>}]},
+        Block[{dependencyReadiness = Function[Null, Throw["probe"]], dependencyRelease = Function[Null, Throw["network"]]},
+            {PacletDependencyInformation[owner, "CheckReadiness" -> True, "CheckUpdates" -> True]["Demo/Lib"]["Status"],
+                First[InstallPacletDependencies[owner, All]["Demo/Lib"]], First[UpdatePacletDependencies[owner, All]["Demo/Lib"]]}]],
+    {"Unsupported", "UnsupportedSystem", "UnsupportedSystem"}, TestID -> "Dependencies: unsupported platforms do no work"
+]
+
+VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {"Demo/First", "Demo/Second"}]},
+        Block[{dependencyRelease = Function[{p, entry}, If[entry["Name"] === "Demo/First", dependencyFailure["Network", "Offline."], <|"Version" -> "1.0"|>]]},
+            With[{rows = PacletDependencyInformation[owner, "CheckUpdates" -> True]},
+                {First[rows["Demo/First"]["LatestVersion"]], rows["Demo/Second"]["LatestVersion"]}]]],
+    {"Network", "1.0"}, TestID -> "Dependencies: update lookup returns errors per library"
+]
+
+VerificationTest[
+    {dependencyCompatibleQ["1.10.0", "1.9+"], dependencyCompatibleQ["1.9", "1.10+"],
+        dependencyCompatibleQ["1.0.0", "1.0"], dependencyCompatibleQ["0.10.2", "0.1.*"],
+        dependencyCompatibleQ["0.1.25", "0.1.*"], dependencyCompatibleQ["0.1", "0.1.*"]},
+    {True, False, True, False, True, True}, TestID -> "Dependencies: numeric versions, padding and component wildcards"
+]
+
+VerificationTest[
+    Block[{dependencyCancelledQ = Function[Null, True], dependencyInstall = Function[Null, Throw["install"]]},
+        First /@ Values[InstallPacletDependencies[testDependencyOwner[{}, {"Demo/A", "Demo/B"}], All]]],
+    {"DependencyCancelled", "DependencyCancelled"}, TestID -> "Dependencies: batch cancellation skips remaining actions"
+]
+
+VerificationTest[
+    {First[UpdatePacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]],
+        UninstallPacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]},
+    {"DependencyNotInstalled", Null}, TestID -> "Dependencies: updating or removing an absent dependency"
+]
+
+VerificationTest[
+    First[PacletDependencyInformation["PacletPageTest/AbsentOwner"]],
+    "DependencyOwner", TestID -> "Dependencies: missing owner is a local lookup failure"
+]
+
+VerificationTest[
+    Module[{source = CreateDirectory[], name = "Test" <> StringDelete[CreateUUID[], "-"]},
+        WithCleanup[
+            Put[PacletObject[<|"Name" -> name, "Version" -> "1.0"|>], FileNameJoin[{source, "PacletInfo.wl"}]];
+            PacletDirectoryLoad[source];
+            {First[UninstallPacletDependencies[testDependencyOwner[{}, {name}], All][name]], DirectoryQ[source]},
+            PacletDirectoryUnload[source]; DeleteDirectory[source, DeleteContents -> True]]],
+    {"ExternalInstallation", True}, TestID -> "Dependencies: protect development checkouts"
+]
+
+(* A literal counter in unused release metadata must stay unevaluated. *)
+VerificationTest[
+    Module[{source},
+        source = "ResourceObject[<|\"Name\" -> \"Demo/A\", \"Version\" -> \"2.0\", \"ResourceType\" -> \"Paclet\", " <>
+            "\"SystemID\" -> {\"MacOSX-ARM64\", \"Linux-x86-64\"}, \"Extra\" -> (Global`releaseSideEffect = True), " <>
+            "\"PacletFile\" -> CloudObject[\"https://example.org/a.paclet\"]|>]";
+        Block[{Global`releaseSideEffect = False}, {dependencyArchiveURL[source, "Demo/A", "2.0", "Linux-x86-64"],
+            FailureQ[dependencyArchiveURL[source, "Demo/A", "1.0", "Linux-x86-64"]],
+            FailureQ[dependencyArchiveURL[source, "Demo/A", "2.0", "Windows-x86-64"]], Global`releaseSideEffect}]],
+    {"https://example.org/a.paclet", True, True, False}, TestID -> "Dependencies: inspect literal release fields without evaluating publisher code"
+]
+
+VerificationTest[
+    Module[{record, table, source},
+        record = "<|\"Name\" -> \"Demo/A\", \"Version\" -> \"2.0\", \"ResourceType\" -> \"Paclet\", " <>
+            "\"SystemID\" -> \"Linux-x86-64\", \"PacletFile\" -> \"https://example.org/linux.paclet\"|>";
+        table = "<|\"Linux-x86-64\" -> " <> record <> "|>";
+        source = "If[KeyExistsQ[" <> table <> ", $SystemID], ResourceObject[" <> table <> "[$SystemID]], $Failed]";
+        {dependencyArchiveURL[source, "Demo/A", "2.0", "Linux-x86-64"],
+            FailureQ[dependencyArchiveURL[source, "Demo/A", "2.0", "MacOSX-ARM64"]]}],
+    {"https://example.org/linux.paclet", True}, TestID -> "Dependencies: select the published archive for this platform"
+]
+
+VerificationTest[
+    With[{resource = "https://example.org/obj/team/DeployedResources/Paclet/Demo/A"},
+        dependencyPublisherURLQ[resource, #] & /@ {"https://example.org/obj/team/a", "https://example.org/obj/team2/a",
+            "http://example.org/obj/team/a", "https://elsewhere.org/obj/team/a", "https://example.org/obj/team/../other/a"}],
+    {True, False, False, False, False}, TestID -> "Dependencies: release files belong to the declared publisher"
+]
+
+VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {<|"Name" -> "Demo/A", "Archive" -> "../sibling.paclet"|>}]},
+        First[InstallPacletDependencies[owner, All]["Demo/A"]]],
+    "DependencyArchive", TestID -> "Dependencies: a relative archive belongs to the consumer"
+]
+
+VerificationTest[
+    Block[{$FrontEnd = Null}, {First[PacletDependencyDialog["Demo/Consumer"]], PacletDependencyDialog["Demo/Consumer", "Notify"]}],
+    {"NotebookRequired", Null}, TestID -> "Dependencies: scripts can load consumers without opening setup"
+]
+
+VerificationTest[
+    dependencyCommand["Demo/Consumer", "Update", "Demo/A"],
+    "UpdatePacletDependencies[\"Demo/Consumer\", \"Demo/A\"]", TestID -> "Dependencies: copy the same public command used by scripts"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], name = "Test" <> StringDelete[CreateUUID[], "-"], source, owner,
+            installed, archives, offered, declare, selectVersion},
+        source = CreateDirectory[FileNameJoin[{root, "library"}]];
+        owner = CreateDirectory[FileNameJoin[{root, "consumer"}]];
+        offered = FileNameJoin[{owner, "library.paclet"}];
+        declare[record_] := Put[PacletObject[<|"Name" -> "TestConsumer", "Version" -> "1.0",
+            "OptionalDependencies" -> {record}|>], FileNameJoin[{owner, "PacletInfo.wl"}]];
+        selectVersion[version_] := CopyFile[archives[version], offered, OverwriteTarget -> True];
+        WithCleanup[
+            archives = AssociationMap[Function[version,
+                Put[PacletObject[<|"Name" -> name, "Version" -> version|>], FileNameJoin[{source, "PacletInfo.wl"}]];
+                CreatePacletArchive[source, root]], {"1.9.0", "1.10.0"}];
+            declare[<|"Name" -> name, "Archive" -> "library.paclet", "Version" -> "1.8+"|>];
+            selectVersion["1.9.0"];
+            installed = InstallPacletDependencies[File[owner], All][name];
+            DeleteFile[offered];
+            With[{repeat = InstallPacletDependencies[owner, name][name]},
+                selectVersion["1.10.0"];
+                With[{offeredVersion = PacletDependencyInformation[owner, name, "CheckUpdates" -> True][name]["LatestVersion"],
+                      updated = UpdatePacletDependencies[owner, name][name]},
+                    selectVersion["1.9.0"];
+                    With[{retained = UpdatePacletDependencies[owner, name][name]},
+                        Export[offered, "Invalid archive", "Text"];
+                        {installed["Version"], repeat === installed, offeredVersion, updated["Version"], retained["Version"],
+                         FailureQ[UpdatePacletDependencies[owner, name][name]], First[PacletFind[name]]["Version"],
+                         UninstallPacletDependencies[owner, name][name], PacletFind[name]}]]],
+            Scan[PacletUninstall, PacletFind[name]]; DeleteDirectory[root, DeleteContents -> True]]],
+    {"1.9.0", True, "1.10.0", "1.10.0", "1.10.0", True, "1.10.0", Null, {}},
+    TestID -> "Dependencies: real archive install, idempotence, numeric update, no downgrade, failed update and removal"
+]
+
+End[]

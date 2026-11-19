@@ -100,7 +100,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
                         Button[If[copied === name, "Copied", "Copy " <> ToLowerCase[action] <> " command"],
                             CopyToClipboard[dependencyCommand[commandOwner, action, name]]; copied = name,
                             Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[! busy]]],
-                    Lookup[notices, name, Nothing]
+                    Lookup[notices, name, If[FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"], Nothing]]
                 }, Nothing], Alignment -> Right, Spacings -> .35]}}, Alignment -> {{Left, Right}, Top}]]
     ),
     Deinitialization :> (cancelled = True; If[busy, cancelDependencyDownload[]]),

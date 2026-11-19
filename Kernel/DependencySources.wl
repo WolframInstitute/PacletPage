@@ -99,7 +99,7 @@ dependencyInstallFile[source_, name_, version_] := Module[{p, result},
         Return[dependencyFailure["DependencyArchive", "Expected an archive containing `1` `2`.", name, version]]];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     $dependencyProgress["Installing", None];
-    result = Quiet[PacletInstall[source]];
+    result = Quiet[PacletInstall[source, KeepExistingVersion -> True]];
     Which[FailureQ[result], result, MatchQ[result, _PacletObject] && result["Name"] === name && result["Version"] === version, result,
         True, dependencyFailure["DependencyInstallFailed", "Could not install `1` `2`.", name, version]]
 ]
