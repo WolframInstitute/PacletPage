@@ -39,7 +39,8 @@ PacletObject[<|
         },
         {
             "Asset",
-            "Assets" -> {{"Web", "Assets/Web"}, {"Example", "Assets/Example"}, {"Hero", "Assets/Hero.wxf"}, {"Converter", "Assets/Converter.wxf"}}
+            "Assets" -> {{"Web", "Assets/Web"}, {"Example", "Assets/Example"}, {"Hero", "Assets/Hero.wxf"},
+                {"Converter", "Assets/Converter.wxf"}, {"DependencyLoader", "Assets/LoadDependencyManager.wl"}}
         },
         {
             "Documentation",

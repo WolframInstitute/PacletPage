@@ -5,6 +5,20 @@ Needs["WolframInstitute`PacletPage`"]
 
 Begin["WolframInstitute`PacletPage`Private`"]
 
+VerificationTest[
+    Get[PacletObject[File[DirectoryName[$TestFileName, 2]]]["AssetLocation", "DependencyLoader"]],
+    Null, TestID -> "Dependencies: the standalone loader recognizes the active manager"
+]
+
+VerificationTest[
+    With[{loader = PacletObject[File[DirectoryName[$TestFileName, 2]]]["AssetLocation", "DependencyLoader"],
+            older = PacletObject[<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.83", "Extensions" -> {}|>]},
+        Block[{$Packages = DeleteCases[$Packages, "WolframInstitute`PacletPage`"], PacletFind = ({older} &),
+                PacletInstall = (Throw["Unexpected installation"] &)},
+            With[{result = Get[loader]}, {First[result], StringStartsQ[result["InstallCommand"], "PacletInstall[ResourceObject["]}]]],
+    {"DependencyManagerRequired", True}, TestID -> "Dependencies: a legacy release gives an explicit first-install command"
+]
+
 testDependencyOwner[required_, optional_] := PacletObject[<|
     "Name" -> "Demo/Consumer", "Version" -> "1.0", "PrimaryContext" -> "Demo`Consumer`",
     "Dependencies" -> required, "OptionalDependencies" -> optional|>]

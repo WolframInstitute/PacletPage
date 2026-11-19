@@ -100,15 +100,36 @@ UninstallPacletDependencies["Demo/Consumer", "WolframInstitute/TypeTheory"]
 
 An update retains an equal or newer compatible version. Restart the kernel when a loaded library changes. Uninstalling removes user-installed copies, which other consumers may also use.
 
-## Connect an existing consumer
+## Make setup work on a fresh installation
 
-PureMath already has readiness checks for GAPLink, LeanLink and TypeTheory. A migration can keep those checks next to the computations that use them. Copy each library's name, public resource, supported platforms, download sizes, license and setup links into an optional dependency record. Expose a zero-argument check in the consumer context for each library. For example, a PureMath wrapper for its existing Lean probe can call ``WolframInstitute`PureMath`PackageScope`leanLinkReadyQ[]``.
-
-Once that manifest is present, the consumer's setup function needs only the shared dialog.
+Installing a consumer archive can leave its required dependencies absent. A consumer can ship a small loader that works before PacletPage is available. When preparing the consumer distribution, copy the loader from an installed PacletPage release with dependency management. Here `dir` is the consumer directory and `Resources` is part of its distribution.
 
 ```wl
 #| eval: false
-PureMathSetup[] := WolframInstitute`PacletPage`PacletDependencyDialog["WolframInstitute/PureMath"]
+manager = PacletObject["WolframInstitute/PacletPage"];
+resources = FileNameJoin[{dir, "Resources"}];
+If[!DirectoryQ[resources], CreateDirectory[resources]];
+CopyFile[manager["AssetLocation", "DependencyLoader"], FileNameJoin[{resources, "LoadDependencyManager.wl"}]]
+```
+
+To make setup work offline from the first run, also copy the unpacked PacletPage release into the consumer before packaging it. Use the installed release directory for this step.
+
+```wl
+#| eval: false
+CopyDirectory[manager["Location"], FileNameJoin[{resources, "PacletPage"}]]
+```
+
+The loader prefers a compatible installed copy. If it finds only the bundled copy, it registers that directory for the session. It checks the functions the paclet supplies, so two builds with the same version can be distinguished. If neither copy supplies the manager, the returned failure gives the explicit publisher install command. A kernel that already loaded an older package receives a restart instruction.
+
+## Connect an existing consumer
+
+PureMath can declare GAPLink and LeanLink and keep their runtime checks next to the computations that use them. A Lean check can call `` WolframInstitute`PureMath`PackageScope`leanLinkReadyQ[] ``. The following wrapper loads the manager when a user opens setup.
+
+```wl
+#| eval: false
+PureMathSetup[] := With[{owner = PacletObject["WolframInstitute/PureMath"]},
+    Replace[Get[FileNameJoin[{owner["Location"], "Resources", "LoadDependencyManager.wl"}]],
+        Null :> WolframInstitute`PacletPage`PacletDependencyDialog[owner]]]
 ```
 
 A consumer that wants a desktop reminder can call `PacletDependencyDialog[owner, "Notify"]` at startup. Dismissing the dialog records the preference for that consumer. Batch kernels can load the consumer and run ordinary computations independently of desktop setup.
