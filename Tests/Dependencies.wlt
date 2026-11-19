@@ -195,6 +195,21 @@ VerificationTest[
 ]
 
 VerificationTest[
+    UsingFrontEnd[Module[{nb = CreateDocument[{}, Visible -> False], observed, finished, exercise, task, result},
+        WithCleanup[
+            exercise[label_] := (observed = None; finished = False;
+                task = dependencyScheduleCheck[nb, label, Function[Null, observed = CurrentValue[nb, {TaggingRules, "DependencyCheck"}]],
+                    Function[Null, finished = True]];
+                TaskWait[task]; {observed, finished, CurrentValue[nb, {TaggingRules, "DependencyCheck"}]});
+            result = exercise /@ {"Check readiness", "Check for updates"};
+            Block[{SessionSubmit = Function[Null, $Failed, HoldAll]}, finished = False;
+                dependencyScheduleCheck[nb, "Check readiness", (Throw["Unexpected work"] &), Function[Null, finished = True]]];
+            {result, finished, CurrentValue[nb, {TaggingRules, "DependencyCheck"}]}, NotebookClose[nb]]]],
+    {{{"Check readiness", True, None}, {"Check for updates", True, None}}, True, None},
+    TestID -> "Dependencies: the live notebook displays each active check while it runs and returns to idle after completion or scheduling failure"
+]
+
+VerificationTest[
     {First[UpdatePacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]],
         UninstallPacletDependencies[testDependencyOwner[{}, {"PacletPageTest/Absent"}], All]["PacletPageTest/Absent"]},
     {"DependencyNotInstalled", Null}, TestID -> "Dependencies: updating or removing an absent dependency"
