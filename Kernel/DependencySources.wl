@@ -93,14 +93,17 @@ dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text
     ]
 ]
 
-dependencyInstallFile[source_, name_, version_] := Module[{p, result},
+dependencyInstallFile[source_, name_, version_] := Module[{p, result, installed},
     p = If[MatchQ[source, _PacletObject], source, Quiet[PacletObject[source]]];
     If[! MatchQ[p, _PacletObject] || p["Name"] =!= name || p["Version"] =!= version,
         Return[dependencyFailure["DependencyArchive", "Expected an archive containing `1` `2`.", name, version]]];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     $dependencyProgress["Installing", None];
     result = Quiet[PacletInstall[source, KeepExistingVersion -> True]];
-    Which[FailureQ[result], result, MatchQ[result, _PacletObject] && result["Name"] === name && result["Version"] === version, result,
+    If[MatchQ[result, _PacletObject] && result["Name"] === name && result["Version"] === version, Return[result]];
+    (* Another installer may have committed the same release since the first local lookup. *)
+    installed = PacletFind[name -> version];
+    Which[installed =!= {}, First[installed], MatchQ[result, _Failure], result,
         True, dependencyFailure["DependencyInstallFailed", "Could not install `1` `2`.", name, version]]
 ]
 

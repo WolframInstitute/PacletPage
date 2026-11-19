@@ -60,14 +60,23 @@ dependencyManifest[owner_PacletObject] := Module[{info = owner["PacletInfo"], re
 ]
 
 (* Validate the whole selection before its first action. Each library then keeps its own result. *)
-dependencyMap[f_, ownerSpec_, selection_] := Module[{owner = dependencyOwner[ownerSpec], entries, names, unknown},
+withDependencySelection[ownerSpec_, selection_, action_] := Module[{owner = dependencyOwner[ownerSpec], entries, names, unknown},
     If[! MatchQ[owner, _PacletObject], Return[owner]];
     entries = dependencyManifest[owner];
     If[FailureQ[entries], Return[entries]];
     names = If[selection === All, Keys[entries], DeleteDuplicates[Flatten[{selection}]]];
     unknown = Complement[names, Keys[entries]];
     If[unknown =!= {}, Return[dependencyFailure["UnknownDependency", "`1` does not declare `2`.", owner["Name"], unknown]]];
-    Block[{$refreshDependencySites = True}, AssociationMap[If[dependencyCancelledQ[], dependencyCancelled[], f[owner, entries[#]]] &, names]]
+    Block[{$refreshDependencySites = True}, action[owner, AssociationThread[names, Lookup[entries, names]]]]
+]
+
+dependencyMap[action_, ownerSpec_, selection_] := withDependencySelection[ownerSpec, selection,
+    Function[{owner, entries}, If[dependencyCancelledQ[], dependencyCancelled[], action[owner, #]] & /@ entries]]
+
+(* Exact-name lookups are cheaper for a small selection. For a long one the paclet manager can
+   enumerate the same local index once. Keep its own version and directory precedence in each group. *)
+dependencyInstallations[names_List] := If[Length[names] < 16, AssociationMap[PacletFind, names],
+    With[{byName = GroupBy[PacletFind[], #["Name"] &]}, AssociationThread[names, Lookup[byName, names, {}]]]
 ]
 
 dependencySupportedQ[entry_] := With[{systems = Lookup[entry, "Platforms", All]}, systems === All || MemberQ[systems, $SystemID]]
@@ -84,7 +93,7 @@ dependencyReadiness[owner_, entry_] := Module[{check = entry["Check"], context, 
             If[StringQ[context], Quiet[Needs[context]]]];
         If[! NameQ[check], Return[dependencyFailure["DependencyCheckUnavailable", "The readiness function `1` could not be loaded.", check]]];
         result = Quiet[Symbol[check][]]];
-    Which[result === True, True, FailureQ[result], result,
+    Which[result === True, True, MatchQ[result, _Failure], result,
         True, dependencyFailure["DependencyCheckFailed", "The readiness check `1` did not succeed.", check]]
 ]
 
@@ -106,20 +115,23 @@ PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject),
     PacletDependencyInformation[owner, All, first, rest]
 
 PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
-    With[{probe = TrueQ[OptionValue["CheckReadiness"]], release = TrueQ[OptionValue["CheckUpdates"]]},
-        dependencyMap[Function[{p, entry}, Module[{installed = PacletFind[entry["Name"]], result, readiness, latest},
-            result = Join[entry, <|"Status" -> dependencyLocalStatus[entry, installed],
-                "InstalledVersion" -> If[installed === {}, Missing["NotInstalled"], First[installed]["Version"]]|>];
-            If[probe && result["Status"] === "Installed" && KeyExistsQ[entry, "Check"],
-                readiness = dependencyReadiness[p, entry];
-                If[readiness === True, result["Status"] = "Ready",
-                    AssociateTo[result, {"Status" -> "Needs setup", "ReadinessFailure" -> readiness}]]];
-            If[release && dependencySupportedQ[entry],
-                latest = dependencyRelease[p, entry];
-                AssociateTo[result, "LatestVersion" -> If[FailureQ[latest], latest, latest["Version"]]]];
-            result
-        ]], owner, names]
+    With[{probe = TrueQ[OptionValue["CheckReadiness"]], updates = TrueQ[OptionValue["CheckUpdates"]]},
+        withDependencySelection[owner, names, Function[{paclet, entries}, With[{installed = dependencyInstallations[Keys[entries]]},
+            Map[If[dependencyCancelledQ[], dependencyCancelled[], dependencyInfo[paclet, #, installed[#["Name"]], probe, updates]] &, entries]]]]
     ]
+
+dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{result, readiness, latest},
+    result = Join[entry, <|"Status" -> dependencyLocalStatus[entry, installed],
+        "InstalledVersion" -> If[installed === {}, Missing["NotInstalled"], First[installed]["Version"]]|>];
+    If[probe && result["Status"] === "Installed" && KeyExistsQ[entry, "Check"],
+        readiness = dependencyReadiness[owner, entry];
+        If[readiness === True, result["Status"] = "Ready",
+            AssociateTo[result, {"Status" -> "Needs setup", "ReadinessFailure" -> readiness}]]];
+    If[updates && dependencySupportedQ[entry],
+        latest = dependencyRelease[owner, entry];
+        result["LatestVersion"] = If[FailureQ[latest], latest, latest["Version"]]];
+    result
+]
 
 InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
     dependencyMap[dependencyInstall[#1, #2, False] &, owner, names]
@@ -166,7 +178,7 @@ dependencyUninstall[_, entry_] := Module[{name = entry["Name"], userCopies, load
     Do[
         loaded = dependencyLoadedQ[p];
         result = Quiet[PacletUninstall[p]];
-        If[result =!= Null, Return[If[FailureQ[result], result, dependencyFailure["DependencyUninstallFailed", "Could not remove `1`.", p["Location"]]], Module]];
+        If[result =!= Null, Return[If[MatchQ[result, _Failure], result, dependencyFailure["DependencyUninstallFailed", "Could not remove `1`.", p["Location"]]], Module]];
         If[loaded, AssociateTo[$dependencyRestarts, name -> True]],
         {p, userCopies}];
     Null

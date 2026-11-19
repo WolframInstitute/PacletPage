@@ -24,6 +24,13 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{names = Join[{"PacletTools"}, Table["Demo/Optional" <> IntegerString[index], {index, 30}]], owner},
+        owner = testDependencyOwner[{}, names];
+        PacletDependencyInformation[owner] === Join @@ (PacletDependencyInformation[owner, #] & /@ names)],
+    True, TestID -> "Dependencies: a bulk snapshot preserves the result and order of individual lookups"
+]
+
+VerificationTest[
     Module[{ran = False, owner = testDependencyOwner[{}, {<|"Name" -> "PacletTools", "Check" -> "Demo`Consumer`TestReadyQ"|>}]},
         Block[{Demo`Consumer`TestReadyQ = Function[Null, ran = True; True], dependencyRelease = Function[Null, Throw["network"]]},
             {PacletDependencyInformation[owner]["PacletTools"]["Status"], ran,
