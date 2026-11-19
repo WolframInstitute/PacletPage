@@ -17,8 +17,8 @@ Module[{name = "WolframInstitute/PacletPage", context = "WolframInstitute`Paclet
     If[selected === None && ! (FileExistsQ[bundled] && providesManager[Quiet[PacletObject[File[bundled]]]]),
         command = "PacletInstall[ResourceObject[\"https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/PacletPage\"], ForceVersionInstall -> True]";
         Return[Failure["DependencyManagerRequired", <|
-            "MessageTemplate" -> "Setup needs a PacletPage release with dependency management. Run `1`, then retry setup in a fresh kernel.",
-            "MessageParameters" -> {command}, "InstallCommand" -> command|>], Module]
+            "MessageTemplate" -> "Setup needs a PacletPage release with dependency management. Run the install command below, then retry setup in a fresh kernel.",
+            "InstallCommand" -> command|>], Module]
     ];
     If[MemberQ[$Packages, context], Return[Failure["DependencyManagerRestart", <|
         "MessageTemplate" -> "This kernel has an earlier PacletPage loaded. Restart the kernel and retry setup."|>], Module]];

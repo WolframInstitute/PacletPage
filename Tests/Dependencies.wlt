@@ -15,7 +15,8 @@ VerificationTest[
             older = PacletObject[<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.83", "Extensions" -> {}|>]},
         Block[{$Packages = DeleteCases[$Packages, "WolframInstitute`PacletPage`"], PacletFind = ({older} &),
                 PacletInstall = (Throw["Unexpected installation"] &)},
-            With[{result = Get[loader]}, {First[result], StringStartsQ[result["InstallCommand"], "PacletInstall[ResourceObject["]}]]],
+            With[{result = Get[loader]}, {First[result], StringStartsQ[result["InstallCommand"], "PacletInstall[ResourceObject["] &&
+                StringFreeQ[result["Message"], result["InstallCommand"]]}]]],
     {"DependencyManagerRequired", True}, TestID -> "Dependencies: a legacy release gives an explicit first-install command"
 ]
 
