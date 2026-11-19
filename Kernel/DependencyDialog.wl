@@ -47,20 +47,22 @@ dependencyVersions[row_] := StringRiffle[{
 dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
     {rows = initial, notices = <||>, copied = None, busy = False, cancelled = False, stage = "", fraction = None,
         run, refresh, perform, rowPanel},
-    Column[{
+    Framed[Column[{
         Style[owner["Name"], 18, Bold],
         Dynamic[If[rows === <||>, "This paclet declares no dependencies.",
-            Pane[Column[KeyValueMap[rowPanel, KeySortBy[rows, StringQ[rows[#]["InstalledVersion"]] &]], Dividers -> Center, Spacings -> 1],
+            Pane[Column[KeyValueMap[rowPanel, Join[Select[rows, ! StringQ[#["InstalledVersion"]] &], Select[rows, StringQ[#["InstalledVersion"]] &]]],
+                    ItemSize -> {{Scaled[1]}}, Dividers -> Center, Spacings -> 1.2],
                 ImageSize -> {Full, UpTo[400]}, Scrollbars -> {False, Automatic}]], TrackedSymbols :> {rows, notices, copied}],
         Dynamic[If[busy, Row[{stage, Spacer[12], If[NumberQ[fraction], ProgressIndicator[fraction, {0, 1}],
                 ProgressIndicator[Appearance -> "Indeterminate"]], Spacer[12],
             Button["Cancel", cancelled = True; cancelDependencyDownload[], Method -> "Preemptive",
                 Enabled -> Dynamic[! cancelled && MemberQ[{"Checking release", "Checking for updates", "Downloading", "Retrying"}, stage]]]}], Spacer[{0, 0}]],
             TrackedSymbols :> {busy, stage, fraction}],
-        Row[{Button["Check readiness", refresh[True, False], Enabled -> Dynamic[! busy], Method -> "Queued"], Spacer[8],
-            Button["Check for updates", refresh[False, True], Enabled -> Dynamic[! busy], Method -> "Queued"], Spacer[16],
-            DefaultButton["Close", cancelled = True; If[busy, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], Method -> "Preemptive"]}]
-    }, Spacings -> 1, Alignment -> Left],
+        Grid[{{Row[{Button["Check readiness", refresh[True, False], Enabled -> Dynamic[! busy], Method -> "Queued"], Spacer[8],
+            Button["Check for updates", refresh[False, True], Enabled -> Dynamic[! busy], Method -> "Queued"]}],
+            DefaultButton["Close", cancelled = True; If[busy, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], Method -> "Preemptive"]}},
+            ItemSize -> {{Scaled[.72], Scaled[.28]}}, Alignment -> {{Left, Right}, Center}]
+    }, ItemSize -> {{Scaled[1]}}, Spacings -> 1.15, Alignment -> Left], FrameMargins -> 14, FrameStyle -> None],
     Initialization :> (
         Needs["WolframInstitute`PacletPage`"];
         SetAttributes[run, HoldRest];
@@ -90,7 +92,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
                 True, "Installation complete."];
             copied = None]];
         rowPanel[name_, row_] := With[{installed = StringQ[row["InstalledVersion"]], supported = row["Status"] =!= "Unsupported"},
-            Grid[{{Pane[dependencyDetails[row], ImageSize -> {360, Automatic}],
+            Grid[{{Pane[dependencyDetails[row], ImageSize -> Full, Alignment -> Left],
                 Column[DeleteCases[{
                     Style[row["Status"], Bold], Replace[dependencyVersions[row], "" -> Nothing],
                     Row[Riffle[Map[Function[action, Button[action, perform[name, action], Method -> "Queued",
@@ -99,9 +101,11 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := DynamicModule[
                     With[{action = If[installed, "Uninstall", "Install"]},
                         Button[If[copied === name, "Copied", "Copy " <> ToLowerCase[action] <> " command"],
                             CopyToClipboard[dependencyCommand[commandOwner, action, name]]; copied = name,
-                            Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[! busy]]],
-                    Lookup[notices, name, If[FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"], Nothing]]
-                }, Nothing], Alignment -> Right, Spacings -> .35]}}, Alignment -> {{Left, Right}, Top}]]
+                            Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> Dynamic[! busy && (supported || installed)]]],
+                    Lookup[notices, name, Which[
+                        FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"],
+                        FailureQ[row["LatestVersion"]], row["LatestVersion"]["Message"], True, Nothing]]
+                }, Nothing], Alignment -> Right, Spacings -> .35]}}, ItemSize -> {{Scaled[.65], Scaled[.35]}}, Alignment -> {{Left, Right}, Top}]]
     ),
     Deinitialization :> (cancelled = True; If[busy, cancelDependencyDownload[]]),
     SynchronousInitialization -> True
