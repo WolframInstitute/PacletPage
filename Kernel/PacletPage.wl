@@ -11,6 +11,7 @@
    Feedback.wl   the feedback form, its Databin and the team's pages
    Check.wl      reachability and version checks
    Publish.wl    the pipeline: markdown -> documentation notebooks -> paclet resource -> site
+   Dependencies.wl, DependencySources.wl    manage the paclets a consumer declares
    Local.wl      the site rendered on this computer, without the cloud *)
 
 BeginPackage["WolframInstitute`PacletPage`"]
@@ -57,6 +58,15 @@ graph of the uses.";
 PacletPageDependencies::usage = "PacletPageDependencies[dir, file] gives what a markdown page of the paclet in dir depends \
 on: the symbols it names, every symbol those reach, and the code its cache key holds.";
 
+PacletDependencyInformation::usage = "PacletDependencyInformation[owner] lists the dependencies in the owner's PacletInfo.wl and their local status. PacletDependencyInformation[owner, names] selects specific dependencies.";
+
+InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] installs the selected dependencies and checks their readiness. Give one name, a list of names, or All.";
+
+UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks the declared sources and upgrades the selected installed dependencies when a newer compatible version is available.";
+
+UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes the selected dependencies from the current user's paclet repository.";
+
+
 BuildPacletDocumentation::usage = "BuildPacletDocumentation[dir] converts the markdown documentation of the paclet in \
 dir into documentation notebooks under Documentation/English, and its ResourceDefinition.md into the definition \
 notebook its resource is deployed from.";
@@ -99,7 +109,7 @@ $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web
 $pacletPageVersion := $pacletPageVersion = Replace[PacletObject[File[ParentDirectory[$packageDirectory]]], {p_PacletObject :> p["Version"], _ -> None}];
 $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage";
 
-Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl"}];
+Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl"}];
 
 refreshStaleSites[];
 
