@@ -11,7 +11,7 @@
    Feedback.wl   the feedback form, its Databin and the team's pages
    Check.wl      reachability and version checks
    Publish.wl    the pipeline: markdown -> documentation notebooks -> paclet resource -> site
-   Dependencies.wl, DependencySources.wl    manage the paclets a consumer declares
+   Dependencies.wl, DependencySources.wl, DependencyDialog.wl    manage the paclets a consumer declares
    Local.wl      the site rendered on this computer, without the cloud *)
 
 BeginPackage["WolframInstitute`PacletPage`"]
@@ -66,6 +66,7 @@ UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks
 
 UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes the selected dependencies from the current user's paclet repository."
 
+PacletDependencyDialog::usage = "PacletDependencyDialog[owner] opens a desktop dialog for checking, installing, updating and removing the owner's dependencies."
 
 BuildPacletDocumentation::usage = "BuildPacletDocumentation[dir] converts the markdown documentation of the paclet in \
 dir into documentation notebooks under Documentation/English, and its ResourceDefinition.md into the definition \
@@ -109,7 +110,7 @@ $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web
 $pacletPageVersion := $pacletPageVersion = Replace[PacletObject[File[ParentDirectory[$packageDirectory]]], {p_PacletObject :> p["Version"], _ -> None}];
 $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage";
 
-Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl"}];
+Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyDialog.wl"}];
 
 refreshStaleSites[];
 

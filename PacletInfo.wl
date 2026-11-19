@@ -30,6 +30,7 @@ PacletObject[<|
                 "WolframInstitute`PacletPage`InstallPacletDependencies",
                 "WolframInstitute`PacletPage`UpdatePacletDependencies",
                 "WolframInstitute`PacletPage`UninstallPacletDependencies",
+                "WolframInstitute`PacletPage`PacletDependencyDialog",
                 "WolframInstitute`PacletPage`DeployPacletResource",
                 "WolframInstitute`PacletPage`SubmitPacletResource",
                 "WolframInstitute`PacletPage`PublishPacletPage",
