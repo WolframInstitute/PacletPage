@@ -2559,14 +2559,22 @@ foreignShadowQ[_, _] := False;
 (* The commit a paclet directory is checked out at, or None outside a git repository. A paclet with
    changes not committed is marked +dirty, with a hash of its sources, so that two different
    uncommitted states of one version do not pass for the same release. *)
-gitCommit[dir_String] := Module[{head, status},
-    head = RunProcess[{"git", "-C", dir, "rev-parse", "HEAD"}];
+gitCommit[dir_String] := Module[{git = gitExecutable[], head, status},
+    If[ git === None, Return[None, Module]];
+    head = RunProcess[{git, "-C", dir, "rev-parse", "HEAD"}];
     If[ ! AssociationQ[head] || head["ExitCode"] =!= 0, Return[None, Module]];
-    status = RunProcess[{"git", "-C", dir, "status", "--porcelain", "--", "."}];
+    status = RunProcess[{git, "-C", dir, "status", "--porcelain", "--", "."}];
     StringTrim[head["StandardOutput"]] <> If[ AssociationQ[status] && StringTrim[status["StandardOutput"]] =!= "",
         "+dirty." <> StringTake[sourceHash[dir], 12],
         ""
     ]
+];
+
+(* the git on the PATH, None where there is none: a paclet then has no commit, and nothing reports it *)
+gitExecutable[] := SelectFirst[
+    FileNameJoin[{#, If[$OperatingSystem === "Windows", "git.exe", "git"]}] & /@
+        StringSplit[Replace[Environment["PATH"], Except[_String] -> ""], If[$OperatingSystem === "Windows", ";", ":"]],
+    FileExistsQ, None
 ];
 
 (* a hash of a paclet's sources: every file in its directory but what a build makes *)

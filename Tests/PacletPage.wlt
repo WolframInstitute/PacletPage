@@ -3053,18 +3053,23 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{dir = CreateDirectory[], clean, dirty, dirtier},
+    Module[{dir = CreateDirectory[], git = gitExecutable[], clean, dirty, dirtier, result},
         Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"P/N\", \"Version\" -> \"1\"|>]", "Text"];
-        RunProcess[{"git", "-C", dir, "init", "-q"}];
-        RunProcess[{"git", "-C", dir, "add", "."}];
-        RunProcess[{"git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "x"}];
-        clean = gitCommit[dir];
-        Export[FileNameJoin[{dir, "Notes.md"}], "a", "Text"];
-        dirty = gitCommit[dir];
-        Export[FileNameJoin[{dir, "Notes.md"}], "b", "Text"];
-        dirtier = gitCommit[dir];
+        result = If[ git === None,
+            (* with no git on the PATH a paclet has no commit, and no message says so *)
+            {gitCommit[dir] === None, True, True},
+            RunProcess[{git, "-C", dir, "init", "-q"}];
+            RunProcess[{git, "-C", dir, "add", "."}];
+            RunProcess[{git, "-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "x"}];
+            clean = gitCommit[dir];
+            Export[FileNameJoin[{dir, "Notes.md"}], "a", "Text"];
+            dirty = gitCommit[dir];
+            Export[FileNameJoin[{dir, "Notes.md"}], "b", "Text"];
+            dirtier = gitCommit[dir];
+            {StringFreeQ[clean, "+"], StringStartsQ[dirty, clean <> "+dirty."], dirty =!= dirtier}
+        ];
         DeleteDirectory[dir, DeleteContents -> True];
-        {StringFreeQ[clean, "+"], StringStartsQ[dirty, clean <> "+dirty."], dirty =!= dirtier}
+        result
     ],
     {True, True, True},
     TestID -> "Publish: an uncommitted paclet's commit carries a hash of its sources"
