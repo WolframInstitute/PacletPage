@@ -65,17 +65,19 @@ dependencyDialogAction[owner_, name_, action_, cancelledQ_, progress_] := Module
     {If[AssociationQ[result], result[name], result], If[AssociationQ[fresh], fresh[name], fresh]}
 ]
 
+dependencyDialogMessage[text_String] := StringReplace[text, (c : Except["."]) ~~ "." ~~ EndOfString :> c]
+
 dependencyActionNotice[action_, result_, fresh_] := Which[
-    MatchQ[result, Failure["DependencyCancelled", _]], "Cancelled.",
-    MatchQ[result, _Failure], result["Message"],
-    MatchQ[fresh, _Failure], fresh["Message"],
+    MatchQ[result, Failure["DependencyCancelled", _]], "Cancelled",
+    MatchQ[result, _Failure], dependencyDialogMessage[result["Message"]],
+    MatchQ[fresh, _Failure], dependencyDialogMessage[fresh["Message"]],
     ! AssociationQ[fresh] || ! If[action === "Uninstall", result === Null,
         MatchQ[result, _PacletObject] && StringQ[fresh["InstalledVersion"]]],
-        "Could not confirm the change. Reopen the dialog to check the installed version.",
-    fresh["Status"] === "Restart required", "Restart the kernel to use the changed library.",
-    action === "Uninstall", "Removed from the user repository.",
-    action === "Update", "Version " <> fresh["InstalledVersion"] <> " is installed.",
-    True, "Installation complete."
+        "Could not confirm the change. Reopen the dialog to check the installed version",
+    fresh["Status"] === "Restart required", "Restart the kernel to use the changed library",
+    action === "Uninstall", "Removed from the user repository",
+    action === "Update", "Version " <> fresh["InstalledVersion"] <> " is installed",
+    True, "Installation complete"
 ]
 
 (* Prepare the display in the owning kernel, keeping the full identifier for each action. *)
@@ -92,7 +94,7 @@ dependencyReadinessSummary[rows_] := Module[{states, passed, failed, skipped},
     passed = Count[states, "Ready"];
     failed = Count[states, "Needs setup"];
     skipped = Length[states] - passed - failed;
-    If[states === {}, "No libraries to check.", StringRiffle[{
+    If[states === {}, "No libraries to check", StringRiffle[{
         If[passed > 0, ToString[passed] <> " passed", Nothing],
         If[failed > 0, ToString[failed] <> " failed", Nothing],
         If[skipped > 0, ToString[skipped] <> " skipped", Nothing]}, ", "]]
@@ -154,10 +156,10 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
     {rows = initialRows, notices = <||>, copied = None, operation = None, cancelled = False,
         startCheck, refresh, perform, cancelTransfer, rowPanel},
     Framed[Column[{
-        Column[{Style[heading, 18, Bold], PaneSelector[{True -> $dependencyInternetMessage},
+        Column[{Style[heading, 18, Bold], PaneSelector[{True -> dependencyDialogMessage[$dependencyInternetMessage]},
             Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyInternetDisabled"}]],
             "Install, upgrade, or remove libraries as needed."]}, Alignment -> Left, Spacings -> .6],
-        If[initialRows === <||>, "This paclet declares no dependencies.",
+        If[initialRows === <||>, "This paclet declares no dependencies",
             Pane[Dynamic[Column[KeyValueMap[rowPanel, rows], ItemSize -> {{Scaled[1]}}, Spacings -> 1.2],
                     TrackedSymbols :> {rows, notices}],
                 ImageSize -> Dynamic[dependencyListSize[CurrentValue[EvaluationNotebook[], WindowSize],
@@ -207,7 +209,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
             If[! probe && MemberQ[Notebooks[], nb],
                 CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] =
                     MemberQ[Lookup[Values[rows], "LatestVersion", None], Failure["DependencyInternetDisabled", _]]];
-            Which[FailureQ[outcome], outcome["Message"], cancelled, "Check stopped.",
+            Which[FailureQ[outcome], dependencyDialogMessage[outcome["Message"]], cancelled, "Check stopped",
                 probe, dependencyReadinessSummary[rows], True, ""]
         ];
         cancelTransfer[nb_NotebookObject] := If[TrueQ[CurrentValue[nb, {TaggingRules, "DependencyProgress", "Cancellable"}]],
@@ -248,10 +250,10 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                                 CopyToClipboard[dependencyCommand[commandOwner, action, name]]; copied = name,
                                 Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> If[supported || action === "Uninstall", idle, False]]]],
                         Lookup[notices, name, Which[
-                            FailureQ[row["ReadinessFailure"]], row["ReadinessFailure"]["Message"],
-                            MatchQ[row["LatestVersion"], Failure[Except["DependencyInternetDisabled"], _]], row["LatestVersion"]["Message"],
-                            ! supported, "No release for " <> $SystemID <> ".",
-                            row["Status"] === "Restart required", "Restart the kernel to use the changed library.", True, Nothing]]
+                            FailureQ[row["ReadinessFailure"]], dependencyDialogMessage[row["ReadinessFailure"]["Message"]],
+                            MatchQ[row["LatestVersion"], Failure[Except["DependencyInternetDisabled"], _]], dependencyDialogMessage[row["LatestVersion"]["Message"]],
+                            ! supported, "No release for " <> $SystemID,
+                            row["Status"] === "Restart required", "Restart the kernel to use the changed library", True, Nothing]]
                     }, Nothing], Alignment -> Right, Spacings -> .5], Alignment -> Right]}},
                 ItemSize -> {{Scaled[.65], Scaled[.35]}}, Alignment -> {{Left, Right}, Top}]]
     ),

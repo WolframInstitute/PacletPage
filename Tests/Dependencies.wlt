@@ -292,8 +292,11 @@ VerificationTest[
         {StringStartsQ[unconfirmed, "Could not confirm"], dependencyActionNotice["Uninstall", $Failed, row] === unconfirmed,
             dependencyActionNotice["Install", installed, Missing["Unknown"]] === unconfirmed,
             dependencyActionNotice["Install", installed, <|"InstalledVersion" -> Missing["NotInstalled"]|>] === unconfirmed,
-            dependencyActionNotice["Update", installed, row], dependencyActionNotice["Uninstall", Null, row]}],
-    {True, True, True, True, "Version 1.1 is installed.", "Removed from the user repository."},
+            dependencyActionNotice["Update", installed, row], dependencyActionNotice["Uninstall", Null, row],
+            dependencyActionNotice["Install", installed, row], dependencyActionNotice["Install", dependencyCancelled[], row],
+            dependencyActionNotice["Install", dependencyFailure["Read", "Version 1.1. Retry."], row], dependencyDialogMessage["Waiting..."]}],
+    {True, True, True, True, "Version 1.1 is installed", "Removed from the user repository",
+        "Installation complete", "Cancelled", "Version 1.1. Retry", "Waiting..."},
     TestID -> "Dependencies: success feedback requires a confirmed action and local record"
 ]
 
@@ -350,7 +353,7 @@ VerificationTest[
 VerificationTest[
     With[{rows = AssociationMap[<|"Status" -> #|> &, {"Ready", "Needs setup", "Not installed", "Version mismatch", "Installed"}]},
         dependencyReadinessSummary /@ {<||>, KeyTake[rows, {"Ready"}], KeyDrop[rows, {"Ready", "Needs setup"}], rows}],
-    {"No libraries to check.", "1 passed", "3 skipped", "1 passed, 1 failed, 3 skipped"},
+    {"No libraries to check", "1 passed", "3 skipped", "1 passed, 1 failed, 3 skipped"},
     TestID -> "Dependencies: the readiness summary counts actual probes and distinguishes skipped libraries"
 ]
 
