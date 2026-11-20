@@ -27,6 +27,14 @@ dependencyAction["Uninstall"] = UninstallPacletDependencies
 dependencyCommand[owner_, action_, name_] := ToString[dependencyAction[action], InputForm] <> "[" <> ToString[owner, InputForm] <> ", " <> ToString[name, InputForm] <> "]"
 
 dependencyDialogHeading[rows_] := If[AnyTrue[Values[rows], TrueQ[#["Required"]] &], "Library dependencies", "Optional libraries"]
+dependencyDialogText[defaultTitle_, title_, description_] := Which[
+    title =!= Automatic && (! StringQ[title] || StringTrim[title] === ""),
+        dependencyFailure["DependencyDialogTitle", "Use a nonempty string or Automatic for the dialog title."],
+    description =!= Automatic && ! StringQ[description],
+        dependencyFailure["DependencyDialogDescription", "Use a string or Automatic for the dialog description."],
+    True, <|"Title" -> Replace[title, Automatic -> defaultTitle],
+        "Description" -> Replace[description, Automatic -> "Install, upgrade, or remove libraries as needed."]|>
+]
 dependencyShortName[name_] := Last[StringSplit[name, "/"]]
 dependencyMetaStyle[expr_] := Style[expr, Small, LightDarkSwitched[GrayLevel[.35], GrayLevel[.72]]]
 
@@ -264,13 +272,17 @@ dependencyRowPanel[name_, row_, perform_, copy_, cancelTransfer_] := Module[{ena
 
 (* The three cells let the front end measure the controls independently of the library list.
    The callbacks belong to this dialog and are initialized in its evaluator. *)
-dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, stopCheck},
+dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, stopCheck, heading, description, withIntro},
+    heading = Style[Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyText", "Title"}]], 18, Bold];
+    description = Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyText", "Description"}]];
+    withIntro[text_] := Column[{heading, text}, Alignment -> Left, Spacings -> .6];
     {
-        ExpressionCell[Framed[Column[{DynamicWrapper[Style[dependencyDialogHeading[initial], 18, Bold],
-                dependencyFitList[EvaluationNotebook[]], SynchronousUpdating -> False],
-            PaneSelector[{True -> dependencyDialogMessage[$dependencyInternetMessage]},
+        ExpressionCell[Framed[DynamicWrapper[
+            PaneSelector[{True -> withIntro[dependencyDialogMessage[$dependencyInternetMessage]]},
                 Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyInternetDisabled"}]],
-                "Install, upgrade, or remove libraries as needed.", ImageSize -> Automatic]}, Alignment -> Left, Spacings -> .6],
+                PaneSelector[{"" -> heading}, description, withIntro[description], Alignment -> Left, ImageSize -> Automatic],
+                Alignment -> Left, ImageSize -> Automatic],
+            dependencyFitList[EvaluationNotebook[]], SynchronousUpdating -> False],
             FrameStyle -> None, FrameMargins -> {{0, 0}, {10, 20}}], "DialogStyle",
             CellTags -> "DependencyDialogControls", CellMargins -> {{25, 28}, {0, 0}}],
         ExpressionCell[dependencyLibraryList[owner, commandOwner, initial, startCheck, stopCheck], "DialogStyle",
@@ -355,26 +367,41 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
     SynchronousInitialization -> True
 ]]
 
-dependencyDialogTags[rows_] := <|"DependencyActivity" -> <|"Target" -> None, "Idle" -> True|>,
+dependencyDialogTags[rows_, text_ : Automatic] := With[{defaultTitle = dependencyDialogHeading[rows]},
+    <|"DependencyDefaultTitle" -> defaultTitle, "DependencyText" -> Replace[text, Automatic :> dependencyDialogText[defaultTitle, Automatic, Automatic]],
+    "DependencyActivity" -> <|"Target" -> None, "Idle" -> True|>,
     "DependencyCheckFeedback" -> "", "DependencyInternetDisabled" -> False,
     "DependencyListSize" -> {Full, UpTo[400]}, "DependencyCopied" -> None, "DependencyTransfer" -> <||>,
-    "DependencyRows" -> Map[dependencyRowState, rows], "DependencyChecks" -> dependencyCheckAvailability[rows]|>
+    "DependencyRows" -> Map[dependencyRowState, rows], "DependencyChecks" -> dependencyCheckAvailability[rows]|>]
 
-PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope : (All | "Optional") : All] := Module[{owner, key, dialog, rows},
+Options[PacletDependencyDialog] = {"Title" -> Automatic, "Description" -> Automatic}
+PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope : (All | "Optional") : All, OptionsPattern[]] :=
+ Module[{owner, key, dialog, rows, existing, defaultTitle, text, windowTitle},
     If[! dependencyDesktopQ[], Return[dependencyFailure["NotebookRequired", "Open a desktop notebook to use the dependency dialog. Scripts can use PacletDependencyInformation and the install, update and uninstall functions."]]];
     owner = dependencyOwner[spec];
     If[! MatchQ[owner, _PacletObject], Return[owner]];
     key = {dependencyCommandOwner[owner, owner], scope};
     dialog = $dependencyDialogs[key];
-    If[MemberQ[Notebooks[], dialog], SetSelectedNotebook[dialog]; Return[dialog]];
-    rows = PacletDependencyInformation[owner, "Output" -> "Association"];
-    If[FailureQ[rows], Return[rows]];
-    If[scope === "Optional", rows = Select[rows, ! TrueQ[#["Required"]] &]];
+    existing = MemberQ[Notebooks[], dialog];
+    If[existing,
+        defaultTitle = CurrentValue[dialog, {TaggingRules, "DependencyDefaultTitle"}],
+        rows = PacletDependencyInformation[owner, "Output" -> "Association"];
+        If[FailureQ[rows], Return[rows]];
+        If[scope === "Optional", rows = Select[rows, ! TrueQ[#["Required"]] &]];
+        defaultTitle = dependencyDialogHeading[rows]];
+    text = dependencyDialogText[defaultTitle, OptionValue["Title"], OptionValue["Description"]];
+    If[FailureQ[text], Return[text]];
+    windowTitle = dependencyShortName[owner["Name"]] <> ": " <> text["Title"];
+    If[existing,
+        If[CurrentValue[dialog, {TaggingRules, "DependencyText"}] =!= text,
+            CurrentValue[dialog, {TaggingRules, "DependencyText"}] = text];
+        If[CurrentValue[dialog, WindowTitle] =!= windowTitle, SetOptions[dialog, WindowTitle -> windowTitle]];
+        SetSelectedNotebook[dialog]; Return[dialog]];
     dialog = With[{name = owner["Name"], location = key}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows],
-        WindowTitle -> dependencyShortName[name] <> ": " <> dependencyDialogHeading[rows], WindowSize -> {740, All}, WindowFrame -> "Normal",
+        WindowTitle -> windowTitle, WindowSize -> {740, All}, WindowFrame -> "Normal",
         WindowFrameElements -> {"CloseBox", "ResizeArea"}, WindowElements -> {},
         ScrollingOptions -> {"VerticalScrollRange" -> Fit}, Evaluator -> CurrentValue[EvaluationNotebook[], Evaluator],
-        Visible -> False, TaggingRules -> dependencyDialogTags[rows],
+        Visible -> False, TaggingRules -> dependencyDialogTags[rows, text],
         NotebookEventActions -> {"WindowClose" :> (dependencyRemember[name]; KeyDropFrom[$dependencyDialogs, {location}]), PassEventsDown -> True}]];
     If[MatchQ[dialog, _NotebookObject],
         dependencyFitList[dialog];

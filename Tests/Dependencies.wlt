@@ -625,4 +625,40 @@ VerificationTest[
     TestID -> "Dependencies: real archive install, idempotence, numeric update, no downgrade, failed update and removal"
 ]
 
+VerificationTest[
+    With[{owner = testDependencyOwner[{"Demo/Required"}, {"Demo/Optional"}]},
+        Block[{dependencyDesktopQ = (True &), Notebooks = ({} &), $dependencyDialogs = <||>,
+                EvaluationNotebook = (None &), CurrentValue = (Inherited &), dependencyDialogContent = (Null &),
+                CreateDialog = Function[Null, With[{options = Association[Rest[{##}]]},
+                    {options[WindowTitle], options[TaggingRules]["DependencyText"], Keys[options[TaggingRules]["DependencyRows"]]}]]},
+            {PacletDependencyDialog[owner, "Title" -> "Proof tools", "Description" -> "Check a proof."],
+                PacletDependencyDialog[owner, "Optional", "Description" -> ""], PacletDependencyDialog[owner],
+                First[PacletDependencyDialog[owner, "Title" -> " "]], First[PacletDependencyDialog[owner, "Description" -> 1]]}]],
+    {{"Consumer: Proof tools", <|"Title" -> "Proof tools", "Description" -> "Check a proof."|>, {"Demo/Required", "Demo/Optional"}},
+        {"Consumer: Optional libraries", <|"Title" -> "Optional libraries", "Description" -> ""|>, {"Demo/Optional"}},
+        {"Consumer: Library dependencies", <|"Title" -> "Library dependencies", "Description" -> "Install, upgrade, or remove libraries as needed."|>,
+            {"Demo/Required", "Demo/Optional"}}, "DependencyDialogTitle", "DependencyDialogDescription"},
+    TestID -> "Dependencies: title and description options initialize the selected dialog scope and native window title"
+]
+
+VerificationTest[
+    UsingFrontEnd[Module[{owner = testDependencyOwner[{}, {}], nb, changed, restored},
+        nb = CreateDocument[{}, Visible -> False, TaggingRules -> Join[dependencyDialogTags[<||>],
+            <|"DependencyInternetDisabled" -> True, "DependencyCheckFeedback" -> "2 passed"|>]];
+        WithCleanup[
+            Block[{dependencyDesktopQ = (True &), $dependencyDialogs = <|{dependencyCommandOwner[owner, owner], "Optional"} -> nb|>,
+                    SetSelectedNotebook = (Null &), PacletDependencyInformation = (Throw["Unexpected second snapshot"] &)},
+                Catch[
+                    changed = PacletDependencyDialog[owner, "Optional", "Title" -> "Proof tools", "Description" -> ""];
+                    With[{title = CurrentValue[nb, WindowTitle], text = CurrentValue[nb, {TaggingRules, "DependencyText", "Description"}]},
+                        restored = PacletDependencyDialog[owner, "Optional"];
+                        {changed === nb === restored, title, text, CurrentValue[nb, WindowTitle],
+                            CurrentValue[nb, {TaggingRules, "DependencyText", "Description"}],
+                            CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}],
+                            CurrentValue[nb, {TaggingRules, "DependencyCheckFeedback"}]}]]],
+            NotebookClose[nb]]]],
+    {True, "Consumer: Proof tools", "", "Consumer: Optional libraries", "Install, upgrade, or remove libraries as needed.", True, "2 passed"},
+    TestID -> "Dependencies: reopening changes or restores the text of the same window and preserves its check state"
+]
+
 End[]

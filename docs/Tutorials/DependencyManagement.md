@@ -85,6 +85,15 @@ Click **Install** or **Upgrade** to start a download. The library’s row shows 
 PacletDependencyDialog["Demo/Consumer"]
 ```
 
+For a setup command specific to proofs, show only optional libraries and explain what they enable. The title also appears in the window’s title bar. Use `"Description" -> ""` to omit the introduction.
+
+```wl
+#| eval: false
+PacletDependencyDialog["Demo/Consumer", "Optional",
+    "Title" -> "Proof libraries",
+    "Description" -> "Install TypeTheory to check proofs in this notebook."]
+```
+
 A script can apply the same operations to one name, a list of names or `All`. Each selected name has its own result. The following cells change the current user's installation when evaluated.
 
 ```wl

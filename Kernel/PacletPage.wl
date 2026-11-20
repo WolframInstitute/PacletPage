@@ -68,7 +68,7 @@ UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks
 
 UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes selected optional dependencies from the current user's paclet repository. All selects the removable optional dependencies. PacletPage protects its own installation."
 
-PacletDependencyDialog::usage = "PacletDependencyDialog[owner] opens a desktop dialog for checking, installing, updating and removing the owner's dependencies. PacletDependencyDialog[owner, \"Optional\"] shows only optional libraries."
+PacletDependencyDialog::usage = "PacletDependencyDialog[owner] opens a desktop dialog for checking, installing, updating and removing the owner's dependencies. PacletDependencyDialog[owner, \"Optional\"] shows only optional libraries. The \"Title\" and \"Description\" options set the heading and introduction."
 
 BuildPacletDocumentation::usage = "BuildPacletDocumentation[dir] converts the markdown documentation of the paclet in \
 dir into documentation notebooks under Documentation/English, and its ResourceDefinition.md into the definition \
