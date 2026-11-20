@@ -22,6 +22,7 @@ RelatedTutorials: [DependencyManagement]
 
 ## Details & Options
 
+- The dialog follows the light or dark appearance of the notebook that opened it, including its notebook theme when supported.
 - `"Title" -> "text"` sets the dialog heading. The window title shows the consumer name followed by this heading. The default `Automatic` uses **Library dependencies** when the dialog includes a required library and **Optional libraries** otherwise. A custom title must contain non-whitespace text.
 - `"Description" -> "text"` sets the introduction below the heading. The default `Automatic` displays “Install, upgrade, or remove libraries as needed.” An empty string hides the introduction. An offline notice takes precedence over the introduction.
 - Calling the dialog again for the same consumer and scope applies the supplied options to the open window. Omitted options use their defaults.

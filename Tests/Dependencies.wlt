@@ -346,6 +346,21 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {"Demo/Library"}], cells, settings, edges, color},
+        {cells, settings} = Block[{dependencyDesktopQ = (True &), Notebooks = ({} &),
+                EvaluationNotebook = (None &), CurrentValue = (Inherited &), $dependencyDialogs = <||>,
+                CreateDialog = Function[Null, {First[{##}], Association[Rest[{##}]]}]},
+            PacletDependencyDialog[owner, "Optional"]];
+        edges = Cases[#, HoldPattern[CellFrame -> _], {1}] & /@ cells[[{1, 3}]];
+        color = Cases[#, HoldPattern[CellFrameColor -> _], {1}] & /@ cells[[{1, 3}]];
+        {edges, MatchQ[color, {{_Rule}, {_Rule}}] && First[color] === Last[color],
+            ContainsAll[settings[WindowFrameElements], {"CloseBox", "MinimizeBox", "ZoomBox", "ResizeArea"}],
+            MatchQ[settings[NotebookDynamicExpression], Dynamic[_, SynchronousUpdating -> False]]}],
+    {{{CellFrame -> {{0, 0}, {1, 0}}}, {CellFrame -> {{0, 0}, {0, 1}}}}, True, True, True},
+    TestID -> "Dependencies: the window has matching dividers, native window controls and asynchronous observation"
+]
+
+VerificationTest[
     UsingFrontEnd[Module[{items, bounds, alignedQ},
         items = Graphics[{#, Rectangle[]}, ImageSize -> {48, 12}, ImagePadding -> 0, PlotRangePadding -> None] & /@ {Red, Blue};
         bounds[alignment_, width_] := Module[{image, pixels},
@@ -693,6 +708,51 @@ VerificationTest[
             NotebookClose[nb]]]],
     {True, "Consumer: Proof tools", "", "Consumer: Optional libraries", "Install, upgrade, or remove libraries as needed.", True, "2 passed"},
     TestID -> "Dependencies: reopening changes or restores the text of the same window and preserves its check state"
+]
+
+VerificationTest[
+    With[{owner = testDependencyOwner[{}, {}], source = NotebookObject["Source"]},
+        Block[{dependencyDesktopQ = (True &), EvaluationNotebook = (source &), Notebooks = ({source} &), $dependencyDialogs = <||>,
+                CurrentValue = Function[{nb, key}, Switch[key, LightDark, "Dark", System`NotebookTheme, "Solarized", _, Automatic]],
+                dependencyDialogContent = (Null &), CreateDialog = Function[Null, Association[Rest[{##}]]]},
+            With[{options = PacletDependencyDialog[owner]},
+                {options[Visible], options[LightDark], Lookup[options, System`NotebookTheme, None],
+                    options[TaggingRules]["DependencyAppearanceSource"] === source, options[Background]} ===
+                {False, "Dark", If[$dependencyNamedThemes, "Solarized", None], True,
+                    If[$dependencyNamedThemes, ThemeColor["Background"], LightDarkSwitched[GrayLevel[.925], GrayLevel[.145]]]}]]],
+    True, TestID -> "Dependencies: appearance is set on the dialog's first hidden frame"
+]
+
+VerificationTest[
+    With[{source = NotebookObject["Source"]},
+        Block[{$dependencyNamedThemes = False, Notebooks = ({source} &),
+                CurrentValue = Function[{nb, key}, If[key === LightDark, Automatic, Throw["Unknown notebook option"]]]},
+            Catch[{dependencyAppearanceOptions[source], dependencyDialogBackground[{}],
+                Block[{Notebooks = ({} &)}, dependencyAppearanceOptions[source]]}]]],
+    {{LightDark -> Automatic}, LightDarkSwitched[GrayLevel[.925], GrayLevel[.145]], {}},
+    TestID -> "Dependencies: light and dark settings also work without named notebook themes"
+]
+
+VerificationTest[
+    UsingFrontEnd[Module[{owner = testDependencyOwner[{}, {}], first, second, dialog, openFrom, state, result},
+        first = CreateDocument[{}, Visible -> False, LightDark -> "Dark",
+            Sequence @@ If[$dependencyNamedThemes, {System`NotebookTheme -> "Solarized"}, {}]];
+        second = CreateDocument[{}, Visible -> False, LightDark -> "Light",
+            Sequence @@ If[$dependencyNamedThemes, {System`NotebookTheme -> "Monokai"}, {}]];
+        dialog = CreateDocument[{}, Visible -> False, TaggingRules -> dependencyDialogTags[<||>]];
+        WithCleanup[
+            state[] := {CurrentValue[dialog, LightDark], If[$dependencyNamedThemes, CurrentValue[dialog, System`NotebookTheme], None]};
+            openFrom[source_] := Block[{EvaluationNotebook = (source &), SetSelectedNotebook = (Null &)}, PacletDependencyDialog[owner]];
+            result = Block[{dependencyDesktopQ = (True &), $dependencyDialogs = <|{dependencyCommandOwner[owner, owner], All} -> dialog|>},
+                openFrom[first];
+                With[{dark = state[]}, openFrom[second];
+                    With[{light = state[]}, SetOptions[second, LightDark -> Automatic]; dependencySyncAppearance[dialog];
+                        NotebookClose[second]; dependencySyncAppearance[dialog];
+                        {dark, light, state[], CurrentValue[first, LightDark]}]]];
+            result === {{"Dark", If[$dependencyNamedThemes, "Solarized", None]}, {"Light", If[$dependencyNamedThemes, "Monokai", None]},
+                {Automatic, If[$dependencyNamedThemes, "Monokai", None]}, "Dark"},
+            Scan[If[MemberQ[Notebooks[], #], NotebookClose[#]] &, {dialog, second, first}]]]],
+    True, TestID -> "Dependencies: appearance follows the most recent caller and survives closing its notebook"
 ]
 
 End[]

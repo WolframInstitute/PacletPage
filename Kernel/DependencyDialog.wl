@@ -36,7 +36,26 @@ dependencyDialogText[defaultTitle_, title_, description_] := Which[
         "Description" -> Replace[description, Automatic -> "Install, upgrade, or remove libraries as needed."]|>
 ]
 dependencyShortName[name_] := Last[StringSplit[name, "/"]]
-dependencyMetaStyle[expr_] := Style[expr, Small, LightDarkSwitched[GrayLevel[.35], GrayLevel[.72]]]
+$dependencyNamedThemes = MemberQ[First /@ Options[CreateDialog], System`NotebookTheme]
+dependencyDialogColor[fraction_, light_, dark_] := If[$dependencyNamedThemes,
+    ThemeColor[{fraction -> "Background", (1 - fraction) -> "Foreground"}], LightDarkSwitched[GrayLevel[light], GrayLevel[dark]]]
+dependencyMetaStyle[expr_] := Style[expr, Small, dependencyDialogColor[.97, .35, .72]]
+dependencyDialogBackground[appearance_] := If[Lookup[Association[appearance], System`NotebookTheme, "Wolfram Default"] === "Wolfram Default",
+    LightDarkSwitched[GrayLevel[.925], GrayLevel[.145]], ThemeColor["Background"]]
+
+(* Keep Automatic so the front end can follow the operating system. The notebook's
+   current theme is its compact name; the absolute value expands the entire palette. *)
+dependencyAppearanceOptions[source_] := Module[{mode, theme},
+    If[! MatchQ[source, _NotebookObject] || ! MemberQ[Notebooks[], source], Return[{}]];
+    mode = CurrentValue[source, LightDark];
+    {If[MemberQ[{Automatic, "Light", "Dark"}, mode], LightDark -> mode, Nothing],
+     If[$dependencyNamedThemes && MatchQ[theme = CurrentValue[source, System`NotebookTheme], _String | _Association],
+         System`NotebookTheme -> theme, Nothing]}
+]
+
+dependencySyncAppearance[nb_NotebookObject] := With[{appearance = dependencyAppearanceOptions[CurrentValue[nb, {TaggingRules, "DependencyAppearanceSource"}]]},
+    With[{changed = Select[appearance, CurrentValue[nb, First[#]] =!= Last[#] &]},
+        If[changed =!= {}, SetOptions[nb, Join[changed, {Background -> dependencyDialogBackground[appearance]}]]]]]
 
 (* CellSize includes magnification. Let the front end measure wrapped headings and controls.
    A window with too little room for one line scrolls the entire notebook. *)
@@ -289,22 +308,23 @@ dependencyRowPanel[name_, row_, perform_, copy_, cancelTransfer_] := Module[{ena
 
 (* The three cells let the front end measure the controls independently of the library list.
    The callbacks belong to this dialog and are initialized in its evaluator. *)
-dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, stopCheck, heading, description, withIntro},
+dependencyDialogContent[owner_, commandOwner_, initial_, focus_Symbol : Unique[]] := Module[{startCheck, stopCheck, heading, description, withIntro, ink, divider},
+    ink = If[$dependencyNamedThemes, ThemeColor["Foreground"], LightDarkSwitched[Black, White]];
+    divider = dependencyDialogColor[.15, .85, .35];
     heading = Style[Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyText", "Title"}]], 18, Bold];
     description = Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyText", "Description"}]];
     withIntro[text_] := Column[{heading, text}, Alignment -> Left, Spacings -> .6];
     {
-        ExpressionCell[Framed[DynamicWrapper[
+        ExpressionCell[Framed[
             PaneSelector[{True -> withIntro[dependencyDialogMessage[$dependencyInternetMessage]]},
                 Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyInternetDisabled"}]],
                 PaneSelector[{"" -> heading}, description, withIntro[description], Alignment -> Left, ImageSize -> Automatic],
                 Alignment -> Left, ImageSize -> Automatic],
-            dependencyFitList[EvaluationNotebook[]], SynchronousUpdating -> False],
             FrameStyle -> None, FrameMargins -> {{0, 0}, {10, 24}}], "DialogStyle",
             CellTags -> "DependencyDialogControls", CellMargins -> {{25, 28}, {0, 0}},
-            CellFrame -> {{0, 0}, {1, 0}}, CellFrameColor -> GrayLevel[.85], CellFrameMargins -> 0],
-        ExpressionCell[dependencyLibraryList[owner, commandOwner, initial, startCheck, stopCheck], "DialogStyle",
-            CellMargins -> {{25, 28}, {0, 0}}],
+            CellFrame -> {{0, 0}, {1, 0}}, CellFrameColor -> divider, CellFrameMargins -> 0, FontColor -> ink],
+        ExpressionCell[dependencyLibraryList[owner, commandOwner, initial, startCheck, stopCheck, focus], "DialogStyle",
+            CellMargins -> {{25, 28}, {0, 0}}, FontColor -> ink],
         ExpressionCell[Framed[Grid[{{Pane[dependencyFlow[{
             dependencyCheckControl["Check readiness", "Run the readiness tests supplied for installed libraries that can run in this kernel.",
                 startCheck[True, ButtonNotebook[]], stopCheck[], Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyChecks", "Readiness"}]]],
@@ -316,13 +336,13 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, 
             ItemSize -> {{Automatic, Full}}, Alignment -> {{Left, Right}, Bottom}, Spacings -> {.6, 0}],
             FrameMargins -> {{0, 0}, {17, 7}}, FrameStyle -> None], "DialogStyle",
             CellTags -> "DependencyDialogControls", CellMargins -> {{25, 28}, {0, 0}},
-            CellFrame -> {{0, 0}, {0, 1}}, CellFrameColor -> GrayLevel[.85], CellFrameMargins -> 0]
+            CellFrame -> {{0, 0}, {0, 1}}, CellFrameColor -> divider, CellFrameMargins -> 0, FontColor -> ink]
     }
 ]
 
-dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCheck_Symbol] := With[{
+dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCheck_Symbol, focus_Symbol] := With[{
         initialRows = dependencyDialogRows[initial], packageFile = FileNameJoin[{$packageDirectory, "PacletPage.wl"}]}, DynamicModule[
-    {rows = initialRows, operation = None, cancelled = False, wasSelected = True, focus, refresh, perform, copy, cancelTransfer},
+    {rows = initialRows, operation = None, cancelled = False, wasSelected = True, refresh, perform, copy, cancelTransfer},
     Pane[If[initialRows === <||>, "This paclet declares no dependencies",
             Column[KeyValueMap[dependencyRowPanel[#1, #2, perform, copy, cancelTransfer] &, initialRows],
                 ItemSize -> {{Scaled[1]}}, Spacings -> 1.2]],
@@ -331,9 +351,9 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
         FrameMargins -> {{0, 0}, {6, 8}}],
     Initialization :> (
         If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Get[packageFile]]];
-        focus[nb_, selected_, active_] := Which[
+        focus[nb_, selected_] := Which[
             selected === False && wasSelected, wasSelected = False,
-            selected === True && ! wasSelected && active === None,
+            selected === True && ! wasSelected && operation === None,
             wasSelected = True;
             With[{changed = dependencyLocalChanges[owner, rows]}, If[changed =!= <||> && MemberQ[Notebooks[], nb],
                 rows = Join[rows, changed];
@@ -343,7 +363,6 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                 CurrentValue[nb, {TaggingRules, "DependencyChecks"}] = dependencyCheckAvailability[rows];
                 CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] = dependencyOfflineQ[rows];
                 CurrentValue[nb, {TaggingRules, "DependencyCheckFeedback"}] = ""]]];
-        With[{nb = EvaluationNotebook[]}, SetOptions[nb, NotebookDynamicExpression :> focus[nb, CurrentValue[nb, "NotebookSelected"], operation]]];
         copy[name_, action_, nb_] := (CopyToClipboard[dependencyCommand[commandOwner, action, name]];
             CurrentValue[nb, {TaggingRules, "DependencyCopied"}] = name);
         stopCheck[closing_ : False] := (cancelled = True; If[closing && operation =!= None, cancelDependencyDownload[]]);
@@ -396,7 +415,7 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                         dependencySetActivity[nb, None]]]
             ]]
     ),
-    Deinitialization :> (cancelled = True; If[operation =!= None, cancelDependencyDownload[]]; Clear[startCheck, stopCheck]),
+    Deinitialization :> (cancelled = True; If[operation =!= None, cancelDependencyDownload[]]; Clear[startCheck, stopCheck, focus]),
     SynchronousInitialization -> True
 ]]
 
@@ -409,7 +428,7 @@ dependencyDialogTags[rows_, text_ : Automatic] := With[{defaultTitle = dependenc
 
 Options[PacletDependencyDialog] = {"Title" -> Automatic, "Description" -> Automatic}
 PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope : (All | "Optional") : All, OptionsPattern[]] :=
- Module[{owner, key, dialog, rows, existing, defaultTitle, text, windowTitle},
+ Module[{owner, key, dialog, rows, existing, defaultTitle, text, windowTitle, source, focus},
     If[! dependencyDesktopQ[], Return[dependencyFailure["NotebookRequired", "Open a desktop notebook to use the dependency dialog. Scripts can use PacletDependencyInformation and the install, update and uninstall functions."]]];
     owner = dependencyOwner[spec];
     If[! MatchQ[owner, _PacletObject], Return[owner]];
@@ -425,16 +444,26 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope :
     text = dependencyDialogText[defaultTitle, OptionValue["Title"], OptionValue["Description"]];
     If[FailureQ[text], Return[text]];
     windowTitle = dependencyShortName[owner["Name"]] <> ": " <> text["Title"];
+    source = EvaluationNotebook[];
     If[existing,
+        If[MatchQ[source, _NotebookObject] && source =!= dialog,
+            If[CurrentValue[dialog, {TaggingRules, "DependencyAppearanceSource"}] =!= source,
+                CurrentValue[dialog, {TaggingRules, "DependencyAppearanceSource"}] = source];
+            dependencySyncAppearance[dialog]];
         If[CurrentValue[dialog, {TaggingRules, "DependencyText"}] =!= text,
             CurrentValue[dialog, {TaggingRules, "DependencyText"}] = text];
         If[CurrentValue[dialog, WindowTitle] =!= windowTitle, SetOptions[dialog, WindowTitle -> windowTitle]];
         SetSelectedNotebook[dialog]; Return[dialog]];
-    dialog = With[{name = owner["Name"], location = key}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows],
+    dialog = With[{name = owner["Name"], location = key, appearance = dependencyAppearanceOptions[source]}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows, focus],
         WindowTitle -> windowTitle, WindowSize -> {740, All}, WindowFrame -> "Normal",
         WindowFrameElements -> {"CloseBox", "MinimizeBox", "ZoomBox", "ResizeArea"}, WindowElements -> {},
-        ScrollingOptions -> {"VerticalScrollRange" -> Fit}, Evaluator -> CurrentValue[EvaluationNotebook[], Evaluator],
-        Visible -> False, TaggingRules -> dependencyDialogTags[rows, text],
+        ScrollingOptions -> {"VerticalScrollRange" -> Fit}, Evaluator -> CurrentValue[source, Evaluator],
+        Sequence @@ appearance, Background -> dependencyDialogBackground[appearance],
+        Visible -> False, TaggingRules -> Append[dependencyDialogTags[rows, text], "DependencyAppearanceSource" -> source],
+        (* Observe the window independently of the library list's synchronous initialization. *)
+        NotebookDynamicExpression -> Dynamic[With[{nb = EvaluationNotebook[]},
+            dependencySyncAppearance[nb]; dependencyFitList[nb]; focus[nb, CurrentValue[nb, "NotebookSelected"]]],
+            SynchronousUpdating -> False],
         NotebookEventActions -> {"WindowClose" :> (dependencyRemember[name]; KeyDropFrom[$dependencyDialogs, {location}]), PassEventsDown -> True}]];
     If[MatchQ[dialog, _NotebookObject],
         dependencyFitList[dialog];
