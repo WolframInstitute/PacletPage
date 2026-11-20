@@ -8,13 +8,13 @@ Module[{name = "WolframInstitute/PacletPage", context = "WolframInstitute`Paclet
     providesManager = Function[paclet, MatchQ[paclet, _PacletObject] && paclet["Name"] === name &&
         ContainsAll[Flatten[Cases[paclet["PacletInfo"]["Extensions"], {"Kernel", opts___} :>
             Lookup[Association[opts], "Symbols", {}]]], Append[functions, report]]];
-    loadedManager = Function[Null, NameQ[report] && ToExpression[report, InputForm, UpValues] =!= {} &&
-        AllTrue[functions, NameQ[#] && ToExpression[#, InputForm, DownValues] =!= {} &]];
+    loadedManager = Function[Null, NameQ[report] && UpValues[Evaluate[Symbol[report]]] =!= {} &&
+        AllTrue[functions, NameQ[#] && DownValues[Evaluate[Symbol[#]]] =!= {} &]];
     If[MemberQ[$Packages, context] && loadedManager[], Return[Null, Module]];
 
     selected = SelectFirst[PacletFind[name], providesManager, None];
     bundled = FileNameJoin[{DirectoryName[$InputFileName], "PacletPage.paclet"}];
-    If[selected === None && ! (FileExistsQ[bundled] && providesManager[Quiet[PacletObject[File[bundled]]]]),
+    If[selected === None && ! (FileExistsQ[bundled] && providesManager[PacletObject[File[bundled]]]),
         command = "PacletInstall[ResourceObject[\"https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/PacletPage\"], ForceVersionInstall -> True]";
         Return[Failure["DependencyManagerRequired", <|
             "MessageTemplate" -> "Setup needs a PacletPage release with dependency management. Run the install command below, then retry setup in a fresh kernel.",
@@ -27,10 +27,11 @@ Module[{name = "WolframInstitute/PacletPage", context = "WolframInstitute`Paclet
         (* Keep the consumer's archive intact. Several consumers or kernels can share the same extracted release. *)
         cache = FileNameJoin[{$CacheBaseDirectory, "WolframInstitute", "PacletPage", "DependencyManager", FileHash[bundled, "SHA256", "HexString"]}];
         If[! DirectoryQ[cache],
-            staging = Quiet[CreateDirectory[FileNameJoin[{DirectoryName[cache], CreateUUID["unpack-"]}]]];
+            staging = CreateDirectory[FileNameJoin[{DirectoryName[cache], CreateUUID["unpack-"]}], CreateIntermediateDirectories -> True];
             If[StringQ[staging], WithCleanup[
-                unpacked = Quiet[ExtractPacletArchive[bundled, staging]];
-                If[StringQ[unpacked], Quiet[RenameDirectory[unpacked, cache]]],
+                unpacked = ExtractPacletArchive[bundled, staging];
+                (* another kernel may have unpacked the same release meanwhile *)
+                If[StringQ[unpacked] && ! DirectoryQ[cache], RenameDirectory[unpacked, cache]],
                 DeleteDirectory[staging, DeleteContents -> True]]]
         ];
         If[! FileExistsQ[FileNameJoin[{cache, "Kernel", "PacletPage.wl"}]], Return[Failure["DependencyManagerBundle", <|

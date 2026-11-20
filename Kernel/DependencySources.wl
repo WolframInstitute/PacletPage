@@ -16,7 +16,7 @@ $dependencyInternetMessage = "Wolfram internet access is disabled. Enable it in 
 (* The lightweight cloud metadata contains the version. Fetch the larger description and the
    archive only after the version comparison. Keep public requests independent of cloud sign-in. *)
 dependencyResourceMetadata[url_] := Block[{$ProgressReporting = False, CloudConnect = ($Failed &)},
-    Quiet[TimeConstrained[Association[MetaInformation /. Options[CloudObject[url], MetaInformation]], 20, $Failed]]
+    TimeConstrained[Association[MetaInformation /. Options[CloudObject[url], MetaInformation]], 20, $Failed]
 ]
 
 (* Apply the paclet manager's runtime filters to this candidate before PacletInstall,
@@ -31,7 +31,7 @@ dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup
             If[FailureQ[archive], Return[archive]];
             If[FileType[First[archive]] =!= File || ToLowerCase[FileExtension[First[archive]]] =!= "paclet",
                 Return[dependencyFailure["DependencyArchive", "The paclet archive `1` could not be found.", archive]]];
-            p = Quiet[PacletObject[archive]];
+            p = PacletObject[archive];
             If[! MatchQ[p, _PacletObject] || p["Name"] =!= name,
                 Return[dependencyFailure["DependencyArchive", "The archive `1` does not contain `2`.", archive, name]]];
             If[! dependencyArchiveSupportedQ[p], Return[dependencyArchiveUnsupported[p]]];
@@ -46,7 +46,8 @@ dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup
         True,
             With[{refresh = $refreshDependencySites},
                 $refreshDependencySites = False;
-                candidates = Quiet[PacletFindRemote[name, UpdatePacletSites -> refresh]]];
+                candidates = PacletFindRemote[name, UpdatePacletSites -> refresh]];
+            If[$AllowInternet === False, Return[dependencyFailure["DependencyInternetDisabled", $dependencyInternetMessage]]];
             p = If[ListQ[candidates], SelectFirst[candidates, dependencyVersionQ[#["Version"]] && dependencyCompatibleQ[#["Version"], spec] &, None], None];
             If[! MatchQ[p, _PacletObject], Return[dependencyFailure["DependencyRelease", "No compatible release of `1` was found on the configured paclet sites.", name]]];
             <|"Version" -> p["Version"], "SitePaclet" -> p|>
@@ -64,7 +65,7 @@ dependencyResourceRecord[HoldPattern[HoldComplete[If[KeyExistsQ[_Association, $S
 dependencyResourceRecord[_, _] := None
 
 dependencyArchiveURL[text_String, name_, version_, system_] := Module[{held, record, strings, platforms, archives},
-    held = Block[{$Context = "WolframInstitute`PacletPage`ResourceDescription`", $ContextPath = {"System`"}}, Quiet[ToExpression[text, InputForm, HoldComplete]]];
+    held = If[SyntaxQ[text], Block[{$Context = "WolframInstitute`PacletPage`ResourceDescription`", $ContextPath = {"System`"}}, ToExpression[text, InputForm, HoldComplete]], None];
     record = dependencyResourceRecord[held, system];
     If[record === None, Return[dependencyFailure["DependencyRelease", "No release record for `1` on `2`.", name, system]]];
     strings = Cases[record, HoldPattern[Rule[key : ("Name" | "Version" | "ResourceType"), value_String]] :> (key -> value), {2}];
@@ -93,7 +94,7 @@ dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text
             resource = entry["Resource"];
             desc = release["DescriptionURL"];
             If[! dependencyPublisherURLQ[resource, desc], Return[dependencyFailure["DependencyPublisher", "Unexpected release description address for `1`.", name]]];
-            text = Block[{CloudConnect = ($Failed &)}, Quiet[TimeConstrained[Import[CloudObject[desc], "Text"], 60, $Failed]]];
+            text = Block[{CloudConnect = ($Failed &)}, TimeConstrained[Import[CloudObject[desc], "Text"], 60, $Failed]];
             If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
             If[! StringQ[text], Return[dependencyFailure["DependencyRelease", "Could not read the release description for `1`.", name]]];
             url = dependencyArchiveURL[text, name, release["Version"], $SystemID];
@@ -104,13 +105,13 @@ dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text
 ]
 
 dependencyInstallFile[source_, name_, version_] := Module[{p, result, installed},
-    p = If[MatchQ[source, _PacletObject], source, Quiet[PacletObject[source]]];
+    p = If[MatchQ[source, _PacletObject], source, PacletObject[source]];
     If[! MatchQ[p, _PacletObject] || p["Name"] =!= name || p["Version"] =!= version,
         Return[dependencyFailure["DependencyArchive", "Expected an archive containing `1` `2`.", name, version]]];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     If[! dependencyArchiveSupportedQ[p], Return[dependencyArchiveUnsupported[p]]];
     $dependencyProgress["Installing", None];
-    result = Quiet[PacletInstall[source, KeepExistingVersion -> True]];
+    result = PacletInstall[source, KeepExistingVersion -> True];
     If[MatchQ[result, _PacletObject] && result["Name"] === name && result["Version"] === version, Return[result]];
     (* Another installer may have committed the same release since the first local lookup. *)
     installed = PacletFind[name -> version];

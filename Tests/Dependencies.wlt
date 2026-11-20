@@ -736,6 +736,8 @@ VerificationTest[
                          UninstallPacletDependencies[owner, name][name], PacletFind[name]}]]],
             Scan[PacletUninstall, PacletFind[name]]; DeleteDirectory[root, DeleteContents -> True]]],
     {"1.9.0", True, "1.10.0", "1.10.0", "1.10.0", True, "1.10.0", Null, {}},
+    (* the failed update reads an archive that is not a paclet, which the paclet manager reports *)
+    {PacletManager`CreatePaclet::badppi},
     TestID -> "Dependencies: real archive install, idempotence, numeric update, no downgrade, failed update and removal"
 ]
 

@@ -14,7 +14,8 @@ dependencyCompatibleQ[version_String, spec_String] := Which[
 ]
 
 dependencyOwner[p_PacletObject] := p
-dependencyOwner[File[path_String]] := If[DirectoryQ[path], Quiet[PacletObject[File[path]]],
+dependencyOwner[File[path_String]] := If[DirectoryQ[path] && AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ[FileNameJoin[{path, #}]] &],
+    PacletObject[File[path]],
     dependencyFailure["DependencyOwner", "No paclet directory was found at `1`.", path]]
 dependencyOwner[name_String] := Which[
     DirectoryQ[name], dependencyOwner[File[name]],
@@ -85,16 +86,20 @@ dependencySupportedQ[entry_] := With[{systems = Lookup[entry, "Platforms", All]}
 If[! AssociationQ[$dependencyRestarts], $dependencyRestarts = <||>]
 dependencyLoadedQ[p_PacletObject] := ! DisjointQ[$Packages, Flatten[{p["Context"]}]]
 
-dependencyReadiness[owner_, entry_] := Module[{check = entry["Check"], context, result},
+(* The messages of loading the consumer and of its check are what explain a failed check: they are
+   kept in the failure, as well as issued. *)
+dependencyReadiness[owner_, entry_] := Module[{check = entry["Check"], context, run, loading = {}},
     Block[{$ContextPath = $ContextPath},
         If[! NameQ[check],
             context = SelectFirst[Flatten[{owner["PrimaryContext"], owner["Context"]}],
                 StringQ[#] && StringStartsQ[check, #] &, None];
-            If[StringQ[context], Quiet[Needs[context]]]];
-        If[! NameQ[check], Return[dependencyFailure["DependencyCheckUnavailable", "The readiness function `1` could not be loaded.", check]]];
-        result = Quiet[Symbol[check][]]];
-    Which[result === True, True, MatchQ[result, _Failure], result,
-        True, dependencyFailure["DependencyCheckFailed", "The readiness check `1` did not succeed.", check]]
+            If[StringQ[context], loading = EvaluationData[Needs[context]]["MessagesText"]]];
+        If[! NameQ[check], Return[Failure["DependencyCheckUnavailable", <|"MessageTemplate" -> "The readiness function `1` could not be loaded.",
+            "MessageParameters" -> {check}, "Messages" -> loading|>]]];
+        run = EvaluationData[Symbol[check][]]];
+    Which[run["Result"] === True, True, MatchQ[run["Result"], _Failure], run["Result"],
+        True, Failure["DependencyCheckFailed", <|"MessageTemplate" -> "The readiness check `1` did not succeed.",
+            "MessageParameters" -> {check}, "Messages" -> run["MessagesText"]|>]]
 ]
 
 dependencyLocalStatus[entry_, installed_] := Which[
@@ -192,7 +197,7 @@ dependencyUninstall[owner_, entry_] := Module[{name = entry["Name"], userCopies,
         dependencyFailure["ExternalInstallation", "`1` is supplied outside the user paclet repository.", name]]]];
     Do[
         loaded = dependencyLoadedQ[p];
-        result = Quiet[PacletUninstall[p]];
+        result = PacletUninstall[p];
         If[result =!= Null, Return[If[MatchQ[result, _Failure], result, dependencyFailure["DependencyUninstallFailed", "Could not remove `1`.", p["Location"]]], Module]];
         If[loaded, AssociateTo[$dependencyRestarts, name -> True]],
         {p, userCopies}];
