@@ -19,15 +19,17 @@ Begin["WolframInstitute`PacletPage`Private`"];
 $typeTheory = "WolframInstitute/TypeTheory";
 $parser = "Wolfram/Parser";
 $owner = PacletObject[<|"Name" -> "Demo/Consumer", "Version" -> "1.0.0", "PrimaryContext" -> "Demo`Consumer`",
-    "Dependencies" -> {"WolframInstitute/PacletPage"},
-    "OptionalDependencies" -> {
+    "Dependencies" -> {
+        "WolframInstitute/PacletPage",
         <|"Name" -> $typeTheory,
+          "Optional" -> True,
           "Description" -> "Type checking for the Calculus of Inductive Constructions.",
           "Resource" -> "https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/TypeTheory",
           "License" -> "MIT",
           "URL" -> "https://github.com/WolframInstitute/TypeTheory#loading",
           "Check" -> "Demo`Consumer`TypeTheoryReadyQ"|>,
         <|"Name" -> $parser,
+          "Optional" -> True,
           "Description" -> "Parsers for the Wolfram Language and other languages, built from their grammars.",
           "Git" -> "https://github.com/sw1sh/WolframParser",
           "Commit" -> "5e05149ead1c292ebd39d02eee85f1c0b8059f55",
@@ -57,12 +59,12 @@ $notReady = Join[$checked[$typeTheory], <|"Status" -> "Needs setup", "ReadinessF
 
 (* open the dialog from a notebook of the given appearance, with the given rows, set the tagging
    rules an action would set, and render it *)
-shot[file_String, appearance_String, rows_Association, scope_, opts_List, tags_List] := Module[{source, nb, image, background},
+shot[file_String, appearance_String, rows_Association, opts_List, tags_List] := Module[{source, nb, image, background},
     source = CreateDocument[{}, Visible -> False, LightDark -> appearance];
     WithCleanup[
         Block[{dependencyDesktopQ = (True &), EvaluationNotebook = (source &), SetSelectedNotebook = (Null &),
                 PacletDependencyInformation = (rows &), $dependencyDialogs = <||>},
-            nb = PacletDependencyDialog[$owner, scope, Sequence @@ opts];
+            nb = PacletDependencyDialog[$owner, Sequence @@ opts];
             Scan[(CurrentValue[nb, {TaggingRules, Sequence @@ First[#]}] = Last[#]) &, tags];
             image = Rasterize[nb]],
         If[MatchQ[nb, _NotebookObject], NotebookClose[nb]];
@@ -76,16 +78,16 @@ shot[file_String, appearance_String, rows_Association, scope_, opts_List, tags_L
 ];
 
 UsingFrontEnd[
-    shot["DependencyDialog-Opened.png", "Light", $opened, All, {}, {}];
-    shot["DependencyDialog-Downloading.png", "Light", $opened, All, {}, {
+    shot["DependencyDialog-Opened.png", "Light", $opened, {}, {}];
+    shot["DependencyDialog-Downloading.png", "Light", $opened, {}, {
         {"DependencyTransfer", $typeTheory} -> True,
         {"DependencyProgress"} -> dependencyProgressState["Downloading", .42],
         {"DependencyActivity"} -> <|"Target" -> $typeTheory, "Idle" -> False|>}];
-    shot["DependencyDialog-Updates.png", "Light", $checked, All, {}, {
+    shot["DependencyDialog-Updates.png", "Light", $checked, {}, {
         {"DependencyCheckFeedback"} -> dependencyUpdateSummary[$checked]}];
-    shot["DependencyDialog-NeedsSetup.png", "Light", ReplacePart[$checked, Key[$typeTheory] -> $notReady], All, {}, {
+    shot["DependencyDialog-NeedsSetup.png", "Light", ReplacePart[$checked, Key[$typeTheory] -> $notReady], {}, {
         {"DependencyCheckFeedback"} -> dependencyReadinessSummary[<|$typeTheory -> $notReady|>]}];
-    shot["DependencyDialog-Optional.png", "Light", Select[$opened, ! TrueQ[#["Required"]] &], "Optional",
+    shot["DependencyDialog-Titled.png", "Light", $opened,
         {"Title" -> "Proof libraries", "Description" -> "Install TypeTheory to check proofs in this notebook."}, {}];
-    shot["DependencyDialog-Dark.png", "Dark", $opened, All, {}, {}]
+    shot["DependencyDialog-Dark.png", "Dark", $opened, {}, {}]
 ];

@@ -12,11 +12,9 @@ RelatedTutorials: [DependencyManagement, UsingTheDependencyDialog]
 
 ## Usage
 
-<code>[PacletDependencyDialog]()[*owner*]</code> opens the desktop notebook dialog for the dependencies of *owner*.
+<code>[PacletDependencyDialog]()[*owner*]</code> opens the desktop notebook dialog for the dependencies of *owner*, required and optional.
 
-<code>[PacletDependencyDialog]()[*owner*, "Optional"]</code> shows only the optional libraries declared by *owner*.
-
-<code>[PacletDependencyDialog]()[*owner*, *opts*]</code> and <code>[PacletDependencyDialog]()[*owner*, "Optional", *opts*]</code> customize the dialog for the consumer.
+<code>[PacletDependencyDialog]()[*owner*, *opts*]</code> customizes the dialog for the consumer.
 
 <code>[PacletDependencyDialog]()[*owner*, "Notify"]</code> issues a desktop setup message when optional dependencies are missing and the user has not dismissed setup for this paclet.
 
@@ -25,7 +23,7 @@ RelatedTutorials: [DependencyManagement, UsingTheDependencyDialog]
 - The dialog follows the light or dark appearance of the notebook that opened it, including its notebook theme when supported.
 - `"Title" -> "text"` sets the dialog heading. The window title shows the consumer name followed by this heading. The default `Automatic` uses **Library dependencies** when the dialog includes a required library and **Optional libraries** otherwise. A custom title must contain non-whitespace text.
 - `"Description" -> "text"` sets the introduction below the heading. The default `Automatic` displays “Install, upgrade, or remove libraries as needed.” An empty string hides the introduction. An offline notice takes precedence over the introduction.
-- Calling the dialog again for the same consumer and scope applies the supplied options to the open window. Omitted options use their defaults. After a kernel restart, reopening setup reads the local installation again in the same window.
+- Calling the dialog again for the same consumer applies the supplied options to the open window. Omitted options use their defaults. After a kernel restart, reopening setup reads the local installation again in the same window.
 - Opening the dialog reads the local installation. **Check for updates** looks up compatible releases for installed libraries. **Upgrade** appears beside a library when a newer release is available. **Install** looks up the release when you choose a missing library.
 - **Check readiness** runs the tests supplied by the consumer for installed libraries that can run in this kernel. Each footer button becomes available when at least one library qualifies. Installing or removing a library updates both buttons.
 - A running check shows a spinner and **Cancel check**. Cancellation takes effect after the current library. The footer summarizes completed checks. Hover over a row’s failure or setup notice to read the details.

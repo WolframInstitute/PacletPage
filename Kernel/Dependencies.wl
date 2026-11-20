@@ -35,8 +35,9 @@ dependencyEntryQ[entry_, owner_] := With[{
     platforms = Lookup[entry, "Platforms", All], check = Lookup[entry, "Check", None],
     links = Lookup[entry, "SetupLinks", <||>], size = Lookup[entry, "DownloadSize", ""]
 },
-    ContainsAll[{"Name", "Required", "Version", "Platforms", "Description", "Check", "Resource", "Archive", "Git", "Commit", "Path",
+    ContainsAll[{"Name", "Required", "Optional", "Version", "Platforms", "Description", "Check", "Resource", "Archive", "Git", "Commit", "Path",
         "DownloadSize", "License", "URL", "SetupLinks"}, Keys[entry]] &&
+    BooleanQ[Lookup[entry, "Optional", False]] &&
     dependencyNameQ[name] && name =!= owner["Name"] && dependencyVersionSpecQ[version] &&
     (platforms === All || MatchQ[platforms, {___String}]) &&
     AllTrue[Values[KeyTake[entry, {"Description", "License"}]], StringQ] &&
@@ -53,11 +54,11 @@ dependencyEntryQ[entry_, owner_] := With[{
         AnyTrue[Cases[Flatten[{owner["PrimaryContext"], owner["Context"]}], _String], StringStartsQ[check, #] &]))
 ]
 
-dependencyManifest[owner_PacletObject] := Module[{info = owner["PacletInfo"], required, optional, entries, names},
-    required = Lookup[info, "Dependencies", {}];
-    optional = Lookup[info, "OptionalDependencies", {}];
-    If[! ListQ[required] || ! ListQ[optional], Return[dependencyFailure["DependencyManifest", "Dependencies and OptionalDependencies must be lists."]]];
-    entries = Join[Append[dependencyEntry[#], "Required" -> True] & /@ required, Append[dependencyEntry[#], "Required" -> False] & /@ optional];
+(* The paclet's own "Dependencies" list: a dependency is required unless its declaration says
+   "Optional" -> True *)
+dependencyManifest[owner_PacletObject] := Module[{declared = Lookup[owner["PacletInfo"], "Dependencies", {}], entries, names},
+    If[! ListQ[declared], Return[dependencyFailure["DependencyManifest", "Dependencies must be a list."]]];
+    entries = With[{entry = dependencyEntry[#]}, Append[entry, "Required" -> ! TrueQ[Lookup[entry, "Optional", False]]]] & /@ declared;
     With[{invalid = SelectFirst[entries, ! dependencyEntryQ[#, owner] &, None]},
         If[invalid =!= None, Return[dependencyFailure["DependencyManifest", "Invalid dependency declaration in `1`: `2`.", owner["Name"], invalid]]]];
     names = #["Name"] & /@ entries;

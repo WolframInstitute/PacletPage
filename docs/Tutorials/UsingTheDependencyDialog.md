@@ -11,7 +11,7 @@ RelatedGuides: [PacletDependencyManagement, PacletPage]
 
 ## Open the dialog
 
-A paclet that declares the libraries it uses, a consumer, gives its users one window for them. Each library shows what it is, which version is installed and what can be done with it. This tutorial follows the consumer `Demo/Consumer` from the [Dependency Management](paclet:WolframInstitute/PacletPage/tutorial/DependencyManagement) tutorial. It requires PacletPage, and it declares two optional libraries: TypeTheory, published as a Wolfram Cloud resource, and Wolfram/Parser, from a commit of its GitHub repository.
+A paclet that declares the libraries it uses, a consumer, gives its users one window for them. Each library shows what it is, which version is installed and what can be done with it. This tutorial follows the consumer `Demo/Consumer` from the [Dependency Management](paclet:WolframInstitute/PacletPage/tutorial/DependencyManagement) tutorial. Its `"Dependencies"` list requires PacletPage and declares two libraries `"Optional" -> True`: TypeTheory, published as a Wolfram Cloud resource, and Wolfram/Parser, from a commit of its GitHub repository. The dialog lists them all, required and optional.
 
 Open the dialog from a desktop notebook:
 
@@ -79,20 +79,20 @@ InstallPacletDependencies["Demo/Consumer", "WolframInstitute/TypeTheory"]
 
 The link reads **Copied** until the next action. When the dialog's window is selected again, it reads the installation again, so a library installed or removed elsewhere shows its new state.
 
-## Ask for what a notebook needs
+## Say what the libraries are for
 
-A notebook that only needs the optional libraries can open a dialog of those alone, and say why in its own words. The title is also the window's title, here **Consumer: Proof libraries**.
+A notebook can open the dialog with its own heading and introduction, to say in its own words what the libraries are for. The dialog still lists every dependency. The title is also the window's title, here **Consumer: Proof libraries**.
 
 ```wl
 #| eval: false
-PacletDependencyDialog["Demo/Consumer", "Optional",
+PacletDependencyDialog["Demo/Consumer",
     "Title" -> "Proof libraries",
     "Description" -> "Install TypeTheory to check proofs in this notebook."]
 ```
 
-![The dialog of optional libraries only, titled Proof libraries, with the description Install TypeTheory to check proofs in this notebook, and the rows TypeTheory and Parser](Images/DependencyDialog-Optional.png)
+![The dialog titled Proof libraries, with the description Install TypeTheory to check proofs in this notebook, and the rows PacletPage, TypeTheory and Parser](Images/DependencyDialog-Titled.png)
 
-`"Description" -> ""` leaves out the introduction. Opening the dialog again for the same consumer and libraries brings its window forward, with the title and description of the new call.
+`"Description" -> ""` leaves out the introduction. Opening the dialog again for the same consumer brings its window forward, with the title and description of the new call.
 
 ## Light and dark
 

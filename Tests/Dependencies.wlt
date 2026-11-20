@@ -51,13 +51,22 @@ VerificationTest[
     {"Demo/Consumer", Null, Null, True, True}, TestID -> "Dependencies: a packaged consumer reuses its compatible offline manager and rejects an incompatible bundle"
 ]
 
+(* a consumer that declares the required dependencies, then the optional ones *)
 testDependencyOwner[required_, optional_] := PacletObject[<|
     "Name" -> "Demo/Consumer", "Version" -> "1.0", "PrimaryContext" -> "Demo`Consumer`",
-    "Dependencies" -> required, "OptionalDependencies" -> optional|>]
+    "Dependencies" -> Join[required, Append[dependencyEntry[#], "Optional" -> True] & /@ optional]|>]
 
 VerificationTest[
     Normal[PacletDependencyInformation[testDependencyOwner[{}, {}]]],
     <||>, TestID -> "Dependencies: empty manifest"
+]
+
+VerificationTest[
+    With[{owner = Function[declared, PacletObject[<|"Name" -> "Demo/Consumer", "Version" -> "1.0", "Dependencies" -> declared|>]]},
+        {#["Required"] & /@ dependencyManifest[owner[{"Demo/A", <|"Name" -> "Demo/B", "Optional" -> True|>, <|"Name" -> "Demo/C", "Optional" -> False|>}]],
+         FailureQ[dependencyManifest[owner[{<|"Name" -> "Demo/B", "Optional" -> "yes"|>}]]]}],
+    {<|"Demo/A" -> True, "Demo/B" -> False, "Demo/C" -> True|>, True},
+    TestID -> "Dependencies: one Dependencies list, where a dependency is optional when its declaration says \"Optional\" -> True"
 ]
 
 VerificationTest[
@@ -399,7 +408,7 @@ VerificationTest[
         {cells, settings} = Block[{dependencyDesktopQ = (True &), Notebooks = ({} &),
                 EvaluationNotebook = (None &), CurrentValue = (Inherited &), $dependencyDialogs = <||>,
                 CreateDialog = Function[Null, {First[{##}], Association[Rest[{##}]]}]},
-            PacletDependencyDialog[owner, "Optional"]];
+            PacletDependencyDialog[owner]];
         edges = Cases[#, HoldPattern[CellFrame -> _], {1}] & /@ cells[[{1, 3}]];
         color = Cases[#, HoldPattern[CellFrameColor -> _], {1}] & /@ cells[[{1, 3}]];
         {edges, MatchQ[color, {{_Rule}, {_Rule}}] && First[color] === Last[color],
@@ -704,9 +713,9 @@ VerificationTest[
                 PacletSiteUpdate = (Throw["Unexpected site update"] &), PacletFindRemote = (Throw["Unexpected remote lookup"] &),
                 URLRead = (Throw["Unexpected request"] &), URLSubmit = (Throw["Unexpected request"] &),
                 dependencyDialogContent = Function[{paclet, command, rows}, Keys[rows]], CreateDialog = Function[Null, First[{##}]]},
-            Catch[{PacletDependencyDialog[owner, "Optional"], PacletDependencyDialog[owner]}]]]],
-    {{"Demo/Optional"}, {"Demo/Required", "Demo/Optional"}},
-    TestID -> "Dependencies: opening either dialog reads local metadata and leaves readiness and updates to its buttons"
+            Catch[PacletDependencyDialog[owner]]]]],
+    {"Demo/Required", "Demo/Optional"},
+    TestID -> "Dependencies: opening the dialog lists every dependency, reads local metadata and leaves readiness and updates to its buttons"
 ]
 
 VerificationTest[
@@ -716,7 +725,7 @@ VerificationTest[
         owner = CreateDirectory[FileNameJoin[{root, "consumer"}]];
         offered = FileNameJoin[{owner, "library.paclet"}];
         declare[record_] := Put[PacletObject[<|"Name" -> "TestConsumer", "Version" -> "1.0",
-            "OptionalDependencies" -> {record}|>], FileNameJoin[{owner, "PacletInfo.wl"}]];
+            "Dependencies" -> {Append[record, "Optional" -> True]}|>], FileNameJoin[{owner, "PacletInfo.wl"}]];
         selectVersion[version_] := CopyFile[archives[version], offered, OverwriteTarget -> True];
         WithCleanup[
             archives = AssociationMap[Function[version,
@@ -751,7 +760,7 @@ VerificationTest[
                 Put[PacletObject[Join[<|"Name" -> name, "Version" -> "1.0"|>, constraint]], FileNameJoin[{source, "PacletInfo.wl"}]];
                 archive = CreatePacletArchive[source, root];
                 record = <|"Name" -> name, "Archive" -> FileNameTake[archive]|>;
-                owner = PacletObject[<|"Name" -> "TestConsumer", "Version" -> "1.0", "Location" -> root, "OptionalDependencies" -> {record}|>];
+                owner = PacletObject[<|"Name" -> "TestConsumer", "Version" -> "1.0", "Location" -> root, "Dependencies" -> {Append[record, "Optional" -> True]}|>];
                 result = Block[{PacletInstall = (Throw["Unexpected installation"] &)}, Catch[{
                     PacletDependencyInformation[owner, "CheckUpdates" -> True][name]["LatestVersion"],
                     InstallPacletDependencies[owner, name][name], dependencyInstallFile[File[archive], name, "1.0"]}]];
@@ -764,19 +773,19 @@ VerificationTest[
 ]
 
 VerificationTest[
-    With[{owner = testDependencyOwner[{"Demo/Required"}, {"Demo/Optional"}]},
+    With[{owner = testDependencyOwner[{"Demo/Required"}, {"Demo/Optional"}], optional = testDependencyOwner[{}, {"Demo/Optional"}]},
         Block[{dependencyDesktopQ = (True &), Notebooks = ({} &), $dependencyDialogs = <||>,
                 EvaluationNotebook = (None &), CurrentValue = (Inherited &), dependencyDialogContent = (Null &),
                 CreateDialog = Function[Null, With[{options = Association[Rest[{##}]]},
                     {options[WindowTitle], options[TaggingRules]["DependencyText"], Keys[options[TaggingRules]["DependencyRows"]]}]]},
             {PacletDependencyDialog[owner, "Title" -> "Proof tools", "Description" -> "Check a proof."],
-                PacletDependencyDialog[owner, "Optional", "Description" -> ""], PacletDependencyDialog[owner],
+                PacletDependencyDialog[optional, "Description" -> ""], PacletDependencyDialog[owner],
                 First[PacletDependencyDialog[owner, "Title" -> " "]], First[PacletDependencyDialog[owner, "Description" -> 1]]}]],
     {{"Consumer: Proof tools", <|"Title" -> "Proof tools", "Description" -> "Check a proof."|>, {"Demo/Required", "Demo/Optional"}},
         {"Consumer: Optional libraries", <|"Title" -> "Optional libraries", "Description" -> ""|>, {"Demo/Optional"}},
         {"Consumer: Library dependencies", <|"Title" -> "Library dependencies", "Description" -> "Install, upgrade, or remove libraries as needed."|>,
             {"Demo/Required", "Demo/Optional"}}, "DependencyDialogTitle", "DependencyDialogDescription"},
-    TestID -> "Dependencies: title and description options initialize the selected dialog scope and native window title"
+    TestID -> "Dependencies: title and description options initialize the dialog and its native window title, Optional libraries when nothing is required"
 ]
 
 VerificationTest[
@@ -784,12 +793,12 @@ VerificationTest[
         nb = CreateDocument[{}, Visible -> False, TaggingRules -> Join[dependencyDialogTags[<||>],
             <|"DependencyInternetDisabled" -> True, "DependencyCheckFeedback" -> "2 passed"|>]];
         WithCleanup[
-            Block[{dependencyDesktopQ = (True &), $dependencyDialogs = <|{dependencyCommandOwner[owner, owner], "Optional"} -> nb|>,
+            Block[{dependencyDesktopQ = (True &), $dependencyDialogs = <|dependencyCommandOwner[owner, owner] -> nb|>,
                     SetSelectedNotebook = (Null &), PacletDependencyInformation = (Throw["Unexpected second snapshot"] &)},
                 Catch[
-                    changed = PacletDependencyDialog[owner, "Optional", "Title" -> "Proof tools", "Description" -> ""];
+                    changed = PacletDependencyDialog[owner, "Title" -> "Proof tools", "Description" -> ""];
                     With[{title = CurrentValue[nb, WindowTitle], text = CurrentValue[nb, {TaggingRules, "DependencyText", "Description"}]},
-                        restored = PacletDependencyDialog[owner, "Optional"];
+                        restored = PacletDependencyDialog[owner];
                         {changed === nb === restored, title, text, CurrentValue[nb, WindowTitle],
                             CurrentValue[nb, {TaggingRules, "DependencyText", "Description"}],
                             CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}],
@@ -814,26 +823,26 @@ VerificationTest[
 
 VerificationTest[
     UsingFrontEnd[Block[{$dependencyDialogs = <||>}, Module[
-        {owner = testDependencyOwner[{}, {"Demo/Optional"}], source, open, first, optional, reloaded, recovered, feedback, kept},
+        {owners = {testDependencyOwner[{}, {"Demo/Optional"}], testDependencyOwner[{}, {"Demo/Other"}]}, source, open, first, other, reloaded, recovered, feedback, kept},
         source = CreateDocument[{}, Visible -> False];
-        open[scope_] := Block[{dependencyDesktopQ = (True &), EvaluationNotebook = (source &), SetSelectedNotebook = (Null &)},
-            PacletDependencyDialog[owner, scope]];
+        open[owner_] := Block[{dependencyDesktopQ = (True &), EvaluationNotebook = (source &), SetSelectedNotebook = (Null &)},
+            PacletDependencyDialog[owner]];
         feedback = {TaggingRules, "DependencyCheckFeedback"};
         WithCleanup[
-            first = open[All]; optional = open["Optional"];
-            SetOptions[optional, WindowSize -> {440, 300}];
-            CurrentValue[optional, feedback] = "1 passed";
+            first = open[First[owners]]; other = open[Last[owners]];
+            SetOptions[other, WindowSize -> {440, 300}];
+            CurrentValue[other, feedback] = "1 passed";
             Block[{$Context = Context[dependencyDialogTags], $ContextPath = {"WolframInstitute`PacletPage`", "System`"}},
                 Get[FileNameJoin[{$packageDirectory, "DependencyDialog.wl"}]]];
-            reloaded = open["Optional"]; kept = CurrentValue[reloaded, feedback];
+            reloaded = open[Last[owners]]; kept = CurrentValue[reloaded, feedback];
             $dependencyDialogs = <||>;
-            recovered = {open[All], open["Optional"]};
-            {first =!= optional, reloaded === optional, kept, recovered === {first, optional},
+            recovered = open /@ owners;
+            {first =!= other, reloaded === other, kept, recovered === {first, other},
                 CurrentValue[Last[recovered], feedback], Round[CurrentValue[Last[recovered], WindowSize]]},
-            Scan[NotebookClose, Intersection[Cases[Flatten[{source, first, optional, reloaded, recovered}], _NotebookObject], Notebooks[]]]]
+            Scan[NotebookClose, Intersection[Cases[Flatten[{source, first, other, reloaded, recovered}], _NotebookObject], Notebooks[]]]]
     ]]],
     {True, True, "1 passed", True, "", {440, 300}},
-    TestID -> "Dependencies: a package reload preserves open dialogs and a fresh evaluator rebuilds each scope in place"
+    TestID -> "Dependencies: a package reload preserves open dialogs and a fresh evaluator rebuilds each consumer's dialog in place"
 ]
 
 VerificationTest[
@@ -856,7 +865,7 @@ VerificationTest[
         WithCleanup[
             state[] := {CurrentValue[dialog, LightDark], If[$dependencyNamedThemes, CurrentValue[dialog, System`NotebookTheme], None]};
             openFrom[source_] := Block[{EvaluationNotebook = (source &), SetSelectedNotebook = (Null &)}, PacletDependencyDialog[owner]];
-            result = Block[{dependencyDesktopQ = (True &), $dependencyDialogs = <|{dependencyCommandOwner[owner, owner], All} -> dialog|>},
+            result = Block[{dependencyDesktopQ = (True &), $dependencyDialogs = <|dependencyCommandOwner[owner, owner] -> dialog|>},
                 openFrom[first];
                 With[{dark = state[]}, openFrom[second];
                     With[{light = state[]}, SetOptions[second, LightDark -> Automatic]; dependencySyncAppearance[dialog];

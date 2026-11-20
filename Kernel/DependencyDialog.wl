@@ -433,12 +433,13 @@ dependencyDialogTags[rows_, text_ : Automatic] := With[{defaultTitle = dependenc
     "DependencyRows" -> Map[dependencyRowState, rows], "DependencyChecks" -> dependencyCheckAvailability[rows]|>]
 
 Options[PacletDependencyDialog] = {"Title" -> Automatic, "Description" -> Automatic}
-PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope : (All | "Optional") : All, OptionsPattern[]] :=
+(* The dialog lists every dependency the owner declares, required and optional. *)
+PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), OptionsPattern[]] :=
  Module[{owner, key, dialog, rows, existing, defaultTitle, text, windowTitle, source, evaluator, windows, windowKey, previous, windowArguments},
     If[! dependencyDesktopQ[], Return[dependencyFailure["NotebookRequired", "Open a desktop notebook to use the dependency dialog. Scripts can use PacletDependencyInformation and the install, update and uninstall functions."]]];
     owner = dependencyOwner[spec];
     If[! MatchQ[owner, _PacletObject], Return[owner]];
-    key = {dependencyCommandOwner[owner, owner], scope};
+    key = dependencyCommandOwner[owner, owner];
     source = EvaluationNotebook[];
     evaluator = CurrentValue[source, Evaluator];
     windows = Notebooks[];
@@ -448,7 +449,6 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope :
         defaultTitle = CurrentValue[dialog, {TaggingRules, "DependencyDefaultTitle"}],
         rows = PacletDependencyInformation[owner, "Output" -> "Association"];
         If[FailureQ[rows], Return[rows]];
-        If[scope === "Optional", rows = Select[rows, ! TrueQ[#["Required"]] &]];
         defaultTitle = dependencyDialogHeading[rows]];
     text = dependencyDialogText[defaultTitle, OptionValue["Title"], OptionValue["Description"]];
     If[FailureQ[text], Return[text]];

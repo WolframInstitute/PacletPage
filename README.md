@@ -29,7 +29,7 @@ paclet with a documentation site, without a front end and without scripts of the
 
 ## Paclet dependencies
 
-Describe optional libraries in the consumer's `PacletInfo.wl`. Open `PacletDependencyDialog[owner]` to manage them in a desktop notebook, or use the same operations from a script. The tutorial includes the manifest, a runtime check and a PureMath integration example. [Dependency Management](docs/Tutorials/DependencyManagement.md)
+Declare the libraries in the consumer's `PacletInfo.wl` `"Dependencies"`, an optional one with `"Optional" -> True`. Open `PacletDependencyDialog[owner]` to manage them in a desktop notebook, or use the same operations from a script. The tutorial includes the manifest, a runtime check and a PureMath integration example. [Dependency Management](docs/Tutorials/DependencyManagement.md)
 
 ## Features
 

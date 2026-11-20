@@ -11,7 +11,7 @@ RelatedGuides: [PacletDependencyManagement, PacletPage]
 
 ## Declare an optional computation
 
-Suppose `Demo/Consumer` offers proofs through TypeTheory. Its ordinary computations can run before the user installs the proof engine. Put the following declaration in the consumer's `PacletInfo.wl`. The standard `"Dependencies"` list names PacletPage so that the consumer can call its setup functions. The separate `"OptionalDependencies"` list describes the proof engine.
+Suppose `Demo/Consumer` offers proofs through TypeTheory. Its ordinary computations can run before the user installs the proof engine. Put the following declaration in the consumer's `PacletInfo.wl`. Its `"Dependencies"` list names PacletPage, which the consumer needs to call its setup functions, and describes the proof engine, which `"Optional" -> True` marks as a library the consumer works without.
 
 ```wl
 consumer = PacletObject[<|
@@ -19,9 +19,10 @@ consumer = PacletObject[<|
     "Version" -> "1.0.0",
     "PrimaryContext" -> "Demo`Consumer`",
     "Extensions" -> {{"Kernel", "Root" -> "Kernel", "Context" -> "Demo`Consumer`"}},
-    "Dependencies" -> {"WolframInstitute/PacletPage"},
-    "OptionalDependencies" -> {
+    "Dependencies" -> {
+        "WolframInstitute/PacletPage",
         <|"Name" -> "WolframInstitute/TypeTheory",
+          "Optional" -> True,
           "Description" -> "Type checking for the Calculus of Inductive Constructions.",
           "Resource" -> "https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/TypeTheory",
           "License" -> "MIT",
@@ -39,11 +40,12 @@ Keys[PacletDependencyInformation[consumer]]
 
 <!-- => {"WolframInstitute/PacletPage", "WolframInstitute/TypeTheory"} -->
 
-A bare dependency name uses the configured paclet sites. The other sources are a public Wolfram Cloud paclet `"Resource"`, a local `"Archive"`, such as `"Resources/Algebra.paclet"`, relative to the consumer directory, or a GitHub repository at a commit, `"Git"` with `"Commit"`, and `"Path"` where the paclet is not at the repository's root. Choose one source per library. Cloud resources may select their archive by system. Each dependency appears once across both lists.
+A bare dependency name uses the configured paclet sites. The other sources are a public Wolfram Cloud paclet `"Resource"`, a local `"Archive"`, such as `"Resources/Algebra.paclet"`, relative to the consumer directory, or a GitHub repository at a commit, `"Git"` with `"Commit"`, and `"Path"` where the paclet is not at the repository's root. Choose one source per library. Cloud resources may select their archive by system. Each dependency appears once in the list.
 
 | Declaration | Meaning |
 |---|---|
 | `"Name"` | Exact paclet name, including its publisher when applicable |
+| `"Optional"` | `True` for a library the consumer works without; a dependency is required by default |
 | `"Version"` | A numeric version such as `"1.2.0"`, a minimum such as `"1.2+"`, a version family such as `"1.2.*"`, or `"*"` for any version |
 | `"Platforms"` | List of supported system IDs. Omitting the field allows every platform |
 | `"Description"`, `"License"` | What the library provides and its license or account requirements |
@@ -56,9 +58,10 @@ A library that is not published can come from its repository. This declaration i
 
 ```wl
 #| eval: false
-"OptionalDependencies" -> {
+"Dependencies" -> {
     <|
         "Name" -> "Wolfram/Parser",
+        "Optional" -> True,
         "Git" -> "https://github.com/sw1sh/WolframParser",
         "Commit" -> "5e05149ead1c292ebd39d02eee85f1c0b8059f55",
         "Path" -> "Parser"
@@ -102,11 +105,11 @@ Click **Install** or **Upgrade** to start a download. The library’s row shows 
 PacletDependencyDialog["Demo/Consumer"]
 ```
 
-For a setup command specific to proofs, show only optional libraries and explain what they enable. The title also appears in the window’s title bar. Use `"Description" -> ""` to omit the introduction.
+For a setup command specific to proofs, give the dialog a heading and an introduction that say what the libraries enable. The dialog still lists every dependency. The title also appears in the window’s title bar. Use `"Description" -> ""` to omit the introduction.
 
 ```wl
 #| eval: false
-PacletDependencyDialog["Demo/Consumer", "Optional",
+PacletDependencyDialog["Demo/Consumer",
     "Title" -> "Proof libraries",
     "Description" -> "Install TypeTheory to check proofs in this notebook."]
 ```
