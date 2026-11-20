@@ -204,6 +204,7 @@ pacletDirectories[] := Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}
 dependencyName[name_String] := name;
 dependencyName[name_String -> _] := name;
 dependencyName[{name_String, ___}] := name;
+dependencyName[KeyValuePattern["Name" -> name_String]] := name;
 dependencyName[_] := Nothing;
 
 dependencyDirectory[location_String] /; DirectoryQ[location] := location;
@@ -3415,6 +3416,32 @@ refreshPacletSites[] := If[ ! TrueQ[$sitesRefreshed] && TrueQ[$AllowInternet],
     $sitesRefreshed = True;
     monitor["the paclet sites refreshed"];
     TimeConstrained[Scan[PacletSiteUpdate[#, Asynchronous -> False] &, PacletSites[]], 60]
+];
+
+(* The sites whose last update succeeded over three days ago, or never, by the paclet manager's own
+   record, which its weekly update reads; none where that record is not at hand *)
+staleSites[] := If[ DownValues[PacletManager`Services`Private`getPacletSiteData] === {} || DownValues[PacletManager`Package`differenceInDays] === {}, {},
+    Cases[PacletManager`Services`Private`getPacletSiteData[],
+        {url_String, _, _, _, last_, ___} /; ! MatchQ[last, {__Integer} | {__?NumericQ}] || PacletManager`Package`differenceInDays[last, Date[]] > 3 :> url]
+];
+
+(* When PacletPage loads in a kernel whose sites are stale, such as each container of a build on a
+   new pod, and internet access is allowed, it refreshes them synchronously at once, so that the weekly update the paclet manager
+   scheduled when the kernel started finds them fresh when it fires, later, in the middle of
+   whatever the kernel does then, and starts nothing. Not on parallel kernels, which start no weekly
+   update. It is a convenience, so loading never waits on it long nor reports it: each site has twelve
+   seconds, and a site that cannot be reached, its connection refused or timed out, ends it, the
+   network being down; its messages, the transfer's and the update's, are the expected answer of an
+   unreachable site, kept off the output, the one purpose of this Quiet, and the paclet manager's
+   own weekly update then runs as it would have. *)
+refreshStaleSites[] := If[ $KernelID === 0 && TrueQ[$AllowInternet],
+    With[{stale = staleSites[]},
+        Catch[Scan[
+            If[ ! MatchQ[TimeConstrained[Quiet[PacletSiteUpdate[#, Asynchronous -> False], {URLFetch::invhttp, PacletSiteUpdate::err, General::stop}], 12, $TimedOut], _PacletSiteObject],
+                Throw[Null, "sites"]] &,
+            stale
+        ], "sites"]
+    ]
 ];
 
 DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],

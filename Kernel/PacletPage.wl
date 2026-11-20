@@ -116,6 +116,10 @@ $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage"
 Block[{$AllowInternet = False, $AllowDataUpdates = False},
     Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl"}]];
 
+(* the paclet sites refreshed when they are stale, outside the offline load above, so that it sees
+   whether this kernel may reach the internet *)
+refreshStaleSites[];
+
 End[]
 
 EndPackage[]

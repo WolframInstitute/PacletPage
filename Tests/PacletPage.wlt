@@ -2553,6 +2553,27 @@ VerificationTest[
     TestID -> "Build: the kernels PacletPage starts, and a build, start no asynchronous site update or information refresh"
 ]
 
+VerificationTest[
+    Block[{PacletManager`Services`Private`getPacletSiteData},
+        PacletSites[];
+        DownValues[PacletManager`Services`Private`getPacletSiteData] = {HoldPattern[PacletManager`Services`Private`getPacletSiteData[]] :> {
+            {"https://fresh.example", "F", None, Date[], Date[], None}, {"https://old.example", "O", None, {2020, 1, 1}, {2020, 1, 1}, None},
+            {"https://never.example", "N", None, {}, {}, None}}};
+        staleSites[]
+    ],
+    {"https://old.example", "https://never.example"},
+    TestID -> "Build: the paclet sites last updated over three days ago, or never, are the stale ones PacletPage refreshes when it loads"
+]
+
+VerificationTest[
+    {
+        Block[{$AllowInternet = False, staleSites = (Throw["asked", "stale"] &)}, Catch[refreshStaleSites[], "stale"]],
+        dependencyName /@ {"A/B", "C/D" -> "1.0", {"E/F", "2.0"}, <|"Name" -> "G/H", "Description" -> "x", "Resource" -> "https://example.org/r"|>, 7}
+    },
+    {Null, {"A/B", "C/D", "E/F", "G/H"}},
+    TestID -> "Build: a kernel with internet access disallowed refreshes no site when PacletPage loads, and a dependency declared as an association is named by its Name"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},
