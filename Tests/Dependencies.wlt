@@ -22,7 +22,7 @@ VerificationTest[
 
 VerificationTest[
     Module[{root = CreateDirectory[], checkout = DirectoryName[$TestFileName, 2], source, resources, loader,
-            archive, consumer, packages = "WolframInstitute`PacletPage`", files = {}, reused, result},
+            archive, consumer, packages = "WolframInstitute`PacletPage`", files = {}, reused, result, incompatible},
         WithCleanup[
             source = CreateDirectory[FileNameJoin[{root, "manager", "Kernel"}]];
             CopyFile[FileNameJoin[{checkout, "PacletInfo.wl"}], FileNameJoin[{DirectoryName[source], "PacletInfo.wl"}]];
@@ -33,13 +33,22 @@ VerificationTest[
             archive = CreatePacletArchive[DirectoryName[source], root];
             CopyFile[archive, FileNameJoin[{resources, "PacletPage.paclet"}]];
             consumer = PacletObject[File[CreatePacletArchive[DirectoryName[resources], root]]];
-            Block[{$Packages = DeleteCases[$Packages, packages], $CacheBaseDirectory = root, PacletFind = ({} &),
-                    PacletDirectoryLoad = (Null &), Needs = Function[{context, file}, AppendTo[files, file]; Null]},
-                result = Get[loader];
-                reused = Block[{ExtractPacletArchive = (Throw["Unexpected second extraction"] &)}, Get[loader]]];
-            {consumer["Name"], result, reused, MatchQ[files, {_String, _String}] && SameQ @@ files && FileExistsQ[First[files]]},
+            Internal`InheritedBlock[{PacletFind, Needs}, Unprotect[PacletFind, Needs];
+                PacletFind["WolframInstitute/PacletPage"] = {};
+                Needs["WolframInstitute`PacletPage`", file_String] := (AppendTo[files, file]; Null);
+                Block[{$Packages = DeleteCases[$Packages, packages], $CacheBaseDirectory = root},
+                    result = Get[loader];
+                    reused = Block[{ExtractPacletArchive = (Throw["Unexpected second extraction"] &)}, Get[loader]];
+                    If[files =!= {}, PacletDirectoryUnload[DirectoryName[First[files], 2]]];
+                    Put[PacletObject[Join[PacletObject[File[DirectoryName[source]]]["PacletInfo"],
+                        <|"WolframVersion" -> "99+"|>]], FileNameJoin[{DirectoryName[source], "PacletInfo.wl"}]];
+                    CopyFile[CreatePacletArchive[DirectoryName[source], CreateDirectory[FileNameJoin[{root, "future"}]]],
+                        FileNameJoin[{resources, "PacletPage.paclet"}], OverwriteTarget -> True];
+                    incompatible = Get[loader]]];
+            {consumer["Name"], result, reused, MatchQ[files, {_String, _String}] && SameQ @@ files && FileExistsQ[First[files]],
+                MatchQ[incompatible, Failure["DependencyManagerIncompatible", _Association]]},
             DeleteDirectory[root, DeleteContents -> True]]],
-    {"Demo/Consumer", Null, Null, True}, TestID -> "Dependencies: a packaged offline consumer keeps its own identity and reuses its cached manager"
+    {"Demo/Consumer", Null, Null, True, True}, TestID -> "Dependencies: a packaged consumer reuses its compatible offline manager and rejects an incompatible bundle"
 ]
 
 testDependencyOwner[required_, optional_] := PacletObject[<|
@@ -198,6 +207,14 @@ VerificationTest[
             With[{rows = PacletDependencyInformation[owner, "CheckUpdates" -> True]},
                 {First[rows["Demo/First"]["LatestVersion"]], rows["Demo/Second"]["LatestVersion"]}]]],
     {"Network", "1.0"}, TestID -> "Dependencies: update lookup returns errors per library"
+]
+
+VerificationTest[
+    With[{owner = testDependencyOwner[{}, {"Demo/Optional"}],
+            releases = PacletObject[<|"Name" -> "Demo/Optional", "Version" -> #|>] & /@ {"2.0.0-beta", "1.9.0", "1.8.0"}},
+        Block[{PacletFindRemote = (releases &)},
+            PacletDependencyInformation[owner, "CheckUpdates" -> True]["Demo/Optional"]["LatestVersion"]]],
+    "1.9.0", TestID -> "Dependencies: a newer prerelease on a site does not hide its latest compatible numeric release"
 ]
 
 VerificationTest[

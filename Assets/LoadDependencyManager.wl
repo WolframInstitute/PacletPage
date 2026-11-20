@@ -36,7 +36,12 @@ Module[{name = "WolframInstitute/PacletPage", context = "WolframInstitute`Paclet
         If[! FileExistsQ[FileNameJoin[{cache, "Kernel", "PacletPage.wl"}]], Return[Failure["DependencyManagerBundle", <|
             "MessageTemplate" -> "Could not unpack the bundled dependency manager into `1`.", "MessageParameters" -> {cache}|>], Module]];
         PacletDirectoryLoad[cache];
-        selected = PacletObject[File[cache]]
+        selected = First[PacletFind[name, <|"Location" -> cache|>], None];
+        If[selected === None,
+            PacletDirectoryUnload[cache];
+            Return[Failure["DependencyManagerIncompatible", <|
+                "MessageTemplate" -> "The bundled dependency manager is incompatible with this Wolfram system.",
+                "Archive" -> bundled|>], Module]]
     ];
     file = FileNameJoin[{selected["Location"], "Kernel", "PacletPage.wl"}];
     Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Needs[context, file]];

@@ -132,7 +132,7 @@ For offline setup, put the publisher's PacletPage release archive beside the loa
 CopyFile[archive, FileNameJoin[{resources, "PacletPage.paclet"}]]
 ```
 
-The loader prefers a compatible installed copy. On first use of a bundled archive, it extracts it into the user's cache and registers that directory for the session. Other consumers can reuse the same cached release. The loader checks the interface the paclet supplies, so two builds with the same version can be distinguished. If neither copy supplies the manager, the returned failure gives the publisher's install command. A kernel that already loaded an older package receives a restart instruction.
+The loader prefers a compatible installed copy. On first use of a bundled archive, it extracts it into the user's cache and checks its compatibility with the running Wolfram system before loading it. Other consumers can reuse the same cached release. The loader checks the interface the paclet supplies, so two builds with the same version can be distinguished. If neither copy supplies the manager, the returned failure gives the publisher's install command. A kernel that already loaded an older package receives a restart instruction.
 
 ## Connect an existing consumer
 
