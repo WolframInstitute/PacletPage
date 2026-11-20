@@ -246,11 +246,13 @@ VerificationTest[
             installed = {local};
             added = {dependencyUpdateSummary[check[False]], dependencyReadinessSummary[check[True]],
                 Values[dependencyCheckAvailability[rows]], rows[name]["Status"]};
+            rows[name] = Append[rows[name], "LatestVersion" -> dependencyFailure["DependencyInternetDisabled", "Offline."]];
             installed = {};
-            removed = {dependencyUpdateSummary[check[False]], rows[name]["Status"], Values[dependencyCheckAvailability[rows]]}];
+            removed = {dependencyReadinessSummary[check[True]], rows[name]["Status"], Values[dependencyCheckAvailability[rows]],
+                KeyExistsQ[rows[name], "LatestVersion"]}];
         {empty, added, removed, started, published, probes, releases}],
     {{{False, False}, "No libraries to check", "No libraries to check", {}, {}, {}, {}},
-     {"No upgrades", "1 passed", {True, True}, "Ready"}, {"No libraries to check", "Not installed", {False, False}},
+     {"No upgrades", "1 passed", {True, True}, "Ready"}, {"No libraries to check", "Not installed", {False, False}, False},
      {"Library", "Library"}, {"Demo/Library", "Demo/Library", "Demo/Library"}, {"Demo/Library"}, {"Demo/Library"}},
     TestID -> "Dependencies: dialog checks refresh externally installed and removed libraries without probing an absent library"
 ]
@@ -387,7 +389,7 @@ VerificationTest[
         name = Last[names];
         owner = testDependencyOwner[{}, names];
         rows = AssociationMap[<|"Name" -> #, "InstalledVersion" -> "1.0", "Status" -> "Installed", "Required" -> False|> &, names];
-        rows[name] = Append[rows[name], "LatestVersion" -> "1.1"];
+        rows[name] = Join[rows[name], <|"LatestVersion" -> "1.1", "Description" -> "Previous release."|>];
         (* Use the list cell alone so its full height, including the last row, can be measured. *)
         nb = CreateDialog[{dependencyDialogContent[owner, owner["Name"], rows][[2]]}, WindowSize -> {740, 420},
             Visible -> False, TaggingRules -> Append[dependencyDialogTags[rows], "DependencyListSize" -> {Full, Automatic}]];

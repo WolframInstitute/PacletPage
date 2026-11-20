@@ -84,7 +84,7 @@ dependencyFlow[items_List, gap_, alignment_ : Left] := With[{margins = If[alignm
 
 dependencyField[name_, key_] := Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyRows", name, key}]]
 
-dependencyDetails[row_, label_] := Module[{name = row["Name"], size, license, requirement, links, installed, versions, metadata, description},
+dependencyDetails[row_, label_] := Module[{name = row["Name"], size, license, requirement, links, installed, versions, metadata},
     size = Replace[Lookup[row, "DownloadSize", None], a_Association :> Lookup[a, $SystemID, None]];
     license = Lookup[row, "License", None];
     requirement = Lookup[row, "Version", All];
@@ -95,9 +95,7 @@ dependencyDetails[row_, label_] := Module[{name = row["Name"], size, license, re
         If[TrueQ[row["Required"]], "Required", Nothing], If[StringQ[requirement] && requirement =!= "*", "Requires " <> requirement, Nothing]};
     links = Join[If[StringQ[row["URL"]], {Hyperlink["Setup instructions", row["URL"]]}, {}],
         KeyValueMap[Hyperlink, Lookup[row, "SetupLinks", <||>]]];
-    description = Lookup[row, "Description", ""];
-    Column[{Tooltip[Style[label, 14, Bold], name], dependencyMetaStyle[versions],
-        If[description === "", dependencyField[name, "Description"], description],
+    Column[{Tooltip[Style[label, 14, Bold], name], dependencyMetaStyle[versions], dependencyField[name, "Description"],
         If[metadata === {}, Nothing, dependencyMetaStyle[dependencyFlow[metadata, 12]]],
         If[links === {}, Nothing, dependencyFlow[links, 12]]}, Alignment -> Left, Spacings -> .5]
 ]
@@ -180,6 +178,11 @@ dependencyCheckAvailability[rows_] := With[{installed = Select[rows, StringQ[#["
     <|"Readiness" -> AnyTrue[installed, dependencyCheckableQ[#, #["Status"], True] &],
       "Updates" -> AnyTrue[installed, dependencyCheckableQ[#, #["Status"], False] &]|>]
 
+(* Keep a known release across installation changes. A failed lookup belongs to the installation that was checked. *)
+dependencyCachedMetadata[old_, fresh_] := KeyTake[old, {"Description",
+    If[StringQ[old["LatestVersion"]] || (StringQ[fresh["InstalledVersion"]] && fresh["InstalledVersion"] === old["InstalledVersion"]),
+        "LatestVersion", Nothing]}]
+
 (* Local inventory does not reproduce readiness results. Keep the existing row and its
    notice unless the installed version or its underlying local status changed. *)
 dependencyLocalChanges[owner_, rows_] := Module[{fresh, old},
@@ -189,8 +192,7 @@ dependencyLocalChanges[owner_, rows_] := Module[{fresh, old},
         old = rows[name];
         If[row["InstalledVersion"] === old["InstalledVersion"] &&
             row["Status"] === Replace[old["Status"], ("Ready" | "Needs setup") -> "Installed"], Nothing,
-            name -> dependencyDialogRow[Join[KeyTake[old, {"Description"}],
-                If[StringQ[old["LatestVersion"]], KeyTake[old, {"LatestVersion"}], <||>], row], old["Label"]]]], fresh]
+            name -> dependencyDialogRow[Join[dependencyCachedMetadata[old, row], row], old["Label"]]]], fresh]
 ]
 
 dependencyOfflineQ[rows_] := AnyTrue[rows, StringQ[#["InstalledVersion"]] &&
@@ -217,7 +219,7 @@ dependencyCheckLibraries[owner_, rows_, probe_, started_, publish_] := withDepen
             eligible = installed[name] =!= {} && dependencyCheckableQ[entries[name], dependencyLocalStatus[entries[name], installed[name]], probe];
             If[eligible, started[old["Label"]]];
             fresh = dependencyInfo[paclet, entries[name], installed[name], eligible && probe, eligible && ! probe];
-            row = dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], fresh,
+            row = dependencyDialogRow[Join[dependencyCachedMetadata[old, fresh], fresh,
                 If[! (eligible && probe) && fresh["Status"] === "Installed" && old["InstalledVersion"] === fresh["InstalledVersion"],
                     KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]];
             If[eligible || row =!= old, publish[name, row]];
@@ -383,7 +385,7 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                     CurrentValue[nb, {TaggingRules, "DependencyRows", name}] = dependencyRowState[row]]]];
             If[MemberQ[Notebooks[], nb],
                 CurrentValue[nb, {TaggingRules, "DependencyChecks"}] = dependencyCheckAvailability[rows];
-                If[! probe, CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] = dependencyOfflineQ[rows]]];
+                CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] = dependencyOfflineQ[rows]];
             Which[FailureQ[checked], dependencyDialogMessage[checked["Message"]], cancelled, "Check stopped",
                 probe, dependencyReadinessSummary[checked], True, dependencyUpdateSummary[checked]]
         ];
@@ -405,7 +407,7 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                     dependencySetActivity[nb, name];
                     CurrentValue[nb, {TaggingRules, "DependencyTransfer", name}] = True;
                     {result, fresh} = dependencyDialogAction[owner, name, action, Function[Null, cancelled], progress];
-                    If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[KeyTake[rows[name], {"LatestVersion", "Description"}], fresh], rows[name]["Label"]]];
+                    If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[dependencyCachedMetadata[rows[name], fresh], fresh], rows[name]["Label"]]];
                     If[rows[name]["Status"] === "Installed" && StringQ[rows[name]["Check"]],
                         Which[MatchQ[result, Failure["DependencySetupRequired", _]],
                             rows[name] = Join[rows[name], <|"Status" -> "Needs setup", "ReadinessFailure" -> result["Cause"]|>],
