@@ -30,6 +30,13 @@ dependencyDialogHeading[rows_] := If[AnyTrue[Values[rows], TrueQ[#["Required"]] 
 dependencyShortName[name_] := Last[StringSplit[name, "/"]]
 dependencyMetaStyle[expr_] := Style[expr, Small, LightDarkSwitched[GrayLevel[.35], GrayLevel[.72]]]
 
+dependencyCompactFooterQ[width_, zoom_] := width < 520 zoom
+
+(* Keep the heading and footer visible when the user gives the window a fixed height.
+   An automatically sized window fits a short list and caps a long one at 400 points. *)
+dependencyListSize[{width_, height_}, zoom_] := {Full, UpTo[If[NumberQ[height],
+    Max[24, height/zoom - If[dependencyCompactFooterQ[width, zoom], 174, 136]], 400]]}
+
 dependencyDetails[row_, label_] := Module[{size, license, requirement, links, versions, metadata},
     size = Replace[Lookup[row, "DownloadSize", None], a_Association :> Lookup[a, $SystemID, None]];
     license = Lookup[row, "License", None];
@@ -150,18 +157,26 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
         Column[{Style[heading, 18, Bold], PaneSelector[{True -> $dependencyInternetMessage},
             Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyInternetDisabled"}]],
             "Install, upgrade, or remove libraries as needed."]}, Alignment -> Left, Spacings -> .6],
-        Dynamic[If[rows === <||>, "This paclet declares no dependencies.",
-            Pane[Column[KeyValueMap[rowPanel, rows],
-                    ItemSize -> {{Scaled[1]}}, Spacings -> 1.2],
-                ImageSize -> {Full, UpTo[400]}, Scrollbars -> {False, Automatic}, AppearanceElements -> None]], TrackedSymbols :> {rows, notices, copied}],
-        Grid[{{Grid[{{
-            dependencyCheckControl["Check readiness", "Test whether installed libraries work in this kernel.",
+        If[initialRows === <||>, "This paclet declares no dependencies.",
+            Pane[Dynamic[Column[KeyValueMap[rowPanel, rows], ItemSize -> {{Scaled[1]}}, Spacings -> 1.2],
+                    TrackedSymbols :> {rows, notices}],
+                ImageSize -> Dynamic[dependencyListSize[CurrentValue[EvaluationNotebook[], WindowSize],
+                    AbsoluteCurrentValue[EvaluationNotebook[], Magnification]]],
+                Scrollbars -> {False, Automatic}, AppearanceElements -> None, Alignment -> {Left, Top}]],
+        With[{
+            readiness = dependencyCheckControl["Check readiness", "Test whether installed libraries work in this kernel.",
                 startCheck[True, ButtonNotebook[]], cancelled],
-            dependencyCheckControl["Check for updates", "Look up the latest compatible versions.",
+            updates = dependencyCheckControl["Check for updates", "Look up the latest compatible versions.",
                 startCheck[False, ButtonNotebook[]], cancelled],
-            dependencyMetaStyle[Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyCheckFeedback"}]]]}}, Alignment -> {Left, Center}, Spacings -> {.6, 0}],
-            DefaultButton["Close", cancelled = True; If[operation =!= None, cancelDependencyDownload[]]; dependencyRemember[owner["Name"]]; DialogReturn[], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
-            ItemSize -> {{Scaled[.82], Scaled[.18]}}, Alignment -> {{Left, Right}, Center}]
+            feedback = dependencyMetaStyle[Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyCheckFeedback"}]]],
+            close = DefaultButton["Close", cancelled = True; If[operation =!= None, cancelDependencyDownload[]];
+                dependencyRemember[owner["Name"]]; DialogReturn[], ImageSize -> {90, Automatic}, Method -> "Preemptive"]},
+            PaneSelector[{True -> Grid[{{readiness, feedback}, {updates, close}}, ItemSize -> {{Scaled[.58], Scaled[.42]}},
+                    Alignment -> {{Left, Right}, Center}, Spacings -> {0, .4}],
+                False -> Grid[{{Grid[{{readiness, updates, feedback}}, Alignment -> {Left, Center}, Spacings -> {.6, 0}], close}},
+                    ItemSize -> {{Scaled[.82], Scaled[.18]}}, Alignment -> {{Left, Right}, Center}]},
+                Dynamic[dependencyCompactFooterQ[First[CurrentValue[EvaluationNotebook[], WindowSize]],
+                    AbsoluteCurrentValue[EvaluationNotebook[], Magnification]]], ImageSize -> {Full, Automatic}]]
     }, ItemSize -> {{Scaled[1]}}, Spacings -> 1.3, Alignment -> Left, Dividers -> {False, {False, False, GrayLevel[.85], False}}], FrameMargins -> 16, FrameStyle -> None],
     Initialization :> (
         If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Get[packageFile]]];
@@ -171,7 +186,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                 Block[{dependencyCancelledQ = Function[Null, cancelled || ! MemberQ[Notebooks[], nb]]}, refresh[probe, nb]],
                 operation = None]
         ]];
-        refresh[probe_, nb_] := Module[{outcome},
+        refresh[probe_, nb_] := Module[{outcome, refreshed = <||>},
             outcome = withDependencySelection[owner, Keys[rows], Function[{paclet, entries}, Module[{installed, old, new},
                 installed = dependencyInstallations[Keys[entries]];
                 Do[
@@ -180,15 +195,15 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                     CurrentValue[nb, {TaggingRules, "DependencyCheckFeedback"}] = old["Label"] <> "…";
                     FinishDynamic[];
                     new = dependencyInfo[paclet, entries[name], installed[name], probe, ! probe];
-                    rows[name] = dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], new,
+                    refreshed[name] = dependencyDialogRow[Join[KeyTake[old, {"LatestVersion", "Description"}], new,
                         If[! probe && new["Status"] === "Installed" && old["InstalledVersion"] === new["InstalledVersion"],
                             KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]];
                     If[KeyExistsQ[new, "LatestVersion"],
                         CurrentValue[nb, {TaggingRules, "DependencyVersions", name}] = Replace[new["LatestVersion"],
-                            {Failure["DependencyInternetDisabled", _] -> "Offline", _Failure -> "Unavailable"}]];
-                    KeyDropFrom[notices, name],
+                            {Failure["DependencyInternetDisabled", _] -> "Offline", _Failure -> "Unavailable"}]],
                     {name, Keys[entries]}]
             ]]];
+            If[refreshed =!= <||>, rows = Join[rows, refreshed]; notices = KeyDrop[notices, Keys[refreshed]]];
             If[! probe && MemberQ[Notebooks[], nb],
                 CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] =
                     MemberQ[Lookup[Values[rows], "LatestVersion", None], Failure["DependencyInternetDisabled", _]]];
@@ -229,7 +244,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := With[{
                             perform[name, action, ButtonNotebook[]], ImageSize -> {100, Automatic}, Method -> "Queued",
                             Enabled -> If[supported || action === "Uninstall", idle, False]]], actions], Spacer[6]]],
                         If[actions === {}, Nothing, With[{action = First[actions]},
-                            Button[If[copied === name, "Copied", "Copy " <> ToLowerCase[action] <> " command"],
+                            Button[Dynamic[If[copied === name, "Copied", "Copy " <> ToLowerCase[action] <> " command"], TrackedSymbols :> {copied}],
                                 CopyToClipboard[dependencyCommand[commandOwner, action, name]]; copied = name,
                                 Appearance -> "Frameless", BaseStyle -> "Hyperlink", Enabled -> If[supported || action === "Uninstall", idle, False]]]],
                         Lookup[notices, name, Which[

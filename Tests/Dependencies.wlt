@@ -229,6 +229,16 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{short = Last[Last[dependencyListSize[{560, 310}, 1]]]},
+        {dependencyListSize[{740, All}, 1], 0 < short < 310,
+            Last[Last[dependencyListSize[{560, 680}, 1]]] > 400,
+            Last[Last[dependencyListSize[{370, 310}, 1]]] < short,
+            dependencyListSize[{740, 620}, 2] === dependencyListSize[{370, 310}, 1]}],
+    {{Full, UpTo[400]}, True, True, True, True},
+    TestID -> "Dependencies: the list fits a resized window and accounts for wrapped controls and magnification"
+]
+
+VerificationTest[
     UsingFrontEnd[Module[{nb = CreateDocument[{}, Visible -> False], tag = {TaggingRules, "DependencyActivity", "Target"}, seen, cleaned, run},
         WithCleanup[
             SetAttributes[run, HoldRest];
