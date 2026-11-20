@@ -39,7 +39,7 @@ dependencyShortName[name_] := Last[StringSplit[name, "/"]]
 $dependencyNamedThemes = MemberQ[First /@ Options[CreateDialog], System`NotebookTheme]
 dependencyDialogColor[fraction_, light_, dark_] := If[$dependencyNamedThemes,
     ThemeColor[{fraction -> "Background", (1 - fraction) -> "Foreground"}], LightDarkSwitched[GrayLevel[light], GrayLevel[dark]]]
-dependencyMetaStyle[expr_] := Style[expr, Small, dependencyDialogColor[.97, .35, .72]]
+dependencyMetaStyle[expr_] := Style[expr, Small, LightDarkSwitched[GrayLevel[0, .55], GrayLevel[1, .61]]]
 dependencyDialogBackground[appearance_] := If[Lookup[Association[appearance], System`NotebookTheme, "Wolfram Default"] === "Wolfram Default",
     LightDarkSwitched[GrayLevel[.925], GrayLevel[.145]], ThemeColor["Background"]]
 
@@ -332,7 +332,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, 
                 startCheck[True, ButtonNotebook[]], stopCheck[], Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyChecks", "Readiness"}]]],
             dependencyCheckControl["Check for updates", "Look up compatible releases for installed libraries.",
                 startCheck[False, ButtonNotebook[]], stopCheck[], Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyChecks", "Updates"}]]],
-            dependencyMetaStyle[Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyCheckFeedback"}]]]},
+            Style[Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyCheckFeedback"}]], Small, dependencyDialogColor[.97, .35, .72]]},
             6], ImageSize -> Full, Alignment -> Left],
             DefaultButton["Close", stopCheck[True]; NotebookClose[ButtonNotebook[]], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
             ItemSize -> {{Automatic, Full}}, Alignment -> {{Left, Right}, Bottom}, Spacings -> {.6, 0}],
