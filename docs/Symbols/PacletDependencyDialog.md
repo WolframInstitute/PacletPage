@@ -20,8 +20,10 @@ RelatedTutorials: [DependencyManagement]
 
 ## Details & Options
 
-- The dialog opens with local versions and statuses. Choose **Check readiness** to run consumer checks or **Check for updates** to look up releases. The latest version reads **Not checked** until a version check runs. **Upgrade** appears when that check finds a newer compatible release. Installed optional libraries offer **Uninstall**, except for PacletPage itself.
-- While either check runs, its button shows a spinner and **Cancel check**. Cancelling skips the remaining libraries after the current lookup or readiness function returns. The readiness check reports how many libraries passed, failed, or were skipped. A failure message appears beside the affected library.
+- Opening the dialog reads the local installation. **Check for updates** looks up compatible releases for installed libraries. **Upgrade** appears beside a library when a newer release is available. **Install** looks up the release when you choose a missing library.
+- **Check readiness** runs the tests supplied by the consumer for installed libraries that can run in this kernel. Each footer button becomes available when at least one library qualifies. Installing or removing a library updates both buttons.
+- A running check shows a spinner and **Cancel check**. Cancellation takes effect after the current library. The footer summarizes completed checks. Hover over a row’s failure or setup notice to read the details.
+- Installed optional libraries offer **Uninstall**, except for PacletPage itself.
 - Rows follow declaration order. Each row shows the short library name and the consumer's description or, when available, the description from the installed library. Authors can declare a description so users can read it before installation. Rows can also include the download size, license and setup links.
 - Use the copy control to take the corresponding install, update or uninstall command to another notebook.
 - An operation keeps the dialog open. A transfer shows progress and offers cancellation. Opening setup again selects the existing dialog for that consumer.

@@ -74,7 +74,9 @@ PacletDependencyInformation["Demo/Consumer", "WolframInstitute/TypeTheory", "Che
 
 ## Install and update
 
-Open the dialog from a desktop notebook. It reads local state first. Click **Check for updates** to look up release versions. The footer names the library being checked, and each row shows its result as it finishes. When Wolfram internet access is disabled, cloud releases show **Offline**. You can still check a local archive. A version lookup that times out after ten seconds shows **Unavailable**, and the check continues with the next library. **Cancel check** stops after the current library and keeps the completed results.
+Open the dialog from a desktop notebook. It reads the local installation. Choose **Install** beside a missing library to fetch its release. Once a library is installed, **Check for updates** looks up compatible releases for it and the other installed libraries. **Check readiness** runs any applicable tests supplied by the consumer. Each button becomes available as soon as a library qualifies.
+
+The footer names the library being checked. A newer release adds **Upgrade** to that library’s row. **Cancel check** stops after the current library and keeps completed results. When Wolfram internet access is disabled, cloud releases show **Offline**. You can still check a local archive. A version lookup that times out after ten seconds shows **Unavailable** and the check continues. Hover over a failure notice for details.
 
 Click **Install** or **Upgrade** to start a download. The library’s row shows progress above **Cancel**. A percentage appears when the publisher supplies the archive size. If you cancel, the row keeps its installed version and you can retry in the same window.
 

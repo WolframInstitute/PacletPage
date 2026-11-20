@@ -222,6 +222,75 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{name = "Demo/Library", owner, local, installed = {}, rows, started = {}, published = {},
+            probes = {}, releases = {}, check, empty, added, removed},
+        owner = testDependencyOwner[{}, {<|"Name" -> name, "Check" -> "Demo`Consumer`readyQ"|>}];
+        local = PacletObject[<|"Name" -> name, "Version" -> "1.0"|>];
+        Block[{dependencyInstallations = Function[names, AssociationMap[installed &, names]],
+                dependencyReadiness = Function[{p, entry}, AppendTo[probes, entry["Name"]]; True],
+                dependencyRelease = Function[{p, entry}, AppendTo[releases, entry["Name"]]; <|"Version" -> "1.0"|>]},
+            rows = dependencyDialogRows[PacletDependencyInformation[owner, "Output" -> "Association"]];
+            check[probe_] := dependencyCheckLibraries[owner, rows, probe, (AppendTo[started, #] &),
+                Function[{key, row}, AppendTo[published, key]; rows[key] = row]];
+            empty = {Values[dependencyCheckAvailability[rows]], dependencyReadinessSummary[check[True]],
+                dependencyUpdateSummary[check[False]], started, published, probes, releases};
+            installed = {local};
+            added = {dependencyUpdateSummary[check[False]], dependencyReadinessSummary[check[True]],
+                Values[dependencyCheckAvailability[rows]], rows[name]["Status"]};
+            installed = {};
+            removed = {dependencyUpdateSummary[check[False]], rows[name]["Status"], Values[dependencyCheckAvailability[rows]]}];
+        {empty, added, removed, started, published, probes, releases}],
+    {{{False, False}, "No libraries to check", "No libraries to check", {}, {}, {}, {}},
+     {"No upgrades", "1 passed", {True, True}, "Ready"}, {"No libraries to check", "Not installed", {False, False}},
+     {"Library", "Library"}, {"Demo/Library", "Demo/Library", "Demo/Library"}, {"Demo/Library"}, {"Demo/Library"}},
+    TestID -> "Dependencies: dialog checks refresh externally installed and removed libraries without probing an absent library"
+]
+
+VerificationTest[
+    Module[{owner, rows, probes = {}, releases = {}, availability, readiness, updates, afterReadiness},
+        owner = testDependencyOwner[{}, {
+            <|"Name" -> "Demo/Ready", "Check" -> "Demo`Consumer`readyQ"|>, "Demo/NoProbe",
+            <|"Name" -> "Demo/Missing", "Check" -> "Demo`Consumer`readyQ"|>,
+            <|"Name" -> "Demo/Unsupported", "Check" -> "Demo`Consumer`readyQ", "Platforms" -> {"OtherSystem"}|>,
+            <|"Name" -> "Demo/Mismatch", "Check" -> "Demo`Consumer`readyQ", "Version" -> "2.0+"|>}];
+        Block[{dependencyInstallations = Function[names, AssociationMap[Function[name, If[name === "Demo/Missing", {},
+                    {PacletObject[<|"Name" -> name, "Version" -> "1.0"|>]}]], names]],
+                dependencyReadiness = Function[{p, entry}, AppendTo[probes, entry["Name"]]; True],
+                dependencyRelease = Function[{p, entry}, AppendTo[releases, entry["Name"]];
+                    Switch[entry["Name"], "Demo/NoProbe", dependencyFailure["Network", "Offline."],
+                        "Demo/Mismatch", <|"Version" -> "2.0"|>, _, <|"Version" -> "1.0"|>]]},
+            rows = dependencyDialogRows[PacletDependencyInformation[owner, "Output" -> "Association"]];
+            availability = Values[dependencyCheckAvailability[KeyTake[rows, {#}]]] & /@ Keys[rows];
+            readiness = dependencyCheckLibraries[owner, rows, True, (Null &), Function[{name, row}, rows[name] = row]];
+            afterReadiness = {probes, releases};
+            updates = dependencyCheckLibraries[owner, rows, False, (Null &), Function[{name, row}, rows[name] = row]]];
+        {availability, Keys[readiness], dependencyReadinessSummary[readiness], afterReadiness,
+            Keys[updates], dependencyUpdateSummary[updates], rows["Demo/Ready"]["Status"], probes, releases}],
+    {{{True, True}, {False, True}, {False, False}, {False, False}, {False, True}},
+     {"Demo/Ready"}, "1 passed", {{"Demo/Ready"}, {}},
+     {"Demo/Ready", "Demo/NoProbe", "Demo/Mismatch"}, "1 upgrade, 1 unavailable", "Ready",
+     {"Demo/Ready"}, {"Demo/Ready", "Demo/NoProbe", "Demo/Mismatch"}},
+    TestID -> "Dependencies: dialog checks limit probes and release lookups to eligible libraries and summarize lookup failures"
+]
+
+VerificationTest[
+    Module[{names = {"Demo/First", "Demo/Second"}, owner, exercise},
+        owner = testDependencyOwner[{}, <|"Name" -> #, "Check" -> "Demo`Consumer`readyQ"|> & /@ names];
+        exercise[probe_] := Module[{rows, checked, stopped = False, probes = {}, releases = {}, published = {}},
+            Block[{dependencyInstallations = Function[keys, AssociationMap[{PacletObject[<|"Name" -> #, "Version" -> "1.0"|>]} &, keys]],
+                    dependencyCancelledQ = (stopped &),
+                    dependencyReadiness = Function[{p, entry}, AppendTo[probes, entry["Name"]]; True],
+                    dependencyRelease = Function[{p, entry}, AppendTo[releases, entry["Name"]]; <|"Version" -> "1.1"|>]},
+                rows = dependencyDialogRows[PacletDependencyInformation[owner, "Output" -> "Association"]];
+                checked = dependencyCheckLibraries[owner, rows, probe, (Null &),
+                    Function[{name, row}, AppendTo[published, name]; stopped = True]]];
+            {Keys[checked], published, probes, releases}];
+        exercise /@ {True, False}],
+    {{{"Demo/First"}, {"Demo/First"}, {"Demo/First"}, {}}, {{"Demo/First"}, {"Demo/First"}, {}, {"Demo/First"}}},
+    TestID -> "Dependencies: cancelling a dialog check keeps the completed row and skips every remaining probe or publisher"
+]
+
+VerificationTest[
     With[{boxes = ToBoxes[dependencyCheckControl["Check readiness", "Test readiness.", testStart[], testCancelled]]},
         Cases[boxes, ButtonBox[_, opts___] /; ! FreeQ[HoldComplete[opts], testStart | testCancelled] :>
             FirstCase[HoldComplete[opts], HoldPattern[Method -> m_] :> m, None, {1}], Infinity]],
