@@ -229,13 +229,85 @@ VerificationTest[
 ]
 
 VerificationTest[
-    With[{short = Last[Last[dependencyListSize[{560, 310}, 1]]]},
-        {dependencyListSize[{740, All}, 1], 0 < short < 310,
-            Last[Last[dependencyListSize[{560, 680}, 1]]] > 400,
-            Last[Last[dependencyListSize[{370, 310}, 1]]] < short,
-            dependencyListSize[{740, 620}, 2] === dependencyListSize[{370, 310}, 1]}],
-    {{Full, UpTo[400]}, True, True, True, True},
-    TestID -> "Dependencies: the list fits a resized window and accounts for wrapped controls and magnification"
+    UsingFrontEnd[Module[{measure, empty, one, many},
+        measure[n_] := Module[{names, owner, rows, nb},
+            names = Table["Demo/Library" <> ToString[i], {i, n}];
+            owner = testDependencyOwner[{}, names];
+            rows = PacletDependencyInformation[owner, "Output" -> "Association"];
+            nb = CreateDialog[dependencyDialogContent[owner, owner["Name"], rows], WindowSize -> {740, All},
+                Visible -> False, TaggingRules -> dependencyDialogTags[rows]];
+            WithCleanup[Last[AbsoluteCurrentValue[Cells[nb][[2]], CellSize]], NotebookClose[nb]]];
+        {empty, one, many} = measure /@ {0, 1, 16};
+        {0 < empty < one < many, 395 <= many <= 401}]],
+    {True, True}, TestID -> "Dependencies: library rows occupy their first frame before the window is revealed"
+]
+
+VerificationTest[
+    UsingFrontEnd[Module[{items, bounds, alignedQ},
+        items = Graphics[{#, Rectangle[]}, ImageSize -> {48, 12}, ImagePadding -> 0, PlotRangePadding -> None] & /@ {Red, Blue};
+        bounds[alignment_, width_] := Module[{image, pixels},
+            image = Rasterize[Pane[dependencyFlow[items, 6, alignment], {width, Automatic}, Alignment -> alignment],
+                "Image", ImageResolution -> 72];
+            pixels = ImageData[ColorConvert[image, "RGB"], "Byte"];
+            (* Image positions are {row, column}. Keep the two ranges for each colored rectangle. *)
+            (MinMax /@ Transpose[Position[pixels, #, {2}]]) & /@ {{255, 0, 0}, {0, 0, 255}}];
+        alignedQ[alignment_] := Module[{wide, narrow, edge, margin},
+            {wide, narrow} = bounds[alignment, #] & /@ {160, 80};
+            edge = If[alignment === Left, 1, 2];
+            margin[box_, width_] := If[alignment === Left, box[[2, 1]], width - box[[2, 2]]];
+            wide[[1, 2, 2]] < wide[[2, 2, 1]] && Abs[wide[[1, 1, 1]] - wide[[2, 1, 1]]] <= 1 &&
+                narrow[[1, 1, 2]] < narrow[[2, 1, 1]] &&
+                AllTrue[narrow, Abs[margin[#, 80] - margin[wide[[edge]], 160]] <= 1 &]];
+        alignedQ /@ {Left, Right}]],
+    {True, True}, TestID -> "Dependencies: both wrapped lines keep the same outer edge as the unwrapped controls"
+]
+
+VerificationTest[
+    UsingFrontEnd[Module[{names, name, owner, rows, nb, cell, height, before, upgraded},
+        names = Table["Demo/Library" <> IntegerString[i, 10, 3], {i, 64}];
+        name = Last[names];
+        owner = testDependencyOwner[{}, names];
+        rows = AssociationMap[<|"Name" -> #, "InstalledVersion" -> "1.0", "Status" -> "Installed", "Required" -> False|> &, names];
+        rows[name] = Append[rows[name], "LatestVersion" -> "1.1"];
+        (* Use the list cell alone so its full height, including the last row, can be measured. *)
+        nb = CreateDialog[{dependencyDialogContent[owner, owner["Name"], rows][[2]]}, WindowSize -> {740, 420},
+            Visible -> False, TaggingRules -> Append[dependencyDialogTags[rows], "DependencyListSize" -> {Full, Automatic}]];
+        WithCleanup[
+            cell = First[Cells[nb]];
+            height[] := Last[AbsoluteCurrentValue[cell, CellSize]];
+            CurrentValue[nb, {TaggingRules, "DependencyCopied"}] = name;
+            SetOptions[nb, WindowSize -> {460, 420}];
+            before = height[];
+            CurrentValue[nb, {TaggingRules, "DependencyCopied"}] = None;
+            upgraded = Join[rows[name], <|"InstalledVersion" -> "1.1",
+                "Description" -> StringRiffle[Table["Release note " <> ToString[i], {i, 12}], "\n"]|>];
+            CurrentValue[nb, {TaggingRules, "DependencyRows", name}] = dependencyRowState[upgraded, dependencyNotice["Updated"]];
+            {before > Length[names] CurrentValue[nb, "FontLineHeight"], height[] > before},
+            NotebookClose[nb]]]],
+    {True, True}, TestID -> "Dependencies: the 64-row list still formats the updated last row after copy and resize"
+]
+
+VerificationTest[
+    UsingFrontEnd[Module[{dialog, size, plain, wrapped, tall, zoom, tiny, nb, long},
+        dialog[footer_] := CreateDialog[{
+            ExpressionCell["Heading", "DialogStyle", CellTags -> "DependencyDialogControls", CellMargins -> 0],
+            ExpressionCell["List", "DialogStyle", CellMargins -> 0],
+            ExpressionCell[footer, "DialogStyle", CellTags -> "DependencyDialogControls", CellMargins -> 0]},
+            WindowSize -> {560, 310}, Visible -> False];
+        nb = dialog["Footer"]; long = dialog[Column[{"First line", "Second line", "Third line"}]];
+        WithCleanup[
+            size[window_] := Last[Last[dependencyListSize[window]]];
+            plain = size[nb]; wrapped = size[long];
+            SetOptions[long, WindowSize -> {560, 820}]; tall = size[long];
+            SetOptions[long, Magnification -> 2]; zoom = size[long];
+            SetOptions[long, WindowSize -> {320, 40}];
+            tiny = {dependencyListSize[long], CurrentValue[long, WindowElements]};
+            SetOptions[long, WindowSize -> {740, All}];
+            {0 < wrapped < plain < 310, tall > 400, 0 < zoom < tall, tiny,
+                dependencyListSize[long], CurrentValue[long, WindowElements]},
+            NotebookClose[long]; NotebookClose[nb]]]],
+    {True, True, True, {{Full, Automatic}, {"VerticalScrollBar"}}, {Full, UpTo[400]}, {}},
+    TestID -> "Dependencies: measured controls leave room for wrapped text, magnification and native scrolling"
 ]
 
 VerificationTest[
@@ -289,15 +361,35 @@ VerificationTest[
     Module[{installed = PacletObject[<|"Name" -> "Demo/Library", "Version" -> "1.1"|>],
             row = <|"InstalledVersion" -> "1.1", "Status" -> "Installed"|>, unconfirmed},
         unconfirmed = dependencyActionNotice["Install", $Failed, row];
-        {StringStartsQ[unconfirmed, "Could not confirm"], dependencyActionNotice["Uninstall", $Failed, row] === unconfirmed,
+        {Values[unconfirmed], dependencyActionNotice["Uninstall", $Failed, row] === unconfirmed,
             dependencyActionNotice["Install", installed, Missing["Unknown"]] === unconfirmed,
             dependencyActionNotice["Install", installed, <|"InstalledVersion" -> Missing["NotInstalled"]|>] === unconfirmed,
-            dependencyActionNotice["Update", installed, row], dependencyActionNotice["Uninstall", Null, row],
-            dependencyActionNotice["Install", installed, row], dependencyActionNotice["Install", dependencyCancelled[], row],
-            dependencyActionNotice["Install", dependencyFailure["Read", "Version 1.1. Retry."], row], dependencyDialogMessage["Waiting..."]}],
-    {True, True, True, True, "Version 1.1 is installed", "Removed from the user repository",
-        "Installation complete", "Cancelled", "Version 1.1. Retry", "Waiting..."},
+            Values /@ {dependencyActionNotice["Update", installed, row], dependencyActionNotice["Uninstall", Null, row],
+                dependencyActionNotice["Install", installed, row], dependencyActionNotice["Install", dependencyCancelled[], row]}}],
+    {{"Unconfirmed", "Reopen the dialog to check the installed version."}, True, True, True,
+        {{"Updated", ""}, {"Removed", ""}, {"Installed", ""}, {"Cancelled", ""}}},
     TestID -> "Dependencies: success feedback requires a confirmed action and local record"
+]
+
+VerificationTest[
+    Module[{installed = PacletObject[<|"Name" -> "Demo/Library", "Version" -> "1.1"|>],
+            row = <|"InstalledVersion" -> "1.1", "Status" -> "Installed"|>,
+            reason = dependencyFailure["Read", "Version 1.1. Retry."], setup, restart, fields},
+        setup = dependencyFailure["DependencySetupRequired", "Configure the library."];
+        restart = Append[row, "Status" -> "Restart required"];
+        fields[state_] := Lookup[state, {"Notice", "NoticeDetail"}];
+        {fields[dependencyRowState[row, dependencyActionNotice["Install", reason, row]]],
+            fields[dependencyRowState[row, dependencyActionNotice["Install", installed, reason]]],
+            fields[dependencyRowState[row, dependencyActionNotice["Install", setup, row]]],
+            fields[dependencyRowState[Append[row, "ReadinessFailure" -> reason]]],
+            fields[dependencyRowState[Append[row, "LatestVersion" -> reason]]],
+            fields[dependencyRowState[restart]], Values[dependencyActionNotice["Update", installed, restart]],
+            dependencyDialogMessage["Waiting..."]}],
+    {{"Failed", "Version 1.1. Retry."}, {"Unconfirmed", "Version 1.1. Retry."}, {"Needs setup", "Configure the library."},
+        {"Needs setup", "Version 1.1. Retry."}, {"Check failed", "Version 1.1. Retry."},
+        {"Restart required", "Restart the kernel to use the changed library."},
+        {"Restart required", "Restart the kernel to use the changed library."}, "Waiting..."},
+    TestID -> "Dependencies: short row notices retain diagnostic and recovery details"
 ]
 
 VerificationTest[
@@ -421,13 +513,13 @@ VerificationTest[
 ]
 
 VerificationTest[
-    With[{owner = testDependencyOwner[{"Demo/Required"}, {"Demo/Optional"}]},
+    UsingFrontEnd[With[{owner = testDependencyOwner[{"Demo/Required"}, {"Demo/Optional"}]},
         Block[{dependencyDesktopQ = (True &), Notebooks = ({} &), $dependencyDialogs = <||>,
                 dependencyRelease = (Throw["Unexpected release lookup"] &), dependencyReadiness = (Throw["Unexpected readiness check"] &),
                 PacletSiteUpdate = (Throw["Unexpected site update"] &), PacletFindRemote = (Throw["Unexpected remote lookup"] &),
                 URLRead = (Throw["Unexpected request"] &), URLSubmit = (Throw["Unexpected request"] &),
                 dependencyDialogContent = Function[{paclet, command, rows}, Keys[rows]], CreateDialog = Function[Null, First[{##}]]},
-            Catch[{PacletDependencyDialog[owner, "Optional"], PacletDependencyDialog[owner]}]]],
+            Catch[{PacletDependencyDialog[owner, "Optional"], PacletDependencyDialog[owner]}]]]],
     {{"Demo/Optional"}, {"Demo/Required", "Demo/Optional"}},
     TestID -> "Dependencies: opening either dialog reads local metadata and leaves readiness and updates to its buttons"
 ]
