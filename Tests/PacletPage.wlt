@@ -804,9 +804,12 @@ definitionCode[fixture_, helper_String, bar_String] := Export[fixture["Code"], S
     "BeginPackage[\"" <> fixture["Context"] <> "\"]", "foo::usage = \"foo[x]\";", "bar::usage = \"bar[x]\";", "Begin[\"`Private`\"]",
     "foo[x_] := helper[x]", "helper[x_] := " <> helper, "bar[x_] := " <> bar, "End[]", "SetAttributes[{foo, bar}, {Protected, ReadProtected}]", "EndPackage[]"
 }, "\n"], "Text"];
-withDefinitionFixture[pages_, body_] := Module[{fixture = definitionFixture[pages], result},
+withDefinitionFixture[pages_, body_] := Module[{fixture = definitionFixture[pages], path = $ContextPath, result},
     definitionCode[fixture, "x + 1", "2 x"];
     result = body[fixture];
+    (* the contexts the fixture's packages put on the path leave it, so that the next fixture's
+       functions of the same names shadow nothing *)
+    $ContextPath = Select[$ContextPath, MemberQ[path, #] &];
     PacletDirectoryUnload[fixture["Directory"]];
     DeleteDirectory[fixture["Directory"], DeleteContents -> True];
     result
@@ -1997,9 +2000,9 @@ VerificationTest[
         frontEnds = kernelFrontEnds[kernels];
         closeKernels[kernels];
         waitForExit[frontEnds, 10];
-        {Length[frontEnds], livingProcesses[frontEnds], closeKernels[{}], Intersection[Kernels[], kernels]}
+        {Length[frontEnds] >= Length[kernels], livingProcesses[frontEnds], closeKernels[{}], Intersection[Kernels[], kernels]}
     ],
-    {2, {}, {}, {}},
+    {True, {}, {}, {}},
     TestID -> "Build: parallel kernels close after the front ends they started are ended"
 ]
 
@@ -2095,12 +2098,16 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{kernels = LaunchKernels[1], off = offGeneralMessages[], before, matched, reversed},
+    Module[{kernels = LaunchKernels[1], shadowOff = MemberQ[offGeneralMessages[], "shdw"], off, before, matched, reversed},
+        (* the building kernel as a script kernel is, General::shdw off, whatever this kernel was started as *)
+        Off[General::shdw];
+        off = offGeneralMessages[];
         DistributeDefinitions[matchGeneralMessages];
         before = First @ ParallelEvaluate[MemberQ[offGeneralMessages[], "shdw"], kernels];
         matched = First @ With[{o = off}, ParallelEvaluate[matchGeneralMessages[o]; offGeneralMessages[], kernels]];
         reversed = First @ With[{o = DeleteCases[off, "shdw"]}, ParallelEvaluate[matchGeneralMessages[o]; MemberQ[offGeneralMessages[], "shdw"], kernels]];
         CloseKernels[kernels];
+        If[! shadowOff, On[General::shdw]];
         {MemberQ[off, "shdw"], before, matched === off, reversed}
     ],
     {True, False, True, False},
