@@ -186,8 +186,8 @@ dependencyUninstall[owner_, entry_] := Module[{name = entry["Name"], userCopies,
     If[! dependencyRemovableQ[entry], Return[If[entry["Required"],
         dependencyFailure["RequiredDependency", "`1` requires `2`.", owner["Name"], name],
         dependencyFailure["DependencyManagerInUse", "`1` is running this dependency manager.", name]]]];
-    userCopies = PacletFind[name, "Location" -> FileNameJoin[{$UserBasePacletsDirectory, "Repository"}],
-        "WolframVersion" -> All, "SystemID" -> All, "Enabled" -> All];
+    userCopies = PacletFind[name, "Location" -> (FileNameJoin[{$UserBasePacletsDirectory, "Repository"}] <> $PathnameSeparator),
+        "WolframVersion" -> All, "SystemID" -> All, "ProductID" -> All, "EvaluationEnvironment" -> All, "Enabled" -> All];
     If[userCopies === {}, Return[If[PacletFind[name] === {}, Null,
         dependencyFailure["ExternalInstallation", "`1` is supplied outside the user paclet repository.", name]]]];
     Do[

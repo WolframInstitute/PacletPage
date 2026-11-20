@@ -601,13 +601,28 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{source = CreateDirectory[], name = "Test" <> StringDelete[CreateUUID[], "-"]},
+    Module[{root = CreateDirectory[], source, name = "Test" <> StringDelete[CreateUUID[], "-"]},
         WithCleanup[
+            source = CreateDirectory[FileNameJoin[{root, "RepositoryBackup", name}]];
             Put[PacletObject[<|"Name" -> name, "Version" -> "1.0"|>], FileNameJoin[{source, "PacletInfo.wl"}]];
             PacletDirectoryLoad[source];
-            {First[UninstallPacletDependencies[testDependencyOwner[{}, {name}], All][name]], DirectoryQ[source]},
-            PacletDirectoryUnload[source]; DeleteDirectory[source, DeleteContents -> True]]],
-    {"ExternalInstallation", True}, TestID -> "Dependencies: protect development checkouts"
+            Block[{$UserBasePacletsDirectory = root, PacletUninstall = (Throw["Unexpected uninstall"] &)},
+                Catch[{First[UninstallPacletDependencies[testDependencyOwner[{}, {name}], All][name]], DirectoryQ[source]}]],
+            PacletDirectoryUnload[source]; DeleteDirectory[root, DeleteContents -> True]]],
+    {"ExternalInstallation", True}, TestID -> "Dependencies: protect development checkouts beside the user repository"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], name = "Test" <> StringDelete[CreateUUID[], "-"], source, copies},
+        source = CreateDirectory[FileNameJoin[{root, "library"}]];
+        copies[] := PacletFind[name, <|"EvaluationEnvironment" -> All|>];
+        WithCleanup[
+            Put[PacletObject[<|"Name" -> name, "Version" -> "1.0",
+                "EvaluationEnvironment" -> If[$EvaluationEnvironment === "Script", "Cloud", "Script"]|>], FileNameJoin[{source, "PacletInfo.wl"}]];
+            Quiet[PacletInstall[CreatePacletArchive[source, root]]];
+            {PacletFind[name], Length[copies[]], UninstallPacletDependencies[testDependencyOwner[{}, {name}], name][name], copies[]},
+            Scan[PacletUninstall, copies[]]; DeleteDirectory[root, DeleteContents -> True]]],
+    {{}, 1, Null, {}}, TestID -> "Dependencies: explicit removal also removes user copies installed for another evaluation environment"
 ]
 
 (* A literal counter in unused release metadata must stay unevaluated. *)
