@@ -17,7 +17,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 ## Details & Options
 
 - The definition notebook's Submit button asks for the version in a dialog, which a kernel without a front end cannot show. `SubmitPacletResource` makes the same submission headless: the notebook scraped into a resource and handed to `ResourceSubmit` with the version and publisher of `PacletInfo.wl`.
-- Before anything is built, it checks the definition notebook, and any error stops the submission. The exception is the missing file listing of `PacletInfo.wl`, which a definition notebook built from markdown lacks; the built paclet takes its place.
+- Before anything is built, it checks the definition notebook, and any error stops the submission. `BuildPacletDocumentation` lists the paclet's files in a definition notebook it builds from markdown, each file's cell with its `CellID`, so the check finds the cell of `PacletInfo.wl` as it does in a notebook a front end has saved.
 - The archive is built afresh into `build/`, in a kernel of its own, and nothing is submitted unless it holds a page for every documentation notebook and loads, alone, in a fresh kernel: a build that fails on the pages still succeeds, with none, and a submission without them publishes a paclet without documentation.
 - With `"EvaluationKernel"`, for a paclet that loads only on another kernel, the fresh kernel the archive loads on is one of that spec, as `DeployPacletResource` checks it.
 - When `Documentation` already holds finished pages, give their authoring notebooks as `"DocumentationSource"`: the paclet is built from a copy whose documentation is those notebooks, since rebuilding finished pages packs none.

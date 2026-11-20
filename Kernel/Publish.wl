@@ -1338,14 +1338,17 @@ fillPacletManifest[nbFile_String, dir_String] := Module[{nb, root = ExpandFileNa
     With[{stream = OpenWrite[nbFile, CharacterEncoding -> "UTF-8"]}, WriteString[stream, text]; Close[stream]];
     True
 ];
-(* each cell of the tree its ExpressionUUID from its place in the tree and its content, so that a
-   build writes the same notebook as the last, where Export would give a cell without one a new one;
-   a cell that only groups others has none, as Export gives a group's options to its first cell *)
+(* each cell of the tree its CellID and ExpressionUUID from its place in the tree and its content, so
+   that a build writes the same notebook as the last, where Export would give a cell without one a
+   new one; the definition notebook's check finds PacletInfo.wl's cell by its CellID, as a front end
+   that opens the notebook gives one. A cell that only groups others has neither, as Export gives a
+   group's options to its first cell. *)
 treeCellIDs[tree_] := Module[{k = 0},
-    Replace[tree, Cell[c : Except[_CellGroupData], o___] :> With[{rest = DeleteCases[{o}, ExpressionUUID -> _]},
-        Cell[c, Sequence @@ rest, ExpressionUUID -> hashUUID[{++k, c, rest}]]], All]
+    Replace[tree, Cell[c : Except[_CellGroupData], o___] :> With[{rest = DeleteCases[{o}, (ExpressionUUID | CellID) -> _]},
+        With[{key = {++k, c, rest}}, Cell[c, Sequence @@ rest, CellID -> hashCellID[key], ExpressionUUID -> hashUUID[key]]]], All]
 ];
 hashUUID[x_] := StringInsert[IntegerString[Hash[x, "MD5"], 16, 32], "-", {9, 13, 17, 21}];
+hashCellID[x_] := 1 + Mod[Hash[x, "MD5"], 2^30 - 1];
 
 manifestPathOf[root_String, File[path_String]] := pacletManifestPath @@ FileNameSplit[StringDrop[path, StringLength[root] + 1]] /;
     StringStartsQ[path, root <> $PathnameSeparator];
@@ -2169,7 +2172,8 @@ codeLintOff[] := If[ DownValues[DefinitionNotebookClient`Inspectors`PackagePriva
 ];
 
 (* The errors the definition notebook's own check finds, which name what stopped a scrape; not the
-   missing PacletInfo cell, which a definition notebook built from markdown never has *)
+   missing PacletInfo cell, which a definition notebook made without BuildPacletDocumentation's file
+   listing lacks, and a deploy does without *)
 $builtNotebookErrors = {"NoPacletInfoFileCell"};
 
 scrapeErrors[notebook_NotebookObject] := DeleteCases[

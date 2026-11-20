@@ -1851,14 +1851,15 @@ VerificationTest[
         again = ByteArrayToString[ReadByteArray[nb], "UTF-8"];
         got = Get[nb];
         DeleteDirectory[dir, DeleteContents -> True];
-        {
+        With[{ids = Cases[got, c : Cell[__, CellTags -> {___, "FileManager-PacletFiles", ___}, ___] :> Lookup[Cases[List @@ c, _Rule], CellID, None], Infinity]}, {
             first, second,
             StringContainsQ[text, "FileNameJoin[{NotebookDirectory[], \"PacletInfo.wl\"}]"], StringFreeQ[text, "pacletManifestPath"], text === again,
-            Count[got, Cell[_, "FileManagerTopSpacer", ___, CellTags -> {"FileManagerCell", "FileManager-PacletFiles"}, ___], Infinity]
-        }
+            Count[got, Cell[_, "FileManagerTopSpacer", ___, CellTags -> {"FileManagerCell", "FileManager-PacletFiles"}, ___], Infinity],
+            Length[ids] > 1 && AllTrue[ids, IntegerQ] && DuplicateFreeQ[ids]
+        }]
     ],
-    {True, True, True, True, True, 1},
-    TestID -> "Build: a definition notebook from markdown lists the paclet's files after its directory chooser, by paths relative to the notebook, the same each build"
+    {True, True, True, True, True, 1, True},
+    TestID -> "Build: a definition notebook from markdown lists the paclet's files after its directory chooser, by paths relative to the notebook, each cell with its CellID, the same each build"
 ]
 
 VerificationTest[
