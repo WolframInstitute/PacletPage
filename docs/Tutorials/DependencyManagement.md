@@ -78,7 +78,7 @@ Open the dialog from a desktop notebook. It reads the local installation. Choose
 
 The footer names the library being checked. A newer release adds **Upgrade** to that library’s row. **Cancel check** stops after the current library and keeps completed results. When Wolfram internet access is disabled, cloud releases show **Offline**. You can still check a local archive. A version lookup that times out after ten seconds shows **Unavailable** and the check continues. Hover over a failure notice for details.
 
-Click **Install** or **Upgrade** to start a download. The library’s row shows progress above **Cancel**. A percentage appears when the publisher supplies the archive size. If you cancel, the row keeps its installed version and you can retry in the same window.
+Click **Install** or **Upgrade** to start a download. The library’s row shows progress above **Cancel**. A percentage appears when the publisher supplies the archive size. If you cancel, the row keeps its installed version and you can retry in the same window. You can also copy the command and run it in another notebook. When you return, the dialog refreshes the installed versions and available actions.
 
 ```wl
 #| eval: false

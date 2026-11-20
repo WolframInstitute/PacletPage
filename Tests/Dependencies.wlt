@@ -256,6 +256,31 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{versions = <|"Demo/Added" -> None, "Demo/Removed" -> "1.0", "Demo/Changed" -> "1.0", "Demo/Stable" -> "1.0"|>,
+            owner, rows, unchanged, changed, offline, snapshots = 0},
+        owner = testDependencyOwner[{}, <|"Name" -> #, "Check" -> "Demo`Consumer`readyQ"|> & /@ Keys[versions]];
+        Block[{dependencyInstallations = Function[names, snapshots++; AssociationMap[Function[name,
+                    If[StringQ[versions[name]], {PacletObject[<|"Name" -> name, "Version" -> versions[name]|>]}, {}]], names]],
+                dependencyReadiness = (Throw["unexpected readiness check"] &), dependencyRelease = (Throw["unexpected release lookup"] &)},
+            rows = dependencyDialogRows[PacletDependencyInformation[owner, "Output" -> "Association"]];
+            rows["Demo/Removed"] = Append[rows["Demo/Removed"], "LatestVersion" -> dependencyFailure["DependencyInternetDisabled", "Offline."]];
+            rows["Demo/Changed"] = Join[rows["Demo/Changed"], <|"Status" -> "Needs setup", "LatestVersion" -> "2.0",
+                "ReadinessFailure" -> dependencyFailure["Setup", "Setup required."]|>];
+            rows["Demo/Stable"] = Join[rows["Demo/Stable"], <|"Status" -> "Ready", "LatestVersion" -> "1.1"|>];
+            snapshots = 0;
+            unchanged = dependencyLocalChanges[owner, rows];
+            offline = dependencyOfflineQ[rows];
+            versions["Demo/Added"] = "1.0"; versions["Demo/Removed"] = None; versions["Demo/Changed"] = "2.0";
+            changed = dependencyLocalChanges[owner, rows]];
+        {unchanged, snapshots, Keys[changed], Lookup[Values[changed], "Status"],
+            dependencyRowActions[changed["Demo/Removed"]], KeyExistsQ[changed["Demo/Changed"], "ReadinessFailure"],
+            changed["Demo/Changed"]["LatestVersion"], {offline, dependencyOfflineQ[Join[rows, changed]]}}],
+    {<||>, 2, {"Demo/Added", "Demo/Removed", "Demo/Changed"}, {"Installed", "Not installed", "Installed"},
+        {"Install"}, False, "2.0", {True, False}},
+    TestID -> "Dependencies: focus reconciliation reads one local snapshot and publishes only changed installations"
+]
+
+VerificationTest[
     Module[{owner, rows, probes = {}, releases = {}, availability, readiness, updates, afterReadiness},
         owner = testDependencyOwner[{}, {
             <|"Name" -> "Demo/Ready", "Check" -> "Demo`Consumer`readyQ"|>, "Demo/NoProbe",

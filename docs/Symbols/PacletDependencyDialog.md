@@ -30,7 +30,7 @@ RelatedTutorials: [DependencyManagement]
 - A running check shows a spinner and **Cancel check**. Cancellation takes effect after the current library. The footer summarizes completed checks. Hover over a row’s failure or setup notice to read the details.
 - Installed optional libraries offer **Uninstall**, except for PacletPage itself.
 - Rows follow declaration order. Each row shows the short library name and the consumer's description or, when available, the description from the installed library. Authors can declare a description so users can read it before installation. Rows can also include the download size, license and setup links.
-- Use the copy control to take the corresponding install, update or uninstall command to another notebook.
+- Use the copy control to run the corresponding install, update or uninstall command in another notebook. Returning to the dialog refreshes the installed versions and available actions.
 - An operation keeps the dialog open. A transfer shows progress and offers cancellation. Opening setup again selects the existing dialog for that consumer.
 - The `"Notify"` form is suitable for a consumer’s optional desktop startup hook. Dismissing setup records a local preference for that consumer. Scripts may use the other dependency functions directly.
 

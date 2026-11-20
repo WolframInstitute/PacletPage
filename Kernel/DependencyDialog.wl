@@ -114,7 +114,8 @@ dependencyRowNotice[row_] := Which[
     FailureQ[row["ReadinessFailure"]], dependencyNotice["Needs setup", row["ReadinessFailure"]["Message"]],
     row["Status"] === "Needs setup", dependencyNotice["Needs setup", "Check readiness for details."],
     row["Status"] === "Restart required", dependencyNotice["Restart required", "Restart the kernel to use the changed library."],
-    MatchQ[row["LatestVersion"], Failure[Except["DependencyInternetDisabled"], _]], dependencyNotice["Check failed", row["LatestVersion"]["Message"]],
+    StringQ[row["InstalledVersion"]] && MatchQ[row["LatestVersion"], Failure[Except["DependencyInternetDisabled"], _]],
+        dependencyNotice["Check failed", row["LatestVersion"]["Message"]],
     row["Status"] === "Unsupported", dependencyNotice["Unsupported", "No release for " <> $SystemID],
     True, dependencyNotice[""]
 ]
@@ -159,6 +160,22 @@ dependencyCheckableQ[entry_, status_, probe_] := If[probe,
 dependencyCheckAvailability[rows_] := With[{installed = Select[rows, StringQ[#["InstalledVersion"]] &]},
     <|"Readiness" -> AnyTrue[installed, dependencyCheckableQ[#, #["Status"], True] &],
       "Updates" -> AnyTrue[installed, dependencyCheckableQ[#, #["Status"], False] &]|>]
+
+(* Local inventory does not reproduce readiness results. Keep the existing row and its
+   notice unless the installed version or its underlying local status changed. *)
+dependencyLocalChanges[owner_, rows_] := Module[{fresh, old},
+    fresh = PacletDependencyInformation[owner, Keys[rows], "Output" -> "Association"];
+    If[! AssociationQ[fresh], Return[<||>]];
+    Association@KeyValueMap[Function[{name, row},
+        old = rows[name];
+        If[row["InstalledVersion"] === old["InstalledVersion"] &&
+            row["Status"] === Replace[old["Status"], ("Ready" | "Needs setup") -> "Installed"], Nothing,
+            name -> dependencyDialogRow[Join[KeyTake[old, {"Description"}],
+                If[StringQ[old["LatestVersion"]], KeyTake[old, {"LatestVersion"}], <||>], row], old["Label"]]]], fresh]
+]
+
+dependencyOfflineQ[rows_] := AnyTrue[rows, StringQ[#["InstalledVersion"]] &&
+    MatchQ[#["LatestVersion"], Failure["DependencyInternetDisabled", _]] &]
 
 dependencyUpdateSummary[rows_] := Module[{upgrades, failed},
     If[rows === <||>, Return["No libraries to check"]];
@@ -304,7 +321,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, 
 
 dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCheck_Symbol] := With[{
         initialRows = dependencyDialogRows[initial], packageFile = FileNameJoin[{$packageDirectory, "PacletPage.wl"}]}, DynamicModule[
-    {rows = initialRows, operation = None, cancelled = False, refresh, perform, copy, cancelTransfer},
+    {rows = initialRows, operation = None, cancelled = False, wasSelected = True, focus, refresh, perform, copy, cancelTransfer},
     Pane[If[initialRows === <||>, "This paclet declares no dependencies",
             Column[KeyValueMap[dependencyRowPanel[#1, #2, perform, copy, cancelTransfer] &, initialRows],
                 ItemSize -> {{Scaled[1]}}, Spacings -> 1.2]],
@@ -312,6 +329,19 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
         Scrollbars -> {False, Automatic}, AppearanceElements -> None, Alignment -> {Left, Top}],
     Initialization :> (
         If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Get[packageFile]]];
+        focus[nb_, selected_, active_] := Which[
+            selected === False && wasSelected, wasSelected = False,
+            selected === True && ! wasSelected && active === None,
+            wasSelected = True;
+            With[{changed = dependencyLocalChanges[owner, rows]}, If[changed =!= <||> && MemberQ[Notebooks[], nb],
+                rows = Join[rows, changed];
+                KeyValueMap[(CurrentValue[nb, {TaggingRules, "DependencyRows", #1}] = dependencyRowState[#2]) &, changed];
+                If[KeyExistsQ[changed, CurrentValue[nb, {TaggingRules, "DependencyCopied"}]],
+                    CurrentValue[nb, {TaggingRules, "DependencyCopied"}] = None];
+                CurrentValue[nb, {TaggingRules, "DependencyChecks"}] = dependencyCheckAvailability[rows];
+                CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] = dependencyOfflineQ[rows];
+                CurrentValue[nb, {TaggingRules, "DependencyCheckFeedback"}] = ""]]];
+        With[{nb = EvaluationNotebook[]}, SetOptions[nb, NotebookDynamicExpression :> focus[nb, CurrentValue[nb, "NotebookSelected"], operation]]];
         copy[name_, action_, nb_] := (CopyToClipboard[dependencyCommand[commandOwner, action, name]];
             CurrentValue[nb, {TaggingRules, "DependencyCopied"}] = name);
         stopCheck[closing_ : False] := (cancelled = True; If[closing && operation =!= None, cancelDependencyDownload[]]);
@@ -328,8 +358,7 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                     CurrentValue[nb, {TaggingRules, "DependencyRows", name}] = dependencyRowState[row]]]];
             If[MemberQ[Notebooks[], nb],
                 CurrentValue[nb, {TaggingRules, "DependencyChecks"}] = dependencyCheckAvailability[rows];
-                If[! probe, CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] =
-                    AnyTrue[rows, StringQ[#["InstalledVersion"]] && MatchQ[#["LatestVersion"], Failure["DependencyInternetDisabled", _]] &]]];
+                If[! probe, CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] = dependencyOfflineQ[rows]]];
             Which[FailureQ[checked], dependencyDialogMessage[checked["Message"]], cancelled, "Check stopped",
                 probe, dependencyReadinessSummary[checked], True, dependencyUpdateSummary[checked]]
         ];
@@ -353,11 +382,13 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                     {result, fresh} = dependencyDialogAction[owner, name, action, Function[Null, cancelled], progress];
                     If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[KeyTake[rows[name], {"LatestVersion", "Description"}], fresh], rows[name]["Label"]]];
                     If[rows[name]["Status"] === "Installed" && StringQ[rows[name]["Check"]],
-                        Which[MatchQ[result, Failure["DependencySetupRequired", _]], rows[name] = Append[rows[name], "Status" -> "Needs setup"],
+                        Which[MatchQ[result, Failure["DependencySetupRequired", _]],
+                            rows[name] = Join[rows[name], <|"Status" -> "Needs setup", "ReadinessFailure" -> result["Cause"]|>],
                             MatchQ[result, _PacletObject], rows[name] = Append[rows[name], "Status" -> "Ready"]]];
                     If[MemberQ[Notebooks[], nb],
                         CurrentValue[nb, {TaggingRules, "DependencyRows", name}] = dependencyRowState[rows[name], dependencyActionNotice[action, result, fresh]];
-                        CurrentValue[nb, {TaggingRules, "DependencyChecks"}] = dependencyCheckAvailability[rows]],
+                        CurrentValue[nb, {TaggingRules, "DependencyChecks"}] = dependencyCheckAvailability[rows];
+                        CurrentValue[nb, {TaggingRules, "DependencyInternetDisabled"}] = dependencyOfflineQ[rows]],
                     operation = None; If[MemberQ[Notebooks[], nb],
                         CurrentValue[nb, {TaggingRules, "DependencyTransfer", name}] = False;
                         dependencySetActivity[nb, None]]]
