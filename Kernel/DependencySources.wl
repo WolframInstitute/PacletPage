@@ -47,7 +47,7 @@ dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup
             With[{refresh = $refreshDependencySites},
                 $refreshDependencySites = False;
                 candidates = Quiet[PacletFindRemote[name, UpdatePacletSites -> refresh]]];
-            p = If[ListQ[candidates], SelectFirst[candidates, dependencyCompatibleQ[#["Version"], spec] &, None], None];
+            p = If[ListQ[candidates], SelectFirst[candidates, dependencyVersionQ[#["Version"]] && dependencyCompatibleQ[#["Version"], spec] &, None], None];
             If[! MatchQ[p, _PacletObject], Return[dependencyFailure["DependencyRelease", "No compatible release of `1` was found on the configured paclet sites.", name]]];
             <|"Version" -> p["Version"], "SitePaclet" -> p|>
     ];
