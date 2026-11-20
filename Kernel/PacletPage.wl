@@ -18,7 +18,12 @@ BeginPackage["WolframInstitute`PacletPage`"]
 
 PacletPageCatalog::usage = "PacletPageCatalog[resource] gives the catalog of the documentation pages of a published paclet: \
 each page's title, its published page, the notebook behind it, and the guide tree. resource is \"Publisher/Name\" or a \
-Paclet Repository URL for a paclet on the repository, or the URL or CloudObject of a paclet resource deployed to a cloud account.";
+Paclet Repository URL for a paclet on the repository, or the URL or CloudObject of a paclet resource deployed to a cloud account. \
+PacletPageCatalog[File[dir]] gives the catalog of the documentation notebooks of the paclet in dir, without the cloud.";
+
+PacletPageDOM::usage = "PacletPageDOM[dir, page] gives the documentation page of the paclet in dir as WebColumn, WebRow and \
+WebItem, its notebook beside the paclet's guides, tutorials and symbols, a page of Wolfram Studio. page is a paclet: URI, \
+an id such as \"ref/Name\" or a symbol's name. PacletPageDOM[dir] gives the main guide.";
 
 BuildPacletPageSite::usage = "BuildPacletPageSite[dir] renders the documentation notebooks of the paclet in dir to HTML \
 on this computer and writes the site around them, under dir/build/site, without the cloud.";
@@ -114,7 +119,7 @@ $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage"
 
 (* Reading definitions in a fresh kernel must use locally available paclets. *)
 Block[{$AllowInternet = False, $AllowDataUpdates = False},
-    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl"}]];
+    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl", "DOM.wl"}]];
 
 (* the paclet sites refreshed when they are stale, outside the offline load above, so that it sees
    whether this kernel may reach the internet *)

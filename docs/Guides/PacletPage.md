@@ -28,9 +28,10 @@ PacletPage takes a paclet from the markdown in its `docs/` folder to a published
 - `PacletPageDependencies` the symbols a page names and reaches, and the code in its cache key
 
 ### The site
-- `PacletPageCatalog` the pages of a published paclet, the notebook behind each, and the guide tree
+- `PacletPageCatalog` the pages of a published paclet or of a paclet directory, the notebook behind each, and the guide tree
 - `PacletPageFiles` the site's pages, to preview locally or to publish elsewhere
 - `BuildPacletPageSite` the site rendered on this computer, without the cloud, to preview the documentation
+- `PacletPageDOM` a page of the documentation as a page of Wolfram Studio, its notebook beside the paclet's pages
 - `DeployPacletPage` publish the site, with its feedback form, in the connected cloud account
 
 ### Feedback

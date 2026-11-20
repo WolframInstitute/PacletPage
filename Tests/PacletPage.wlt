@@ -1664,6 +1664,46 @@ localFixture[] := Module[{dir = CreateDirectory[], put},
 
 VerificationTest[
     Module[{dir = localFixture[], catalog},
+        catalog = PacletPageCatalog[File[dir]];
+        WithCleanup[
+            {KeyTake[catalog, {"Name", "Kind", "RootGuide", "Version"}], Sort[Keys[catalog["Pages"]]],
+                FileNameTake[catalog["Pages"]["ref/F"]["File"], -3], catalog["Pages"]["guide/Name"]["Guides"],
+                FailureQ[PacletPageCatalog[File[$TemporaryDirectory]]]},
+            DeleteDirectory[dir, DeleteContents -> True]]
+    ],
+    {<|"Name" -> "Pub/Name", "Kind" -> "Local", "RootGuide" -> "guide/Name", "Version" -> "1.0.0"|>,
+        {"guide/Name", "guide/Sub", "ref/F", "tutorial/T"}, FileNameJoin[{"ReferencePages", "Symbols", "F.nb"}], {"guide/Sub"}, True},
+    TestID -> "Catalog: a paclet directory's catalog is read from its documentation notebooks alone, each page with its notebook's file"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], main, nav, entries, symbol},
+        main = PacletPageDOM[dir];
+        nav = main[[1, 1]];
+        entries = Cases[nav, WebItem[Hyperlink[title_, uri_], opts___] :> {title, uri, MemberQ[{opts}, "font-weight" -> "600"]}, Infinity];
+        symbol = PacletPageDOM[dir, "paclet:Pub/Name/ref/F"];
+        WithCleanup[
+            {
+                MatchQ[main, WebRow[{_WebColumn, WebItem[_Notebook, ___]}, ___]],
+                entries,
+                Cases[nav, WebItem[label_String, ___] :> label, Infinity],
+                FirstCase[main[[1, 2, 1]], Cell[c_, "GuideTitle", ___] :> c, None, Infinity],
+                FirstCase[symbol[[1, 2, 1]], Cell[c_, "ObjectName", ___] :> c, None, Infinity],
+                symbol === PacletPageDOM[dir, "F"] === PacletPageDOM[dir, "ref/F"],
+                Cases[PacletPageDOM[dir, "Filter" -> "tutorial"], WebItem[Hyperlink[title_, _], ___] :> title, Infinity],
+                Head[PacletPageDOM[dir, "ref/Nope"]] === Failure && First[PacletPageDOM[dir, "ref/Nope"]] === "PacletPageNotFound"
+            },
+            DeleteDirectory[dir, DeleteContents -> True]]
+    ],
+    {True,
+        {{"Name Guide", "paclet:Pub/Name/guide/Name", True}, {"Sub Guide", "paclet:Pub/Name/guide/Sub", False},
+            {"A Tutorial", "paclet:Pub/Name/tutorial/T", False}, {"F", "paclet:Pub/Name/ref/F", False}},
+        {"Guides", "Tutorials", "Symbols"}, "Name Guide", "F", True, {"A Tutorial"}, True},
+    TestID -> "DOM: a page of the paclet's documentation as WebRow, WebColumn and WebItem, its notebook beside the guide tree, tutorials and symbols, from a URI, an id or a name"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], catalog},
         catalog = localCatalog["Pub/Name", localDocumentation[dir]];
         DeleteDirectory[dir, DeleteContents -> True];
         {

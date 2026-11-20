@@ -425,7 +425,23 @@ Options[PacletPageCatalog] = {
     "Monitor" -> False
 };
 
+PacletPageCatalog[File[dir_String], opts : OptionsPattern[]] := localPacletCatalog[dir, opts];
 PacletPageCatalog[source_, opts : OptionsPattern[]] := Block[{$readAsOwner = True}, catalogOf[source, opts]];
+
+(* The catalog of a paclet directory's own documentation, the notebooks BuildPacletDocumentation
+   writes, read from the directory alone: no cloud, no front end. Each page has its notebook's file
+   as "File", and the catalog the paclet's version. *)
+localPacletCatalog[dir_String, opts : OptionsPattern[PacletPageCatalog]] := Module[{local, paclet, catalog},
+    local = If[AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ[FileNameJoin[{dir, #}]] &], localDocumentation[dir], <||>];
+    If[ local === <||>,
+        Return[Failure["PacletPageCatalog", <|"MessageTemplate" -> "`1` is not a paclet directory with documentation notebooks.", "MessageParameters" -> {dir}|>], Module]];
+    paclet = PacletObject[File[dir]];
+    catalog = localCatalog[paclet["Name"], local];
+    Join[catalog,
+        <|"Version" -> paclet["Version"], "Pages" -> Association[KeyValueMap[#1 -> Append[#2, "File" -> local[#1]] &, catalog["Pages"]]]|>,
+        Replace[OptionValue["RootGuide"], {id_String /; KeyExistsQ[catalog["Pages"], id] :> <|"RootGuide" -> id|>, _ -> <||>}],
+        Replace[OptionValue["Title"], {title_String :> <|"Title" -> title|>, _ -> <||>}]]
+];
 Options[catalogOf] = Options[PacletPageCatalog];
 catalogOf[source_, opts : OptionsPattern[PacletPageCatalog]] := Module[
     {spec, html, links, local, pages, listed, queue, level, walked = <||>, nb, structure, discovered, published, unpublished, leftOut, monitor, root, title},
