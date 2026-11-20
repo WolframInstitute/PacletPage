@@ -1868,7 +1868,7 @@ VerificationTest[
         CreateDirectory[DirectoryName[file], CreateIntermediateDirectories -> True];
         Export[file, Notebook[{Cell["", "PageDelimiter"], Cell[CellGroupData[{Cell["Examples", "PrimaryExamplesSection"]}, Open]]}], "NB"];
         (* the script's last step, its share's pages tidied, with the list of its pages *)
-        Block[{pages}, ToExpression /@ Select[StringSplit[script, "\n"], StringStartsQ[#, "pages = "] || StringContainsQ[#, "tidyBuiltPage"] &]];
+        Block[{pages, inputDir}, ToExpression /@ Select[StringSplit[script, "\n"], StringStartsQ[#, "pages = " | "inputDir = "] || StringContainsQ[#, "tidyBuiltPage"] &]];
         tidied = Get[file];
         again = tidyBuiltPage[file];
         DeleteDirectory[dir, DeleteContents -> True];
@@ -1900,6 +1900,37 @@ VerificationTest[
     ],
     {True, True, {True, False, False}, {"Metadata" -> {"uri" -> "P/ref/A"}}},
     TestID -> "Archive: the empty entries the build's front end leaves on some builds are tidied away and change no key"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], source, built, cell, states, tidied},
+        source = FileNameJoin[{dir, "source.nb"}];
+        built = FileNameJoin[{dir, "built.nb"}];
+        cell[style_, id_, opts___] := Cell[BoxData[ToString[id]], style, opts, CellID -> id];
+        (* as converted: an example that shows its output alone, with a tutorial's Needs input in
+           its group, an example closed to its input, a closed cell, a closed template section *)
+        Export[source, Notebook[{
+            Cell[CellGroupData[{cell["Input", 9], cell["Input", 1], cell["Output", 2]}, {3}]],
+            Cell[CellGroupData[{cell["Input", 3], cell["Output", 4]}, Closed]],
+            Cell[CellGroupData[{cell["Input", 5, CellOpen -> False], cell["Output", 6]}, Open]],
+            Cell[CellGroupData[{cell["Section", 7], cell["Text", 8]}, Closed]]}], "NB"];
+        (* as DocumentationBuild leaves it: every group and cell open, the Needs input moved out of
+           the example's group *)
+        Export[built, Notebook[{
+            cell["Input", 9],
+            Cell[CellGroupData[{cell["Input", 1], cell["Output", 2]}, Open]],
+            Cell[CellGroupData[{cell["Input", 3], cell["Output", 4]}, Open]],
+            Cell[CellGroupData[{cell["Input", 5], cell["Output", 6]}, Open]],
+            Cell[CellGroupData[{cell["Section", 7], cell["Text", 8]}, Open]]}], "NB"];
+        states[file_] := {Cases[Get[file], Cell[CellGroupData[_, state_], ___] :> state, Infinity],
+            Cases[Get[file], c : Cell[_, _, ___, CellOpen -> False, ___] :> cellID[c], Infinity]};
+        tidied = {tidyBuiltPage[built, source], tidyBuiltPage[built, source], tidyBuiltPage[built, FileNameJoin[{dir, "none.nb"}]]};
+        With[{after = states[built]},
+            DeleteDirectory[dir, DeleteContents -> True];
+            {tidied, after}]
+    ],
+    {{True, False, False}, {{{2}, Closed, Open, Open}, {5}}},
+    TestID -> "Build: a built page hides again the cells and example groups its converted page hides, which DocumentationBuild opens, and leaves the template's sections to the build"
 ]
 
 VerificationTest[

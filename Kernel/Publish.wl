@@ -2600,13 +2600,64 @@ singleRuleBeforeExamples[Notebook[cells_List, opts___]] := Notebook[
 singleRuleBeforeExamples[other_] := other;
 
 (* the built pages under a built paclet directory tidied in place, where they need it: the number
-   tidied. A page tidied before has neither the delimiter nor the front end's empty entries left,
-   and is only read. *)
-tidyBuiltPages[builtRoot_String] := Count[tidyBuiltPage /@ FileNames["*.nb", FileNameJoin[{builtRoot, "Documentation"}], Infinity], True];
+   tidied. Each page is matched with the converted page it was built from, under the paclet's
+   source directory. A page tidied before has neither the delimiter nor the front end's empty
+   entries left, and its hidden cells hidden, and is only read. *)
+tidyBuiltPages[builtRoot_String, sourceRoot_ : None] := Count[
+    Function[file, tidyBuiltPage[file, If[StringQ[sourceRoot], FileNameJoin[{sourceRoot, relativePath[builtRoot, file]}], None]]] /@
+        FileNames["*.nb", FileNameJoin[{builtRoot, "Documentation"}], Infinity],
+    True];
 
-tidyBuiltPage[file_String] := StringContainsQ[ReadString[file], "\"PageDelimiter\"" | "\"WorkflowDockedCell\"" | "\"SearchTextTranslated\""] && With[{notebook = Get[file]},
-    With[{tidy = DeleteCases[singleRuleBeforeExamples[notebook], $frontEndNoise, Infinity]}, tidy =!= notebook && StringQ[Export[file, tidy, "NB"]]]
+tidyBuiltPage[file_String, source_ : None] := With[{collapsed = collapsedCells[source]},
+    (collapsed =!= <||> || StringContainsQ[ReadString[file], "\"PageDelimiter\"" | "\"WorkflowDockedCell\"" | "\"SearchTextTranslated\""]) && With[{notebook = Get[file]},
+        With[{tidy = restoreCollapsed[DeleteCases[singleRuleBeforeExamples[notebook], $frontEndNoise, Infinity], collapsed]},
+            tidy =!= notebook && StringQ[Export[file, tidy, "NB"]]]]
 ];
+
+(* DocumentationBuild opens every cell group and every cell of a page, so an example whose input
+   the converted page hides, a mermaid diagram's call or a "#| collapse" example, would show it.
+   The converted page's hidden cells, and its groups that are not open, each with the CellIDs of
+   its cells and of those it shows, which the build keeps; the build can move a cell out of a
+   group, as it does the Needs input of a tutorial. A closed group is an example's only when it
+   starts with its input; the template's closed sections are the build's to show. *)
+cellID[Cell[__, CellID -> id_, ___]] := id;
+cellID[_] := None;
+
+collapsedCells[source_String] := If[
+    FileExistsQ[source] && StringContainsQ[ReadString[source], "CellOpen->False" | "Closed]]" | RegularExpression["\\}, \\{[0-9, ]+\\}\\]\\]"]],
+    With[{notebook = Get[source]}, DeleteCases[<|
+        "Groups" -> Cases[notebook,
+            Cell[CellGroupData[cells : {first_, ___}, state : (_List | Closed)], ___] /;
+                DeleteCases[cellID /@ cells, None] =!= {} && (ListQ[state] || MatchQ[first, Cell[_, s_String /; StringEndsQ[s, "Input"] || s === "Code", ___]]) :>
+                <|"Cells" -> DeleteCases[cellID /@ cells, None],
+                  "Shown" -> If[ListQ[state], DeleteCases[cellID /@ cells[[Select[state, IntegerQ[#] && 1 <= # <= Length[cells] &]]], None], Closed]|>,
+            Infinity],
+        "Closed" -> DeleteCases[Cases[notebook, c : Cell[__, CellOpen -> False, ___] :> cellID[c], Infinity], None]
+    |>, {}]],
+    <||>];
+collapsedCells[_] := <||>;
+
+(* the built page with those states again, innermost groups first: a built group takes the state
+   of the converted group its cells come from, and shows the cells that group showed; one whose
+   shown cells are all gone stays open *)
+restoreCollapsed[notebook_, <||>] := notebook;
+restoreCollapsed[notebook_, collapsed_Association] := With[{groups = Lookup[collapsed, "Groups", {}], closed = Lookup[collapsed, "Closed", {}]},
+    With[{byCell = Association[Flatten[Function[g, # -> g & /@ g["Cells"]] /@ groups]]},
+        Replace[notebook, {
+            Cell[CellGroupData[cells_List, state_], go___] /; builtGroupState[cells, byCell] =!= None :>
+                Cell[CellGroupData[cells, builtGroupState[cells, byCell]], go],
+            Cell[content_, style_String, opts___] /; MemberQ[closed, cellID[Cell[content, style, opts]]] && FreeQ[{opts}, CellOpen] :>
+                Cell[content, style, opts, CellOpen -> False]
+        }, {0, Infinity}]]
+];
+
+builtGroupState[cells_, byCell_] := With[{ids = DeleteCases[cellID /@ cells, None]},
+    With[{group = If[ids === {}, None, Lookup[byCell, First[ids], None]]},
+        Which[
+            group === None || ! SubsetQ[group["Cells"], ids], None,
+            group["Shown"] === Closed, Closed,
+            True, Replace[Flatten[Position[cellID /@ cells, Alternatives @@ group["Shown"], {1}, Heads -> False]], {} -> Open]
+        ]]];
 
 (* PacletBuild in a fresh kernel: the build's own documentation step loads packages and issues
    messages that belong to it, not to the caller, and a fresh kernel builds what is on disk, not
@@ -2622,7 +2673,7 @@ pacletBuildScript[source_String, buildDir_String, dependencies_List : {}] := Str
     "handlers = PacletTools`$PacletExtensionHandlers;\n",
     "With[{stock = handlers[\"Documentation\", \"Build\"]},\n",
     "    handlers[\"Documentation\", \"Build\"] = Function[{extension, root, built, files},\n",
-    "        With[{done = stock[extension, root, built, files]}, WolframInstitute`PacletPage`Private`tidyBuiltPages[built]; done]]];\n",
+    "        With[{done = stock[extension, root, built, files]}, WolframInstitute`PacletPage`Private`tidyBuiltPages[built, root]; done]]];\n",
     "result = PacletTools`PacletBuild[", wlString[source], ", ", wlString[buildDir], ", PacletTools`PacletExtensionHandlers -> handlers];\n",
     "report = If[MatchQ[result, _Success], <|\"Archive\" -> result[\"PacletArchive\"]|>, <|\"Failure\" -> ToString[result, InputForm]|>];\n",
     "WriteString[\"stdout\", \"PACLETPAGE-BUILD \" <> ExportString[report, \"RawJSON\", \"Compact\" -> True] <> \"\\n\"];\n",
@@ -2751,7 +2802,7 @@ pageShareScript[source_String, docsDir_String, builtDocsDir_String, pages_List, 
     "    With[{page = FileNameDrop[#1, Length[FileNameSplit[inputDir]]]}, If[MemberQ[pages, page], page -> <|\"Result\" -> #2, \"FileHash\" -> FileHash[#1, \"SHA256\", \"Base64Encoding\"]|>, Nothing]] &,\n",
     "    Replace[processed, Except[_Association] -> <||>]]], ", wlString[recordOut], "];\n",
     $pacletPageLoadCode,
-    "Scan[WolframInstitute`PacletPage`Private`tidyBuiltPage, Select[FileNameJoin[{", wlString[builtDocsDir], ", #}] & /@ pages, FileExistsQ]];\n",
+    "Scan[WolframInstitute`PacletPage`Private`tidyBuiltPage[FileNameJoin[{", wlString[builtDocsDir], ", #}], FileNameJoin[{inputDir, #}]] &, Select[pages, FileExistsQ[FileNameJoin[{", wlString[builtDocsDir], ", #}]] &]];\n",
     $endScriptCode
 ];
 
