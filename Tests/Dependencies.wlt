@@ -355,9 +355,10 @@ VerificationTest[
         color = Cases[#, HoldPattern[CellFrameColor -> _], {1}] & /@ cells[[{1, 3}]];
         {edges, MatchQ[color, {{_Rule}, {_Rule}}] && First[color] === Last[color],
             ContainsAll[settings[WindowFrameElements], {"CloseBox", "MinimizeBox", "ZoomBox", "ResizeArea"}],
-            MatchQ[settings[NotebookDynamicExpression], Dynamic[_, SynchronousUpdating -> False]]}],
+            ! KeyExistsQ[settings, NotebookDynamicExpression] &&
+                ! FreeQ[cells[[2]], HoldPattern[DynamicWrapper[_, _, SynchronousUpdating -> False, TrackedSymbols :> {}]]]}],
     {{{CellFrame -> {{0, 0}, {1, 0}}}, {CellFrame -> {{0, 0}, {0, 1}}}}, True, True, True},
-    TestID -> "Dependencies: the window has matching dividers, native window controls and asynchronous observation"
+    TestID -> "Dependencies: the window has matching dividers, native controls and an asynchronous observer scoped to the displayed list"
 ]
 
 VerificationTest[
@@ -734,7 +735,8 @@ VerificationTest[
             first = open[All]; optional = open["Optional"];
             SetOptions[optional, WindowSize -> {440, 300}];
             CurrentValue[optional, feedback] = "1 passed";
-            Get[FileNameJoin[{$packageDirectory, "PacletPage.wl"}]];
+            Block[{$Context = Context[dependencyDialogTags], $ContextPath = {"WolframInstitute`PacletPage`", "System`"}},
+                Get[FileNameJoin[{$packageDirectory, "DependencyDialog.wl"}]]];
             reloaded = open["Optional"]; kept = CurrentValue[reloaded, feedback];
             $dependencyDialogs = <||>;
             recovered = {open[All], open["Optional"]};
