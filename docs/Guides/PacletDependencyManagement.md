@@ -8,7 +8,7 @@ URI: WolframInstitute/PacletPage/guide/PacletDependencyManagement
 Description: Inspect and manage the required and optional libraries declared by a paclet.
 Keywords: [dependencies, optional libraries, installation, readiness, setup]
 RelatedGuides: [PacletPage]
-RelatedTutorials: [DependencyManagement]
+RelatedTutorials: [DependencyManagement, UsingTheDependencyDialog]
 ---
 
 ## Abstract

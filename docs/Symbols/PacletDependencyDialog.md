@@ -7,7 +7,7 @@ URI: WolframInstitute/PacletPage/ref/PacletDependencyDialog
 Keywords: [notebook, setup, desktop, optional libraries]
 SeeAlso: [PacletDependencyInformation, InstallPacletDependencies, UpdatePacletDependencies, UninstallPacletDependencies]
 RelatedGuides: [PacletDependencyManagement]
-RelatedTutorials: [DependencyManagement]
+RelatedTutorials: [DependencyManagement, UsingTheDependencyDialog]
 ---
 
 ## Usage

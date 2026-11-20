@@ -8,7 +8,7 @@ URI: WolframInstitute/PacletPage/guide/PacletPage
 Description: Build, publish and maintain a paclet's documentation, from markdown to a site around its published pages.
 Keywords: [paclet, documentation, website, Paclet Repository, cloud, feedback, permissions, markdown, submission]
 RelatedGuides: [PacletDependencyManagement]
-RelatedTutorials: [PublishingADocumentationSite, CachingADocumentationBuild, DependencyManagement]
+RelatedTutorials: [PublishingADocumentationSite, CachingADocumentationBuild, DependencyManagement, UsingTheDependencyDialog]
 ---
 
 ## Abstract
