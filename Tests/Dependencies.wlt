@@ -678,6 +678,26 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], source, name = "Test" <> StringDelete[CreateUUID[], "-"], owner, archive, record, result},
+        source = CreateDirectory[FileNameJoin[{root, "library"}]];
+        WithCleanup[
+            Table[
+                Put[PacletObject[Join[<|"Name" -> name, "Version" -> "1.0"|>, constraint]], FileNameJoin[{source, "PacletInfo.wl"}]];
+                archive = CreatePacletArchive[source, root];
+                record = <|"Name" -> name, "Archive" -> FileNameTake[archive]|>;
+                owner = PacletObject[<|"Name" -> "TestConsumer", "Version" -> "1.0", "Location" -> root, "OptionalDependencies" -> {record}|>];
+                result = Block[{PacletInstall = (Throw["Unexpected installation"] &)}, Catch[{
+                    PacletDependencyInformation[owner, "CheckUpdates" -> True][name]["LatestVersion"],
+                    InstallPacletDependencies[owner, name][name], dependencyInstallFile[File[archive], name, "1.0"]}]];
+                DeleteFile[archive];
+                MatchQ[result, {Repeated[Failure["DependencyArchive", _], {3}]}],
+                {constraint, {<|"SystemID" -> If[$SystemID === "Linux-x86-64", "MacOSX-ARM64", "Linux-x86-64"]|>,
+                    <|"WolframVersion" -> "99.0+"|>}}],
+            DeleteDirectory[root, DeleteContents -> True]]],
+    {True, True}, TestID -> "Dependencies: incompatible archives are excluded from release checks and rejected before installation"
+]
+
+VerificationTest[
     With[{owner = testDependencyOwner[{"Demo/Required"}, {"Demo/Optional"}]},
         Block[{dependencyDesktopQ = (True &), Notebooks = ({} &), $dependencyDialogs = <||>,
                 EvaluationNotebook = (None &), CurrentValue = (Inherited &), dependencyDialogContent = (Null &),

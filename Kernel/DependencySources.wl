@@ -19,6 +19,11 @@ dependencyResourceMetadata[url_] := Block[{$ProgressReporting = False, CloudConn
     Quiet[TimeConstrained[Association[MetaInformation /. Options[CloudObject[url], MetaInformation]], 20, $Failed]]
 ]
 
+(* Apply the paclet manager's runtime filters to this candidate before PacletInstall,
+   which also accepts archives for other systems and Wolfram versions. *)
+dependencyArchiveSupportedQ[p_PacletObject] := PacletFind[p["Name"], <|"Paclets" -> {p}, "Enabled" -> All, "Internal" -> All|>] === {p}
+dependencyArchiveUnsupported[p_] := dependencyFailure["DependencyArchive", "The archive for `1` `2` does not support this Wolfram system.", p["Name"], p["Version"]]
+
 dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup[entry, "Version", All], release, archive, p, meta, candidates},
     release = Which[
         KeyExistsQ[entry, "Archive"],
@@ -29,6 +34,7 @@ dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup
             p = Quiet[PacletObject[archive]];
             If[! MatchQ[p, _PacletObject] || p["Name"] =!= name,
                 Return[dependencyFailure["DependencyArchive", "The archive `1` does not contain `2`.", archive, name]]];
+            If[! dependencyArchiveSupportedQ[p], Return[dependencyArchiveUnsupported[p]]];
             <|"Version" -> p["Version"], "Archive" -> archive|>,
         KeyExistsQ[entry, "Resource"],
             If[$AllowInternet === False, Return[dependencyFailure["DependencyInternetDisabled", $dependencyInternetMessage]]];
@@ -102,6 +108,7 @@ dependencyInstallFile[source_, name_, version_] := Module[{p, result, installed}
     If[! MatchQ[p, _PacletObject] || p["Name"] =!= name || p["Version"] =!= version,
         Return[dependencyFailure["DependencyArchive", "Expected an archive containing `1` `2`.", name, version]]];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
+    If[! dependencyArchiveSupportedQ[p], Return[dependencyArchiveUnsupported[p]]];
     $dependencyProgress["Installing", None];
     result = Quiet[PacletInstall[source, KeepExistingVersion -> True]];
     If[MatchQ[result, _PacletObject] && result["Name"] === name && result["Version"] === version, Return[result]];
