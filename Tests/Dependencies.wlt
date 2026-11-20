@@ -724,6 +724,29 @@ VerificationTest[
 ]
 
 VerificationTest[
+    UsingFrontEnd[Block[{$dependencyDialogs = <||>}, Module[
+        {owner = testDependencyOwner[{}, {"Demo/Optional"}], source, open, first, optional, reloaded, recovered, feedback, kept},
+        source = CreateDocument[{}, Visible -> False];
+        open[scope_] := Block[{dependencyDesktopQ = (True &), EvaluationNotebook = (source &), SetSelectedNotebook = (Null &)},
+            PacletDependencyDialog[owner, scope]];
+        feedback = {TaggingRules, "DependencyCheckFeedback"};
+        WithCleanup[
+            first = open[All]; optional = open["Optional"];
+            SetOptions[optional, WindowSize -> {440, 300}];
+            CurrentValue[optional, feedback] = "1 passed";
+            Get[FileNameJoin[{$packageDirectory, "PacletPage.wl"}]];
+            reloaded = open["Optional"]; kept = CurrentValue[reloaded, feedback];
+            $dependencyDialogs = <||>;
+            recovered = {open[All], open["Optional"]};
+            {first =!= optional, reloaded === optional, kept, recovered === {first, optional},
+                CurrentValue[Last[recovered], feedback], CurrentValue[Last[recovered], WindowSize]},
+            Scan[NotebookClose, Intersection[Cases[Flatten[{source, first, optional, reloaded, recovered}], _NotebookObject], Notebooks[]]]]
+    ]]],
+    {True, True, "1 passed", True, "", {440, 300}},
+    TestID -> "Dependencies: a package reload preserves open dialogs and a fresh evaluator rebuilds each scope in place"
+]
+
+VerificationTest[
     With[{source = NotebookObject["Source"]},
         Block[{$dependencyNamedThemes = False, Notebooks = ({source} &),
                 CurrentValue = Function[{nb, key}, If[key === LightDark, Automatic, Throw["Unknown notebook option"]]]},

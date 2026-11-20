@@ -1,6 +1,6 @@
 (* ::Package:: *)
 
-$dependencyDialogs = <||>
+If[! AssociationQ[$dependencyDialogs], $dependencyDialogs = <||>]
 dependencyDesktopQ[] := Block[{$AllowInternet = False, $AllowDataUpdates = False},
     MatchQ[$FrontEnd, _FrontEndObject] && ! TrueQ[$CloudEvaluation] && $KernelID === 0]
 dependencyPreference[name_] := "WolframInstitute/PacletPage/DependencyDialog/" <> name
@@ -428,13 +428,16 @@ dependencyDialogTags[rows_, text_ : Automatic] := With[{defaultTitle = dependenc
 
 Options[PacletDependencyDialog] = {"Title" -> Automatic, "Description" -> Automatic}
 PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope : (All | "Optional") : All, OptionsPattern[]] :=
- Module[{owner, key, dialog, rows, existing, defaultTitle, text, windowTitle, source, focus},
+ Module[{owner, key, dialog, rows, existing, defaultTitle, text, windowTitle, source, evaluator, windows, windowKey, previous, windowArguments, focus},
     If[! dependencyDesktopQ[], Return[dependencyFailure["NotebookRequired", "Open a desktop notebook to use the dependency dialog. Scripts can use PacletDependencyInformation and the install, update and uninstall functions."]]];
     owner = dependencyOwner[spec];
     If[! MatchQ[owner, _PacletObject], Return[owner]];
     key = {dependencyCommandOwner[owner, owner], scope};
+    source = EvaluationNotebook[];
+    evaluator = CurrentValue[source, Evaluator];
+    windows = Notebooks[];
     dialog = $dependencyDialogs[key];
-    existing = MemberQ[Notebooks[], dialog];
+    existing = MemberQ[windows, dialog];
     If[existing,
         defaultTitle = CurrentValue[dialog, {TaggingRules, "DependencyDefaultTitle"}],
         rows = PacletDependencyInformation[owner, "Output" -> "Association"];
@@ -444,7 +447,6 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope :
     text = dependencyDialogText[defaultTitle, OptionValue["Title"], OptionValue["Description"]];
     If[FailureQ[text], Return[text]];
     windowTitle = dependencyShortName[owner["Name"]] <> ": " <> text["Title"];
-    source = EvaluationNotebook[];
     If[existing,
         If[MatchQ[source, _NotebookObject] && source =!= dialog,
             If[CurrentValue[dialog, {TaggingRules, "DependencyAppearanceSource"}] =!= source,
@@ -454,12 +456,19 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope :
             CurrentValue[dialog, {TaggingRules, "DependencyText"}] = text];
         If[CurrentValue[dialog, WindowTitle] =!= windowTitle, SetOptions[dialog, WindowTitle -> windowTitle]];
         SetSelectedNotebook[dialog]; Return[dialog]];
+    (* The front end can outlive its evaluator. Rebuild the old window with fresh callbacks and local inventory. *)
+    windowKey = {evaluator, Hash[key, "SHA256"]};
+    previous = SelectFirst[windows, CurrentValue[#, {TaggingRules, "PacletPageDependencyDialog"}] === windowKey &, None];
+    windowArguments = If[MatchQ[previous, _NotebookObject],
+        {previous, WindowSize -> CurrentValue[previous, WindowSize], WindowMargins -> CurrentValue[previous, WindowMargins]},
+        {WindowSize -> {740, All}}];
     dialog = With[{name = owner["Name"], location = key, appearance = dependencyAppearanceOptions[source]}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows, focus],
-        WindowTitle -> windowTitle, WindowSize -> {740, All}, WindowFrame -> "Normal",
+        Sequence @@ windowArguments, WindowTitle -> windowTitle, WindowFrame -> "Normal",
         WindowFrameElements -> {"CloseBox", "MinimizeBox", "ZoomBox", "ResizeArea"}, WindowElements -> {},
-        ScrollingOptions -> {"VerticalScrollRange" -> Fit}, Evaluator -> CurrentValue[source, Evaluator],
+        ScrollingOptions -> {"VerticalScrollRange" -> Fit}, Evaluator -> evaluator,
         Sequence @@ appearance, Background -> dependencyDialogBackground[appearance],
-        Visible -> False, TaggingRules -> Append[dependencyDialogTags[rows, text], "DependencyAppearanceSource" -> source],
+        Visible -> False, TaggingRules -> Join[dependencyDialogTags[rows, text],
+            <|"DependencyAppearanceSource" -> source, "PacletPageDependencyDialog" -> windowKey|>],
         (* Observe the window independently of the library list's synchronous initialization. *)
         NotebookDynamicExpression -> Dynamic[With[{nb = EvaluationNotebook[]},
             dependencySyncAppearance[nb]; dependencyFitList[nb]; focus[nb, CurrentValue[nb, "NotebookSelected"]]],
