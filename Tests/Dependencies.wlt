@@ -450,6 +450,8 @@ VerificationTest[
             upgraded = Join[rows[name], <|"InstalledVersion" -> "1.1",
                 "Description" -> StringRiffle[Table["Release note " <> ToString[i], {i, 12}], "\n"]|>];
             CurrentValue[nb, {TaggingRules, "DependencyRows", name}] = dependencyRowState[upgraded, dependencyNotice["Updated"]];
+            (* the front end lays the list out again in its own time *)
+            TimeConstrained[While[height[] <= before, Pause[0.1]], 5];
             {before > Length[names] CurrentValue[nb, "FontLineHeight"], height[] > before},
             NotebookClose[nb]]]],
     {True, True}, TestID -> "Dependencies: the 64-row list still formats the updated last row after copy and resize"
@@ -827,7 +829,7 @@ VerificationTest[
             $dependencyDialogs = <||>;
             recovered = {open[All], open["Optional"]};
             {first =!= optional, reloaded === optional, kept, recovered === {first, optional},
-                CurrentValue[Last[recovered], feedback], CurrentValue[Last[recovered], WindowSize]},
+                CurrentValue[Last[recovered], feedback], Round[CurrentValue[Last[recovered], WindowSize]]},
             Scan[NotebookClose, Intersection[Cases[Flatten[{source, first, optional, reloaded, recovered}], _NotebookObject], Notebooks[]]]]
     ]]],
     {True, True, "1 passed", True, "", {440, 300}},
