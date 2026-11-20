@@ -133,6 +133,16 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{owner = testDependencyOwner[{}, {<|"Name" -> "PacletTools", "Check" -> "Demo`Consumer`TestReadyQ"|>}]},
+        Block[{$dependencyRestarts = <|"PacletTools" -> True|>, $Context = Context[dependencyLocalStatus],
+                $ContextPath = {"WolframInstitute`PacletPage`", "System`"}},
+            Get[FileNameJoin[{$packageDirectory, "Dependencies.wl"}]];
+            Block[{dependencyReadiness = (Throw["Unexpected readiness check"] &)}, Catch[
+                PacletDependencyInformation[owner, "CheckReadiness" -> True]["PacletTools"]["Status"]]]]],
+    "Restart required", TestID -> "Dependencies: reloading in the same evaluator preserves pending restart status"
+]
+
+VerificationTest[
     Module[{owner = testDependencyOwner[{}, {"Demo/Real"}], ran = 0},
         Block[{dependencyInstall = Function[Null, ran++]},
             {First[InstallPacletDependencies[owner, {"Demo/Real", "Demo/Typo"}]], ran}]],

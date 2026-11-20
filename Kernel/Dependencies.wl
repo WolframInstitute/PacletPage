@@ -82,7 +82,7 @@ dependencyInstallations[names_List] := If[Length[names] < 16, AssociationMap[Pac
 dependencySupportedQ[entry_] := With[{systems = Lookup[entry, "Platforms", All]}, systems === All || MemberQ[systems, $SystemID]]
 
 (* A loaded context can outlive both an upgrade and an uninstall followed by a reinstall. *)
-$dependencyRestarts = <||>
+If[! AssociationQ[$dependencyRestarts], $dependencyRestarts = <||>]
 dependencyLoadedQ[p_PacletObject] := ! DisjointQ[$Packages, Flatten[{p["Context"]}]]
 
 dependencyReadiness[owner_, entry_] := Module[{check = entry["Check"], context, result},
