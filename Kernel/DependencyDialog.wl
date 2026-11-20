@@ -300,8 +300,9 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, 
                 PaneSelector[{"" -> heading}, description, withIntro[description], Alignment -> Left, ImageSize -> Automatic],
                 Alignment -> Left, ImageSize -> Automatic],
             dependencyFitList[EvaluationNotebook[]], SynchronousUpdating -> False],
-            FrameStyle -> None, FrameMargins -> {{0, 0}, {10, 20}}], "DialogStyle",
-            CellTags -> "DependencyDialogControls", CellMargins -> {{25, 28}, {0, 0}}],
+            FrameStyle -> None, FrameMargins -> {{0, 0}, {10, 24}}], "DialogStyle",
+            CellTags -> "DependencyDialogControls", CellMargins -> {{25, 28}, {0, 0}},
+            CellFrame -> {{0, 0}, {1, 0}}, CellFrameColor -> GrayLevel[.85], CellFrameMargins -> 0],
         ExpressionCell[dependencyLibraryList[owner, commandOwner, initial, startCheck, stopCheck], "DialogStyle",
             CellMargins -> {{25, 28}, {0, 0}}],
         ExpressionCell[Framed[Grid[{{Pane[dependencyFlow[{
@@ -326,7 +327,8 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
             Column[KeyValueMap[dependencyRowPanel[#1, #2, perform, copy, cancelTransfer] &, initialRows],
                 ItemSize -> {{Scaled[1]}}, Spacings -> 1.2]],
         ImageSize -> Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyListSize"}]],
-        Scrollbars -> {False, Automatic}, AppearanceElements -> None, Alignment -> {Left, Top}],
+        Scrollbars -> {False, Automatic}, AppearanceElements -> None, Alignment -> {Left, Top},
+        FrameMargins -> {{0, 0}, {6, 8}}],
     Initialization :> (
         If[DownValues[dependencyRowActions] === {}, Block[{$ContextPath = $ContextPath, $AllowInternet = False}, Get[packageFile]]];
         focus[nb_, selected_, active_] := Which[
@@ -430,7 +432,7 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), scope :
         SetSelectedNotebook[dialog]; Return[dialog]];
     dialog = With[{name = owner["Name"], location = key}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows],
         WindowTitle -> windowTitle, WindowSize -> {740, All}, WindowFrame -> "Normal",
-        WindowFrameElements -> {"CloseBox", "ResizeArea"}, WindowElements -> {},
+        WindowFrameElements -> {"CloseBox", "MinimizeBox", "ZoomBox", "ResizeArea"}, WindowElements -> {},
         ScrollingOptions -> {"VerticalScrollRange" -> Fit}, Evaluator -> CurrentValue[EvaluationNotebook[], Evaluator],
         Visible -> False, TaggingRules -> dependencyDialogTags[rows, text],
         NotebookEventActions -> {"WindowClose" :> (dependencyRemember[name]; KeyDropFrom[$dependencyDialogs, {location}]), PassEventsDown -> True}]];
