@@ -352,7 +352,7 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                     CurrentValue[nb, {TaggingRules, "DependencyTransfer", name}] = True;
                     {result, fresh} = dependencyDialogAction[owner, name, action, Function[Null, cancelled], progress];
                     If[AssociationQ[fresh], rows[name] = dependencyDialogRow[Join[KeyTake[rows[name], {"LatestVersion", "Description"}], fresh], rows[name]["Label"]]];
-                    If[rows[name]["Status"] === "Installed" && KeyExistsQ[rows[name], "Check"],
+                    If[rows[name]["Status"] === "Installed" && StringQ[rows[name]["Check"]],
                         Which[MatchQ[result, Failure["DependencySetupRequired", _]], rows[name] = Append[rows[name], "Status" -> "Needs setup"],
                             MatchQ[result, _PacletObject], rows[name] = Append[rows[name], "Status" -> "Ready"]]];
                     If[MemberQ[Notebooks[], nb],

@@ -107,6 +107,15 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{owner = testDependencyOwner[{}, {<|"Name" -> "PacletTools", "Check" -> None|>}]},
+        Block[{dependencyReadiness = (Throw["Unexpected readiness test"] &)},
+            With[{rows = PacletDependencyInformation[owner, "CheckReadiness" -> True, "Output" -> "Association"]},
+                {rows["PacletTools"]["Status"], dependencyCheckAvailability[rows]["Readiness"],
+                    MatchQ[InstallPacletDependencies[owner, "PacletTools"]["PacletTools"], _PacletObject]}]]],
+    {"Installed", False, True}, TestID -> "Dependencies: an explicit None omits readiness checks in scripts and the dialog"
+]
+
+VerificationTest[
     Module[{owner = testDependencyOwner[{}, {<|"Name" -> "PacletTools", "Check" -> "Demo`Consumer`TestReadyQ"|>}]},
         Block[{Demo`Consumer`TestReadyQ = Function[Null, False], dependencyRelease = Function[Null, Throw["network"]]},
             {PacletDependencyInformation[owner, "CheckReadiness" -> True]["PacletTools"]["Status"],

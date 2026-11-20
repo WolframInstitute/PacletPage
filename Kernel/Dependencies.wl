@@ -128,7 +128,7 @@ PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject), n
 dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{result, readiness, latest, sources, description},
     result = Join[entry, <|"Status" -> dependencyLocalStatus[entry, installed],
         "InstalledVersion" -> If[installed === {}, Missing["NotInstalled"], First[installed]["Version"]]|>];
-    If[probe && result["Status"] === "Installed" && KeyExistsQ[entry, "Check"],
+    If[probe && result["Status"] === "Installed" && StringQ[entry["Check"]],
         readiness = dependencyReadiness[owner, entry];
         If[readiness === True, result["Status"] = "Ready",
             AssociateTo[result, {"Status" -> "Needs setup", "ReadinessFailure" -> readiness}]]];
@@ -152,7 +152,7 @@ UninstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), n
     dependencyMap[dependencyUninstall, owner, names, If[names === All, Select[dependencyRemovableQ], Identity]]
 
 dependencyChecked[owner_, entry_, paclet_] := Module[{readiness},
-    If[KeyExistsQ[$dependencyRestarts, entry["Name"]] || ! KeyExistsQ[entry, "Check"], Return[paclet]];
+    If[KeyExistsQ[$dependencyRestarts, entry["Name"]] || ! StringQ[entry["Check"]], Return[paclet]];
     readiness = dependencyReadiness[owner, entry];
     If[readiness === True, paclet, Failure["DependencySetupRequired", <|
         "MessageTemplate" -> "`1` `2` needs setup. `3`", "MessageParameters" -> {entry["Name"], paclet["Version"], readiness["Message"]},
