@@ -27,6 +27,10 @@ paclet with a documentation site, without a front end and without scripts of the
 | `SetPacletPagePermissions[dir, permissions]` | set permissions over a cloud tree, directory by directory |
 | `CheckPacletPage[catalog, name]` | check, as an anonymous reader, that everything is reachable |
 
+## Paclet dependencies
+
+Describe optional libraries in the consumer's `PacletInfo.wl`. Open `PacletDependencyDialog[owner]` to manage them in a desktop notebook, or use the same operations from a script. The tutorial includes the manifest, a runtime check and a PureMath integration example. [Dependency Management](docs/Tutorials/DependencyManagement.md)
+
 ## Features
 
 - One call per release: `PublishPacletPage` builds the documentation, deploys the paclet resource,

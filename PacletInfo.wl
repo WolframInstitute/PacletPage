@@ -26,6 +26,12 @@ PacletObject[<|
                 "WolframInstitute`PacletPage`BuildPacletDocumentation",
                 "WolframInstitute`PacletPage`PacletDefinitionScan",
                 "WolframInstitute`PacletPage`PacletPageDependencies",
+                "WolframInstitute`PacletPage`PacletDependencyInformation",
+                "WolframInstitute`PacletPage`PacletDependencyReport",
+                "WolframInstitute`PacletPage`InstallPacletDependencies",
+                "WolframInstitute`PacletPage`UpdatePacletDependencies",
+                "WolframInstitute`PacletPage`UninstallPacletDependencies",
+                "WolframInstitute`PacletPage`PacletDependencyDialog",
                 "WolframInstitute`PacletPage`DeployPacletResource",
                 "WolframInstitute`PacletPage`SubmitPacletResource",
                 "WolframInstitute`PacletPage`PublishPacletPage",
@@ -34,7 +40,8 @@ PacletObject[<|
         },
         {
             "Asset",
-            "Assets" -> {{"Web", "Assets/Web"}, {"Example", "Assets/Example"}, {"Hero", "Assets/Hero.wxf"}, {"Converter", "Assets/Converter.wxf"}}
+            "Assets" -> {{"Web", "Assets/Web"}, {"Example", "Assets/Example"}, {"Hero", "Assets/Hero.wxf"},
+                {"Converter", "Assets/Converter.wxf"}, {"DependencyLoader", "Assets/LoadDependencyManager.wl"}}
         },
         {
             "Documentation",

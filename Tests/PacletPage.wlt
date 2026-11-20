@@ -2602,6 +2602,15 @@ VerificationTest[
     TestID -> "Build: the paclet sites last updated over three days ago, or never, are the stale ones PacletPage refreshes when it loads"
 ]
 
+VerificationTest[
+    {
+        Block[{$AllowInternet = False, staleSites = (Throw["asked", "stale"] &)}, Catch[refreshStaleSites[], "stale"]],
+        dependencyName /@ {"A/B", "C/D" -> "1.0", {"E/F", "2.0"}, <|"Name" -> "G/H", "Description" -> "x", "Resource" -> "https://example.org/r"|>, 7}
+    },
+    {Null, {"A/B", "C/D", "E/F", "G/H"}},
+    TestID -> "Build: a kernel with internet access disallowed refreshes no site when PacletPage loads, and a dependency declared as an association is named by its Name"
+]
+
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)
 VerificationTest[
     withFixtureDocs[Function[dir, Module[{before = Kernels[], built},

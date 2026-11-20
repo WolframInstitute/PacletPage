@@ -204,6 +204,7 @@ pacletDirectories[] := Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}
 dependencyName[name_String] := name;
 dependencyName[name_String -> _] := name;
 dependencyName[{name_String, ___}] := name;
+dependencyName[KeyValuePattern["Name" -> name_String]] := name;
 dependencyName[_] := Nothing;
 
 dependencyDirectory[location_String] /; DirectoryQ[location] := location;
@@ -3453,7 +3454,7 @@ staleSites[] := If[ DownValues[PacletManager`Services`Private`getPacletSiteData]
 ];
 
 (* When PacletPage loads in a kernel whose sites are stale, such as each container of a build on a
-   new pod, it refreshes them synchronously at once, so that the weekly update the paclet manager
+   new pod, and internet access is allowed, it refreshes them synchronously at once, so that the weekly update the paclet manager
    scheduled when the kernel started finds them fresh when it fires, later, in the middle of
    whatever the kernel does then, and starts nothing. Not on parallel kernels, which start no weekly
    update. It is a convenience, so loading never waits on it long nor reports it: each site has twelve

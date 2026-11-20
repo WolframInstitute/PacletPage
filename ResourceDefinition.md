@@ -31,6 +31,8 @@ RelatedResources: [ToneAr/LocalDeploy]
 
 [BuildPacletDocumentation]() converts a paclet's markdown into documentation notebooks, [DeployPacletResource]() deploys its resource, [SubmitPacletResource]() submits it to the Paclet Repository, and [PublishPacletPage]() does all of it and publishes the site. [PacletPageCatalog]() reads the published pages of a paclet, [PacletPageFiles]() makes the site's pages, [DeployPacletPage]() publishes them with a feedback form, [PacletPageFeedback]() and [SetPacletPageFeedbackStatus]() triage the feedback, and [CheckPacletPage]() and [SetPacletPagePermissions]() keep the site working.
 
+[PacletDependencyInformation]() reads a consumer’s required and optional libraries from its `PacletInfo.wl`. [PacletDependencyDialog]() manages them in a desktop notebook. Scripts can use [InstallPacletDependencies](), [UpdatePacletDependencies]() and [UninstallPacletDependencies]().
+
 ## Basic Examples
 
 The catalog of a paclet on the Paclet Repository: its pages, the notebook behind each, and its guide tree:
