@@ -36,6 +36,9 @@ dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup
                 Return[dependencyFailure["DependencyArchive", "The archive `1` does not contain `2`.", archive, name]]];
             If[! dependencyArchiveSupportedQ[p], Return[dependencyArchiveUnsupported[p]]];
             <|"Version" -> p["Version"], "Archive" -> archive|>,
+        KeyExistsQ[entry, "Git"],
+            If[$AllowInternet === False, Return[dependencyFailure["DependencyInternetDisabled", $dependencyInternetMessage]]];
+            With[{git = dependencyGitRelease[entry]}, If[FailureQ[git], Return[git], git]],
         KeyExistsQ[entry, "Resource"],
             If[$AllowInternet === False, Return[dependencyFailure["DependencyInternetDisabled", $dependencyInternetMessage]]];
             meta = dependencyResourceMetadata[entry["Resource"]];
@@ -44,10 +47,10 @@ dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup
                 Return[dependencyFailure["DependencyRelease", "Could not read the published release of `1`.", name]]];
             <|"Version" -> Lookup[meta, "PacletVersion"], "DescriptionURL" -> First[meta["ResourceLocation"]]|>,
         True,
+            If[$AllowInternet === False, Return[dependencyFailure["DependencyInternetDisabled", $dependencyInternetMessage]]];
             With[{refresh = $refreshDependencySites},
                 $refreshDependencySites = False;
                 candidates = PacletFindRemote[name, UpdatePacletSites -> refresh]];
-            If[$AllowInternet === False, Return[dependencyFailure["DependencyInternetDisabled", $dependencyInternetMessage]]];
             p = If[ListQ[candidates], SelectFirst[candidates, dependencyVersionQ[#["Version"]] && dependencyCompatibleQ[#["Version"], spec] &, None], None];
             If[! MatchQ[p, _PacletObject], Return[dependencyFailure["DependencyRelease", "No compatible release of `1` was found on the configured paclet sites.", name]]];
             <|"Version" -> p["Version"], "SitePaclet" -> p|>
@@ -89,6 +92,7 @@ dependencyPublisherURLQ[resource_, url_] := Module[{base = URLParse[resource], t
 dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text, url, resource, desc},
     Which[
         KeyExistsQ[release, "SitePaclet"], dependencyInstallFile[release["SitePaclet"], name, release["Version"]],
+        KeyExistsQ[release, "GitArchive"], dependencyGitInstall[release, name],
         KeyExistsQ[release, "Archive"], dependencyInstallFile[release["Archive"], name, release["Version"]],
         True,
             resource = entry["Resource"];
@@ -140,13 +144,82 @@ dependencyDownloadAttempt[url_, file_] := Module[{response = <||>, task},
     ]
 ]
 
+(* a download tried again once where the server did not refuse it *)
+dependencyDownloaded[url_, file_] := (
+    $dependencyProgress["Downloading", None];
+    NestWhile[Function[previous, $dependencyProgress["Retrying", None]; dependencyDownloadAttempt[url, file]],
+        dependencyDownloadAttempt[url, file],
+        Function[result, MatchQ[result, Failure["DependencyDownload", _]] && ! TrueQ[400 <= Lookup[result["Response"], "StatusCode", 0] < 500]], 1, 2]
+)
+
 dependencyDownloadInstall[url_, name_, version_] := Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["paclet-"] <> ".paclet"}], download},
     WithCleanup[
-        $dependencyProgress["Downloading", None];
-        download = NestWhile[Function[previous, $dependencyProgress["Retrying", None]; dependencyDownloadAttempt[url, file]],
-            dependencyDownloadAttempt[url, file],
-            Function[result, MatchQ[result, Failure["DependencyDownload", _]] && ! TrueQ[400 <= Lookup[result["Response"], "StatusCode", 0] < 500]], 1, 2];
+        download = dependencyDownloaded[url, file];
         If[FailureQ[download], download, dependencyInstallFile[download, name, version]],
         If[FileExistsQ[file], DeleteFile[file]]
+    ]
+]
+
+(* ::Section:: *)
+(*A GitHub repository at a commit*)
+
+(* A dependency may be a paclet in a GitHub repository at a commit: "Git" is the repository's
+   address, "Commit" the commit, and "Path" the directory of the paclet in it, the repository's root
+   by default. Its version is the one the commit's PacletInfo.wl gives, read without evaluating it,
+   and installing it unpacks the commit's tree and packs the paclet's directory as an archive. *)
+dependencyGitRepository[url_] := If[StringQ[url],
+    Replace[StringCases[url, RegularExpression["^https://github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\\.git)?/?$"] :> {"$1", "$2"}],
+        {{{owner_String, repository_String}} :> {owner, repository}, _ -> None}],
+    None
+]
+dependencyCommitQ[commit_] := StringQ[commit] && StringMatchQ[commit, RegularExpression["[0-9a-f]{7,40}"]]
+dependencyGitPathQ[path_] := StringQ[path] && (path === "" ||
+    ! StringStartsQ[path, "/" | "\\"] && ! StringContainsQ[path, ":"] && ! MemberQ[FileNameSplit[path], ".." | "."])
+
+dependencyGitText[url_String] := With[{response = TimeConstrained[URLRead[HTTPRequest[url], {"StatusCode", "Body"}], 30, $Failed]},
+    If[AssociationQ[response] && response["StatusCode"] === 200 && StringQ[response["Body"]], response["Body"], $Failed]
+]
+
+(* the "Name" and "Version" of a PacletInfo.wl's text, which is parsed and never evaluated: the
+   PacletObject among its statements, after the comments and blank lines a file opens with *)
+dependencyPacletInfoFields[text_String] := If[ ! SyntaxQ[text], <||>,
+    Replace[
+        FirstCase[
+            Block[{$Context = "WolframInstitute`PacletPage`PacletInfoText`", $ContextPath = {"System`"}}, ToExpression[text, InputForm, HoldComplete]],
+            HoldPattern[PacletObject[info_]] :> HoldComplete[info], None, {1}],
+        {HoldComplete[Association[rules___]] :>
+            Association[Cases[HoldComplete[rules], HoldPattern[Rule[key : ("Name" | "Version"), value_String]] :> (key -> value)]],
+         HoldComplete[info_?AssociationQ] :> Select[KeyTake[info, {"Name", "Version"}], StringQ],
+         _ -> <||>}
+    ]
+]
+
+dependencyGitRelease[entry_] := Module[{name = entry["Name"], commit = entry["Commit"], path = Lookup[entry, "Path", ""], repository, text, fields},
+    repository = dependencyGitRepository[entry["Git"]];
+    text = dependencyGitText[StringRiffle[Join[{"https://raw.githubusercontent.com", repository[[1]], repository[[2]], commit},
+        If[path === "", {}, FileNameSplit[path]], {"PacletInfo.wl"}], "/"]];
+    If[! StringQ[text], Return[dependencyFailure["DependencyRelease", "Could not read the PacletInfo.wl of `1` at commit `2`.", name, commit]]];
+    fields = dependencyPacletInfoFields[text];
+    If[Lookup[fields, "Name", None] =!= name, Return[dependencyFailure["DependencyRelease", "The PacletInfo.wl at commit `1` does not declare `2`.", commit, name]]];
+    <|"Version" -> fields["Version"], "GitArchive" -> "https://codeload.github.com/" <> repository[[1]] <> "/" <> repository[[2]] <> "/zip/" <> commit,
+      "GitPath" -> path|>
+]
+
+(* the commit's tree downloaded, the paclet's directory in it packed as an archive and installed *)
+dependencyGitInstall[release_, name_] := Module[{dir = CreateDirectory[], zip, download, top, source, archive},
+    zip = FileNameJoin[{dir, "tree.zip"}];
+    WithCleanup[
+        download = dependencyDownloaded[release["GitArchive"], zip];
+        If[FailureQ[download], Return[download, Module]];
+        If[dependencyCancelledQ[], Return[dependencyCancelled[], Module]];
+        ExtractArchive[zip, FileNameJoin[{dir, "tree"}]];
+        top = FileNames["*", FileNameJoin[{dir, "tree"}]];
+        source = If[MatchQ[top, {_String?DirectoryQ}], If[release["GitPath"] === "", First[top], FileNameJoin[Join[top, FileNameSplit[release["GitPath"]]]]], None];
+        If[! StringQ[source] || ! FileExistsQ[FileNameJoin[{source, "PacletInfo.wl"}]],
+            Return[dependencyFailure["DependencyArchive", "The commit's tree has no paclet at `1`.", release["GitPath"]], Module]];
+        archive = CreatePacletArchive[source, dir];
+        If[! StringQ[archive], Return[dependencyFailure["DependencyArchive", "Could not pack `1` from the commit's tree.", name], Module]];
+        dependencyInstallFile[File[archive], name, release["Version"]],
+        DeleteDirectory[dir, DeleteContents -> True]
     ]
 ]

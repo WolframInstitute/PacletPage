@@ -35,7 +35,7 @@ dependencyEntryQ[entry_, owner_] := With[{
     platforms = Lookup[entry, "Platforms", All], check = Lookup[entry, "Check", None],
     links = Lookup[entry, "SetupLinks", <||>], size = Lookup[entry, "DownloadSize", ""]
 },
-    ContainsAll[{"Name", "Required", "Version", "Platforms", "Description", "Check", "Resource", "Archive",
+    ContainsAll[{"Name", "Required", "Version", "Platforms", "Description", "Check", "Resource", "Archive", "Git", "Commit", "Path",
         "DownloadSize", "License", "URL", "SetupLinks"}, Keys[entry]] &&
     dependencyNameQ[name] && name =!= owner["Name"] && dependencyVersionSpecQ[version] &&
     (platforms === All || MatchQ[platforms, {___String}]) &&
@@ -44,6 +44,11 @@ dependencyEntryQ[entry_, owner_] := With[{
     dependencyTextMapQ[links] && AllTrue[Values[links], dependencyHTTPQ] &&
     (StringQ[size] || dependencyTextMapQ[size]) &&
     (! KeyExistsQ[entry, "Archive"] || (StringQ[entry["Archive"]] && entry["Archive"] =!= "" && ! KeyExistsQ[entry, "Resource"])) &&
+    (* a repository at a commit is a source of its own, and a commit or a path names nothing without one *)
+    If[KeyExistsQ[entry, "Git"],
+        dependencyGitRepository[entry["Git"]] =!= None && dependencyCommitQ[Lookup[entry, "Commit", None]] &&
+            dependencyGitPathQ[Lookup[entry, "Path", ""]] && ! KeyExistsQ[entry, "Resource"] && ! KeyExistsQ[entry, "Archive"],
+        ! KeyExistsQ[entry, "Commit"] && ! KeyExistsQ[entry, "Path"]] &&
     (check === None || (StringQ[check] && StringMatchQ[check, RegularExpression["([a-zA-Z$][a-zA-Z0-9$]*`)+[a-zA-Z$][a-zA-Z0-9$]*"]] &&
         AnyTrue[Cases[Flatten[{owner["PrimaryContext"], owner["Context"]}], _String], StringStartsQ[check, #] &]))
 ]

@@ -39,7 +39,7 @@ Keys[PacletDependencyInformation[consumer]]
 
 <!-- => {"WolframInstitute/PacletPage", "WolframInstitute/TypeTheory"} -->
 
-A bare dependency name uses the configured paclet sites. The other sources are a public Wolfram Cloud paclet `"Resource"` or a local `"Archive"`, such as `"Resources/Algebra.paclet"`, relative to the consumer directory. Choose one source per library. Cloud resources may select their archive by system. Each dependency appears once across both lists.
+A bare dependency name uses the configured paclet sites. The other sources are a public Wolfram Cloud paclet `"Resource"`, a local `"Archive"`, such as `"Resources/Algebra.paclet"`, relative to the consumer directory, or a GitHub repository at a commit, `"Git"` with `"Commit"`, and `"Path"` where the paclet is not at the repository's root. Choose one source per library. Cloud resources may select their archive by system. Each dependency appears once across both lists.
 
 | Declaration | Meaning |
 |---|---|
@@ -50,6 +50,21 @@ A bare dependency name uses the configured paclet sites. The other sources are a
 | `"DownloadSize"` | Display text or an association of system IDs to display text |
 | `"URL"`, `"SetupLinks"` | Setup instructions and an optional association of additional link labels to HTTPS URLs |
 | `"Check"` | Fully qualified name of a zero-argument readiness function in the consumer's kernel context |
+| `"Git"`, `"Commit"`, `"Path"` | A GitHub repository, the commit to install, 7 to 40 hexadecimal digits, and the directory of the paclet in it; the version is the one the commit's `PacletInfo.wl` gives |
+
+A library that is not published can come from its repository. This declaration installs Wolfram/Parser as it is at one commit, from the `Parser` directory of its repository:
+
+```wl
+#| eval: false
+"OptionalDependencies" -> {
+    <|
+        "Name" -> "Wolfram/Parser",
+        "Git" -> "https://github.com/sw1sh/WolframParser",
+        "Commit" -> "5e05149ead1c292ebd39d02eee85f1c0b8059f55",
+        "Path" -> "Parser"
+    |>
+}
+```
 
 ## Check that a computation works
 

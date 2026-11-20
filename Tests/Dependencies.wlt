@@ -868,4 +868,70 @@ VerificationTest[
     True, TestID -> "Dependencies: appearance follows the most recent caller and survives closing its notebook"
 ]
 
+VerificationTest[
+    {
+        dependencyGitRepository /@ {"https://github.com/sw1sh/WolframParser", "https://github.com/sw1sh/WolframParser.git", "https://github.com/a/b/",
+            "https://gitlab.com/a/b", "http://github.com/a/b", "https://github.com/a"},
+        dependencyCommitQ /@ {"5e05149", "5e05149ead1c292ebd39d02eee85f1c0b8059f55", "main", "5E05149", "5e051"},
+        dependencyGitPathQ /@ {"", "Parser", "src/Parser", "../Parser", "/Parser", "C:Parser"}
+    },
+    {
+        {{"sw1sh", "WolframParser"}, {"sw1sh", "WolframParser"}, {"a", "b"}, None, None, None},
+        {True, True, False, False, False},
+        {True, True, True, False, False, False}
+    },
+    TestID -> "Dependencies: a git source is a GitHub repository, a commit of 7 to 40 hexadecimal digits and a relative path"
+]
+
+VerificationTest[
+    With[{git = <|"Name" -> "Demo/Git", "Git" -> "https://github.com/demo/git", "Commit" -> "abcdef0"|>},
+        {
+            AssociationQ[dependencyManifest[testDependencyOwner[{}, {git, Append[git, {"Name" -> "Demo/Sub", "Path" -> "Sub"}]}]]],
+            FailureQ[dependencyManifest[testDependencyOwner[{}, {Append[git, "Resource" -> "https://example.org/r"]}]]],
+            FailureQ[dependencyManifest[testDependencyOwner[{}, {Append[git, "Archive" -> "Resources/A.paclet"]}]]],
+            FailureQ[dependencyManifest[testDependencyOwner[{}, {<|"Name" -> "Demo/Git", "Commit" -> "abcdef0"|>}]]],
+            FailureQ[dependencyManifest[testDependencyOwner[{}, {KeyDrop[git, "Commit"]}]]],
+            FailureQ[dependencyManifest[testDependencyOwner[{}, {Append[git, "Path" -> "../x"]}]]]
+        }
+    ],
+    {True, True, True, True, True, True},
+    TestID -> "Dependencies: a git declaration has a commit, no other source, and a commit or a path only with a repository"
+]
+
+VerificationTest[
+    dependencyPacletInfoFields /@ {
+        "PacletObject[<|\"Name\" -> \"A/B\", \"Version\" -> \"2.1\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> Print[\"evaluated\"]}}|>]",
+        "(* ::Package:: *)\n\nPacletObject[<|\n    \"Name\" -> \"A/B\",\n    \"Version\" -> \"2.1\"\n|>]\n"
+    },
+    {<|"Name" -> "A/B", "Version" -> "2.1"|>, <|"Name" -> "A/B", "Version" -> "2.1"|>},
+    TestID -> "Dependencies: a commit's PacletInfo.wl is read for its name and version without being evaluated"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], name = "Demo/GitLibrary" <> StringDelete[CreateUUID[], "-"], commit = "0123456789abcdef0123456789abcdef01234567",
+            info, tree, zip, owner, urls = {}, release, installed, found},
+        info = "PacletObject[<|\"Name\" -> \"" <> name <> "\", \"Version\" -> \"1.4.0\"|>]";
+        tree = CreateDirectory[FileNameJoin[{root, "repo-" <> commit, "Sub", "Kernel"}]];
+        Export[FileNameJoin[{DirectoryName[tree], "PacletInfo.wl"}], info, "Text"];
+        Export[FileNameJoin[{tree, "Library.wl"}], "1", "Text"];
+        zip = CreateArchive[FileNameJoin[{root, "repo-" <> commit}], FileNameJoin[{root, "tree.zip"}]];
+        owner = testDependencyOwner[{}, {<|"Name" -> name, "Git" -> "https://github.com/demo/repo.git", "Commit" -> commit, "Path" -> "Sub"|>}];
+        WithCleanup[
+            Block[{dependencyGitText = Function[url, AppendTo[urls, url]; info],
+                    dependencyDownloaded = Function[{url, file}, AppendTo[urls, url]; CopyFile[zip, file]; File[file]]},
+                release = dependencyRelease[owner, dependencyManifest[owner][name]];
+                installed = InstallPacletDependencies[owner, name]];
+            found = PacletFind[name];
+            {release["Version"], urls, MatchQ[installed[name], _PacletObject], If[found === {}, None, First[found]["Version"]]},
+            Scan[PacletUninstall, PacletFind[name]];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {"1.4.0", {
+        "https://raw.githubusercontent.com/demo/repo/0123456789abcdef0123456789abcdef01234567/Sub/PacletInfo.wl",
+        "https://raw.githubusercontent.com/demo/repo/0123456789abcdef0123456789abcdef01234567/Sub/PacletInfo.wl",
+        "https://codeload.github.com/demo/repo/zip/0123456789abcdef0123456789abcdef01234567"}, True, "1.4.0"},
+    TestID -> "Dependencies: a git dependency installs the paclet at the path in the commit's tree, at the version its PacletInfo.wl gives"
+]
+
 End[]
