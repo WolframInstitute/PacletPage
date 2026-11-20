@@ -216,6 +216,26 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Table[Module[{owner = testDependencyOwner[{}, {"Demo/Optional"}], cancelled = False, calls = 0, result},
+        Block[{dependencyCancelledQ = (cancelled &), $dependencyProgress = (If[before && #1 === "Checking release", cancelled = True] &),
+                dependencyRelease = Function[Null, calls++; cancelled = True; dependencyFailure["DependencyRelease", "Lookup interrupted."]]},
+            result = InstallPacletDependencies[owner, All]["Demo/Optional"]];
+        {First[result], calls}], {before, {True, False}}],
+    {{"DependencyCancelled", 0}, {"DependencyCancelled", 1}},
+    TestID -> "Dependencies: cancellation during release checks skips pending work and takes precedence over a failed lookup"
+]
+
+VerificationTest[
+    Table[Module[{calls = 0, cancelled = False, result},
+        Block[{dependencyCancelledQ = (cancelled &), $dependencyProgress = (If[#1 === stage, cancelled = True] &),
+                URLDownloadSubmit = Function[Null, calls++; $Failed]},
+            result = dependencyDownloadInstall["https://example.org/library.paclet", "Demo/Optional", "1.0"]];
+        {First[result], calls}], {stage, {"Downloading", "Retrying"}}],
+    {{"DependencyCancelled", 0}, {"DependencyCancelled", 1}},
+    TestID -> "Dependencies: a cancelled transfer starts no new download or retry"
+]
+
+VerificationTest[
     Module[{names = {"Demo/First", "Demo/Second"}, owner, libraries, exercise},
         owner = testDependencyOwner[{}, <|"Name" -> #, "Check" -> "Demo`Consumer`readyQ"|> & /@ names];
         libraries = PacletObject[<|"Name" -> #, "Version" -> "1.0"|>] & /@ names;

@@ -120,6 +120,7 @@ dependencyInstallFile[source_, name_, version_] := Module[{p, result, installed}
 
 (* TaskWait wakes on cancellation even if a stalled server never sends a progress event. *)
 dependencyDownloadAttempt[url_, file_] := Module[{response = <||>, task},
+    If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     WithCleanup[
         task = URLDownloadSubmit[url, file, TimeConstraint -> <|"Connecting" -> 30, "Reading" -> Infinity|>, ProgressReporting -> False,
             HandlerFunctions -> <|"TaskProgress" -> Function[event, With[{bytes = event["ByteCountDownloaded"], total = event["ByteCountTotal"]},

@@ -167,9 +167,10 @@ dependencyInstall[owner_, entry_, update_] := Module[{name = entry["Name"], inst
     If[! update && current =!= None && dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]],
         Return[dependencyChecked[owner, entry, current]]];
     $dependencyProgress["Checking release", None];
-    release = dependencyRelease[owner, entry];
-    If[FailureQ[release], Return[release]];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
+    release = dependencyRelease[owner, entry];
+    If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
+    If[FailureQ[release], Return[release]];
     If[current =!= None && ! PacletNewerQ[release["Version"], current["Version"]],
         Return[If[dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]], dependencyChecked[owner, entry, current],
             dependencyFailure["DependencyVersionConflict", "Installed `1` `2` does not satisfy `3`.", name, current["Version"], entry["Version"]]]]];
