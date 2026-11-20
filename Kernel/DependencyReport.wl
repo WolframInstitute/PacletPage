@@ -7,7 +7,7 @@ PacletDependencyReport /: Keys[PacletDependencyReport[_, rows_Association]] := K
 PacletDependencyReport /: Values[PacletDependencyReport[_, rows_Association]] := Values[rows]
 
 (* Formatting uses only the snapshot, including failures and versions captured by an explicit check. *)
-dependencyDisplayValue[_Missing] := "\[LongDash]"
+dependencyDisplayValue[_Missing] := "none"
 dependencyDisplayValue[failure_Failure] := failure["Message"]
 dependencyDisplayValue[value_] := value
 
