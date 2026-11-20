@@ -2976,14 +2976,16 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Block[{cloudMeta},
-        cloudMeta[CloudObject["new"]] = None;
-        cloudMeta[CloudObject["other"]] = <|"Name" -> "P/N", "PacletVersion" -> "0.9.0", "PacletCommit" -> "aaa"|>;
-        cloudMeta[CloudObject["same"]] = <|"Name" -> "P/N", "PacletVersion" -> "1.0.0", "PacletCommit" -> "bbb"|>;
-        cloudMeta[CloudObject["bare"]] = <|"Name" -> "P/N", "PacletVersion" -> "1.0.0"|>;
-        cloudMeta[CloudObject["old"]] = <|"Name" -> "P/N"|>;
-        deployedCommit[CloudObject[#], "1.0.0"] & /@ {"new", "other", "same", "bare", "old"}
-    ],
+    Block[{$AllowInternet = False, cloudMeta},
+        With[{location = CloudObject["https://c.example/obj/u/DeployedResources/Paclet/P/N"]},
+            Table[
+                cloudMeta[location] = metadata;
+                deployedCommit[location, "1.0.0"],
+                {metadata, {None,
+                    <|"Name" -> "P/N", "PacletVersion" -> "0.9.0", "PacletCommit" -> "aaa"|>,
+                    <|"Name" -> "P/N", "PacletVersion" -> "1.0.0", "PacletCommit" -> "bbb"|>,
+                    <|"Name" -> "P/N", "PacletVersion" -> "1.0.0"|>,
+                    <|"Name" -> "P/N"|>}}]]],
     {None, None, "bbb", Missing["NoCommit"], None},
     TestID -> "Publish: the commit a deployed resource records for this version"
 ]
