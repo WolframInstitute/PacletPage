@@ -107,13 +107,12 @@ dependencyReadiness[owner_, entry_] := Module[{check = entry["Check"], context, 
     result = Replace[run["Result"], {completed[value_] :> value,
         thrown[value_, tag_] :> Throw[value, tag], value_ :> Throw[value]}];
     If[result === True, Return[True]];
-    failure = If[FailureQ[result], result, Failure["DependencyCheckFailed", <|
+    (* Only a Failure with its association is the consumer's own diagnostic: $Failed is a failure too, with nothing to keep. *)
+    failure = Replace[result, Except[Failure[_, _Association]] :> Failure["DependencyCheckFailed", <|
         "MessageTemplate" -> "The readiness check `1` did not succeed.", "MessageParameters" -> {check}, "Messages" -> {}|>]];
     messages = run["MessagesText"];
-    If[messages === {}, failure, MapAt[Function[data,
-        If[ListQ[Lookup[data, "Messages", {}]],
-            Append[data, "Messages" -> Join[Lookup[data, "Messages", {}], messages]],
-            Append[data, "ReadinessMessages" -> messages]]], failure, 2]]
+    If[messages === {}, failure, MapAt[Function[data, Append[data, With[{own = Lookup[data, "Messages", {}]},
+        If[ListQ[own], "Messages" -> Join[own, messages], "ReadinessMessages" -> messages]]]], failure, 2]]
 ]
 
 dependencyLocalStatus[entry_, installed_, git_: Automatic] := Which[

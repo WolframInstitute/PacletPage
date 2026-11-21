@@ -3497,9 +3497,13 @@ staleSites[] := If[ DownValues[PacletManager`Services`Private`getPacletSiteData]
         {url_String, _, _, _, last_, ___} /; ! MatchQ[last, {__Integer} | {__?NumericQ}] || PacletManager`Package`differenceInDays[last, Date[]] > 3 :> url]
 ];
 
-(* Fresh build containers can have stale indexes. Refresh them synchronously before an explicit
-   build or deploy, while the weekly updater is suppressed. Bound the entire attempt, even with
-   several configured sites. A stalled or unreachable site need not hold up later builds. *)
+(* The paclet manager's weekly update of its sites likewise starts asynchronous transfers, from a
+   task it schedules when the kernel starts: on 15.0 one in flight during a deploy was followed by
+   those crashes each time, and a kernel that ends with one in flight crashes too. A build or a
+   deploy therefore keeps the weekly update from starting and refreshes the stale indexes itself,
+   synchronously and once a kernel, as a fresh build container has them. The whole attempt is
+   bounded, however many sites are configured, and a site that cannot be reached ends it, so that
+   it need not hold up later builds. *)
 $sitesRefreshed = False;
 refreshPacletSites[] := If[$KernelID === 0 && ! TrueQ[$sitesRefreshed] && ! TrueQ[$skipSiteRefresh] && TrueQ[$AllowInternet] && TrueQ[$AllowDataUpdates],
     $sitesRefreshed = True;

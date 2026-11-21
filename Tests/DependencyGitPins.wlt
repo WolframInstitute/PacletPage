@@ -92,4 +92,23 @@ VerificationTest[
     TestID -> "Git pins: rollback preserves a destination claimed by another writer and reports the recoverable original"
 ]
 
+(* The lock of a kernel that has gone names a process that no longer runs: 2147483646 is above every system's process IDs. *)
+VerificationTest[
+    Module[{name = "Demo/Locked" <> StringDelete[CreateUUID[], "-"], file, text, abandon, busy, gone, elsewhere, unreadable},
+        file = FileNameJoin[{$UserBasePacletsDirectory, ".git-pin-" <> IntegerString[Hash[name, "SHA256"], 16] <> ".lock"}];
+        abandon[machine_] := Export[file, StringReplace[text, {
+            ("\"ProcessID\" -> " ~~ DigitCharacter ..) -> "\"ProcessID\" -> 2147483646",
+            ("\"MachineName\" -> \"" ~~ Shortest[__] ~~ "\"") -> "\"MachineName\" -> " <> ToString[machine, InputForm]}], "Text"];
+        WithCleanup[
+            Block[{$dependencyLockWait = 0.3},
+                With[{lock = File[file]}, busy = WithLock[lock, text = ReadString[file]; withDependencyGitLock[name, "ran"]]];
+                abandon[$MachineName]; gone = {withDependencyGitLock[name, "ran"], FileExistsQ[file]};
+                abandon["another-machine"]; elsewhere = {First[withDependencyGitLock[name, "ran"]], FileExistsQ[file]};
+                Export[file, "not a lock", "Text"]; unreadable = dependencyLockAbandonedQ[file]];
+            {First[busy], gone, elsewhere, unreadable},
+            If[FileExistsQ[file], DeleteFile[file]]]],
+    {"DependencyBusy", {"ran", False}, {"DependencyBusy", True}, False},
+    TestID -> "Git pins: an operation waits for a live holder, takes over the lock of a kernel that has gone, and leaves another machine's alone"
+]
+
 End[]

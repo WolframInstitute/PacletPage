@@ -179,6 +179,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{owner = testDependencyOwner[{}, {}], entry = <|"Check" -> "Demo`Consumer`TestReadyQ"|>},
+        Function[{outcome, noisy}, Block[{Demo`Consumer`TestReadyQ = Function[Null, If[noisy, Message[Power::infy, "1/0"]]; outcome]},
+            With[{failure = dependencyReadiness[owner, entry]},
+                {First[failure], Length[failure["Messages"]], StringQ[dependencyReadinessDetail[failure]]}]]] @@@
+            {{$Failed, False}, {$Failed, True}, {$Aborted, False}, {False, False}, {Failure["Bare"], True}}],
+    {{"DependencyCheckFailed", 0, True}, {"DependencyCheckFailed", 1, True}, {"DependencyCheckFailed", 0, True},
+        {"DependencyCheckFailed", 0, True}, {"DependencyCheckFailed", 1, True}},
+    {Power::infy, Power::infy},
+    TestID -> "Dependencies: a check that gives $Failed, or a Failure with no association, is a failed check that keeps its messages"
+]
+
+VerificationTest[
     Module[{reason = Failure["Setup", <|"MessageTemplate" -> "Setup failed.", "Messages" -> {"Missing runtime."}|>],
             row, report, boxes, text = "Setup failed.\nMissing runtime."},
         row = <|"Name" -> "Demo/Library", "Status" -> "Needs setup", "InstalledVersion" -> "1.0", "ReadinessFailure" -> reason|>;
@@ -1001,6 +1013,36 @@ VerificationTest[
         "https://raw.githubusercontent.com/example/tools/abcdef0/Math%20Tools/PacletInfo.m",
         "https://raw.githubusercontent.com/example/tools/abcdef0/Math%20Tools/PacletInfo.wl"}},
     TestID -> "Dependencies: Git uses PacletInfo.m after a missing PacletInfo.wl and preserves transport errors"
+]
+
+VerificationTest[
+    Block[{$ProgressReporting = True, URLRead = Function[Null, <|"StatusCode" -> 200, "Body" -> ToString[$ProgressReporting]|>]},
+        dependencyGitText["https://raw.githubusercontent.com/example/tools/abcdef0/PacletInfo.wl"]],
+    "False", TestID -> "Dependencies: a Git manifest request reports no progress, which a script's kernel would print from then on"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], commit = StringRepeat["c", 40], name = "Demo/Extracted", info, top, zip, owner, seen},
+        info = "PacletObject[<|\"Name\" -> \"" <> name <> "\", \"Version\" -> \"1.0\"|>]";
+        top = FileNameJoin[{root, "repo-" <> commit}];
+        Scan[Function[file, With[{path = FileNameJoin[Prepend[file, top]]},
+                CreateDirectory[DirectoryName[path], CreateIntermediateDirectories -> True];
+                Export[path, If[Last[file] === "PacletInfo.wl", info, "1"], "Text"]]],
+            {{"PacletInfo.wl"}, {"Kernel", "Root.wl"}, {"Sub", "PacletInfo.wl"}, {"Sub", "Kernel", "Library.wl"}, {"Docs", "Page.md"}}];
+        zip = CreateArchive[top, FileNameJoin[{root, "tree.zip"}]];
+        owner[path_] := testDependencyOwner[{}, {Join[<|"Name" -> name, "Git" -> "https://github.com/demo/repo", "Commit" -> commit|>, path]}];
+        WithCleanup[
+            Block[{$AllowInternet = True, dependencyGitText = (info &),
+                    dependencyDownloaded = Function[{url, file}, CopyFile[zip, file]; File[file]],
+                    dependencyInstallFile = Function[{archive, library, version, git},
+                        seen = Sort[FileNameTake /@ Select[FileNames["*", FileNameJoin[{DirectoryName[First[archive]], "tree"}], Infinity], ! DirectoryQ[#] &]];
+                        {git["Path"], seen}]},
+                {InstallPacletDependencies[owner[<|"Path" -> "Sub"|>], name][name], InstallPacletDependencies[owner[<||>], name][name],
+                    First[InstallPacletDependencies[owner[<|"Path" -> "Missing"|>], name][name]]}],
+            DeleteDirectory[root, DeleteContents -> True]]],
+    {{"Sub", Sort[{$dependencyGitReceipt, "Library.wl", "PacletInfo.wl"}]},
+        {"", Sort[{$dependencyGitReceipt, "Library.wl", "PacletInfo.wl", "PacletInfo.wl", "Page.md", "Root.wl"}]}, "DependencyArchive"},
+    TestID -> "Dependencies: only the paclet's directory is extracted from a commit's archive, and all of it for a paclet at the root"
 ]
 
 VerificationTest[

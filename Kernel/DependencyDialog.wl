@@ -184,9 +184,12 @@ dependencyCheckAvailability[rows_] := With[{installed = Select[rows, StringQ[#["
     <|"Readiness" -> AnyTrue[installed, dependencyCheckableQ[#, #["Status"], True] &],
       "Updates" -> AnyTrue[installed, dependencyCheckableQ[#, #["Status"], False] &]|>]
 
+(* the Git source a row declares, empty for another kind of source *)
+dependencyGitPin[row_] := KeyTake[row, {"Git", "Commit", "Path"}]
+
 (* Keep a known release across installation changes. A failed lookup belongs to the installation that was checked. *)
 dependencyCachedMetadata[old_, fresh_] := KeyTake[old, {"Description",
-    If[KeyTake[old, {"Git", "Commit", "Path"}] === KeyTake[fresh, {"Git", "Commit", "Path"}] &&
+    If[dependencyGitPin[old] === dependencyGitPin[fresh] &&
         (StringQ[old["LatestVersion"]] || (StringQ[fresh["InstalledVersion"]] && fresh["InstalledVersion"] === old["InstalledVersion"])),
         "LatestVersion", Nothing]}]
 
@@ -199,7 +202,7 @@ dependencyLocalChanges[owner_, rows_] := Module[{fresh, old},
         old = rows[name];
         If[row["InstalledVersion"] === old["InstalledVersion"] && row["InstalledGitSource"] === old["InstalledGitSource"] &&
             row["GitUserInstallation"] === old["GitUserInstallation"] &&
-            KeyTake[row, {"Git", "Commit", "Path"}] === KeyTake[old, {"Git", "Commit", "Path"}] &&
+            dependencyGitPin[row] === dependencyGitPin[old] &&
             row["Status"] === Replace[old["Status"], ("Ready" | "Needs setup") -> "Installed"], Nothing,
             name -> dependencyDialogRow[Join[dependencyCachedMetadata[old, row], row], old["Label"]]]], fresh]
 ]
