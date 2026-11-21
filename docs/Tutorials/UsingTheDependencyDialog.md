@@ -60,6 +60,10 @@ Hover over a notice to read its details.
 
 A library with a newer release gets **Upgrade** beside its other button, and the footer sums up the check, here **1 upgrade**. A release that cannot be looked up reads **Unavailable**, and the check goes on to the next library. With Wolfram internet access disabled, cloud releases read **Offline**, and the dialog says how to enable it in place of its description.
 
+A Git dependency can change while its version stays the same. Here Parser 1.9.13 is installed at a different commit than the consumer declares. The row shows **Revision mismatch** immediately. Hover over the notice to read the requested commit. Choose **Check for updates**, then **Upgrade**, to install it.
+
+![Parser 1.9.13 showing Revision mismatch before the first update check](Images/DependencyDialog-GitRevision.png)
+
 ## Check that libraries work
 
 Installing a library is not always enough: a proof engine may need a toolchain, or a link a license. A consumer can declare a readiness check for a library, a function that tells whether the library works in this kernel. **Check readiness** runs the checks of the installed libraries, and becomes available once such a library is installed.
