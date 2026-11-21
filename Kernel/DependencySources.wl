@@ -243,7 +243,11 @@ dependencyLockAbandonedQ[file_String] := FileExistsQ[file] && With[{held = depen
 SetAttributes[withDependencyGitLock, HoldRest]
 withDependencyGitLock[name_, action_] := With[{wait = $dependencyLockWait, lock = File[FileNameJoin[{$UserBasePacletsDirectory,
         ".git-pin-" <> IntegerString[Hash[name, "SHA256"], 16] <> ".lock"}]]},
-    If[dependencyLockAbandonedQ[First[lock]], Quiet[DeleteFile[First[lock]]]];
+    If[dependencyLockAbandonedQ[First[lock]],
+        (* A second kernel may have reclaimed the old lock and acquired a new one since the first read. *)
+        WithLock[File[First[lock] <> ".reclaim"],
+            If[dependencyLockAbandonedQ[First[lock]], DeleteFile[First[lock]]],
+            TimeConstraint -> wait, PersistenceTime -> wait]];
     Replace[WithLock[lock, If[dependencyCancelledQ[], dependencyCancelled[], action], TimeConstraint -> wait, PersistenceTime -> 3600],
         $TimedOut :> dependencyFailure["DependencyBusy", "Another operation on `1` is in progress. Try again.", name]]]
 

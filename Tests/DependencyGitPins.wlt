@@ -111,4 +111,14 @@ VerificationTest[
     TestID -> "Git pins: an operation waits for a live holder, takes over the lock of a kernel that has gone, and leaves another machine's alone"
 ]
 
+VerificationTest[
+    Module[{name = "Demo/Contended" <> StringDelete[CreateUUID[], "-"], file, reads = 0},
+        file = FileNameJoin[{$UserBasePacletsDirectory, ".git-pin-" <> IntegerString[Hash[name, "SHA256"], 16] <> ".lock"}];
+        With[{lock = File[file]}, WithLock[lock,
+            (* The first observation is stale. Another kernel now owns the real lock. *)
+            Block[{$dependencyLockWait = 0.3, dependencyLockAbandonedQ = Function[path, ++reads === 1]},
+                {First[withDependencyGitLock[name, "entered"]], FileExistsQ[file]}]]]],
+    {"DependencyBusy", True}, TestID -> "Two kernels recovering the same abandoned lock preserve its new owner"
+]
+
 End[]
