@@ -13,9 +13,21 @@
       cur = null,
       current = '';
 
-  // every page the navigation lists, by id: guide/X, ref/X or tutorial/X, with X as it is
-  // published, "$" and all
-  var KNOWN = {}, links = document.querySelectorAll('#side a[data-id], #side-right a[data-id]');
+  // Merge the painted batch into the catalog's alphabetical order. Keep the other links in
+  // their inert template until a letter, filter or deep link needs them in the rail.
+  var painted = sideRight ? Array.from(sideRight.querySelectorAll('a[data-id]')) : [];
+  var rest = document.getElementById('symbol-rest');
+  var symbolLinks = rest ? Array.from(rest.content.querySelectorAll('a[data-id]')) : painted;
+  if (rest) {
+    painted.forEach(function (link) { symbolLinks.splice(Number(link.parentNode.dataset.position), 0, link); });
+    if (!sideRight.classList.contains('indexed')) sideRight.querySelector('.nav-symbols').appendChild(rest.content);
+    rest.remove();
+  }
+  // Match keyboard and reading order to the finished three-column layout.
+  if (sideRight) sideRight.parentNode.appendChild(sideRight);
+
+  // Every page by its published id, including symbols outside the current batch.
+  var KNOWN = {}, links = Array.from(side.querySelectorAll('a[data-id]')).concat(symbolLinks);
   for (var i = 0; i < links.length; i++) {
     var lid = links[i].getAttribute('data-id');
     (KNOWN[lid] = KNOWN[lid] || []).push(links[i]);
@@ -246,44 +258,48 @@
   // Index the links the shell already knows. Only the current batch occupies the scroll pane;
   // the same links retain their keywords, notebook paths and identities while off screen.
   function makeSymbolIndex(rail) {
-    var list = rail && rail.querySelector('.nav-symbols'), batchSize = 45;
-    if (!list || list.children.length <= 24) return null;
+    if (!rail || !rail.classList.contains('indexed')) return null;
+    var list = rail.querySelector('.nav-symbols'), batchSize = Number(rail.dataset.batchSize);
     var tools = rail.querySelector('.symbol-index'), browse = tools.querySelector('.symbol-browse'),
         buttons = tools.querySelector('.symbol-letters'), letterPicker = tools.querySelector('.symbol-letter-picker select'),
         prefixLabel = tools.querySelector('.symbol-prefix'), prefixPicker = prefixLabel.querySelector('select'),
         selection = prefixLabel.querySelector('.symbol-selection'),
         count = tools.querySelector('.symbol-count'), more = rail.querySelector('.symbol-more'),
         scroll = rail.querySelector('.symbol-scroll'), byLetter = new Map(), byLink = new Map(), prefixCache = new Map();
-    var entries = Array.from(list.children, function (row) {
-      var link = row.querySelector('a'), name = link.getAttribute('data-id').slice(4),
-          initial = (Array.from(name)[0] || '#').toUpperCase(),
+    var entries = symbolLinks.map(function (link) {
+      var row = link.parentNode, name = link.getAttribute('data-id').slice(4),
+          initial = row.dataset.letter || (Array.from(name)[0] || '#').toUpperCase(),
           entry = { row: row, link: link, name: name, folded: name.toLowerCase(), letter: initial };
       if (!byLetter.has(initial)) byLetter.set(initial, []);
       byLetter.get(initial).push(entry);
       byLink.set(link, entry);
       return entry;
     });
-    var letters = Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
-    byLetter.forEach(function (_, initial) {
-      if (initial !== '$' && !letters.includes(initial)) letters.push(initial);
-    });
-    if (byLetter.has('$')) letters.push('$');
-
-    // Show a complete leading word when the shared prefix ends at a word boundary in a name.
-    // For a fragment such as Ap, the first and last symbol names spell out the range instead.
-    function groupLabel(items, prefix) {
-      var first = items[0].name;
-      if (items.length === 1) return first;
-      var family = items.find(function (entry) {
-        var head = entry.name.slice(0, prefix.length), tail = entry.name.slice(prefix.length);
-        return head.toLowerCase() === prefix && (!tail || /^\p{Lu}\p{Ll}/u.test(tail) ||
-          (/\p{Ll}$/u.test(head) && /^\p{Lu}/u.test(tail)) || (/\p{N}$/u.test(head) !== /^\p{N}/u.test(tail)));
-      });
-      return family ? family.name.slice(0, prefix.length) : first + ' \u2013 ' + items[items.length - 1].name;
+    function endsWord(name, head) {
+      var tail = name.slice(head.length);
+      return !tail || /^\p{Lu}\p{Ll}/u.test(tail) || (/\p{Ll}$/u.test(head) && /^\p{Lu}/u.test(tail)) ||
+        (/\p{N}$/u.test(head) !== /^\p{N}/u.test(tail));
     }
 
-    // Partition a crowded letter by its actual common prefixes. Keep a readable family such as
-    // Abstract together; split short, crowded openings such as Ab until they distinguish names.
+    // Keep a short prefix intact. For a long one prefer a word break within 18 characters,
+    // keeping the character that distinguishes this group from its siblings even if it is later.
+    function groupLabel(items, prefix, depth) {
+      var name = items[0].name, head = '', short = '', word = '', length = 0;
+      for (var character of name) {
+        var next = head + character, folded = next.toLowerCase();
+        if (!prefix.startsWith(folded)) break;
+        head = next; length++;
+        if (folded.length > depth && (length <= 18 || !short)) {
+          short = head;
+          if (length >= 6 && endsWord(name, head)) word = head;
+        }
+      }
+      var label = length <= 18 ? head : (word || short || head), key = label.toLowerCase();
+      return label + (items.some(function (entry) { return entry.folded !== key; }) ? '\u2026' : '');
+    }
+
+    // Split Ad into families such as Adele and Adjoint. A four-letter word such as Abel
+    // can stand on its own; a partial word needs at least six characters to be a useful label.
     function prefixesFor(group) {
       var choices = new Map();
       function split(items, depth) {
@@ -298,14 +314,28 @@
           branch.forEach(function (entry) {
             while (!entry.folded.startsWith(prefix)) prefix = prefix.slice(0, -1);
           });
-          if (branch.length > 24 && prefix.length > depth && (prefix.length < 4 || branch.length > 60)) {
+          var length = Array.from(prefix).length;
+          var readable = length >= 6 || (length >= 4 && branch.some(function (entry) {
+            var head = entry.name.slice(0, prefix.length);
+            return head.toLowerCase() === prefix && endsWord(entry.name, head);
+          }));
+          if (branch.length > 1 && prefix.length > depth && (!readable || branch.length > 60)) {
             split(branch, prefix.length);
           } else {
-            choices.set(prefix, { entries: branch, label: groupLabel(branch, prefix) });
+            choices.set(prefix, { entries: branch, label: groupLabel(branch, prefix, depth) });
           }
         });
       }
       if (group.length > batchSize) split(group, (Array.from(group[0].folded)[0] || '').length);
+      if (choices.size > batchSize) {
+        var singles = new Set();
+        choices.forEach(function (choice) { if (choice.entries.length === 1) singles.add(choice.entries[0]); });
+        if (singles.size > 1 && singles.size < choices.size) {
+          choices.forEach(function (choice, key) { if (choice.entries.length === 1) choices.delete(key); });
+          choices.set(':other', { label: 'Other ' + group[0].letter + ' names',
+            entries: group.filter(function (entry) { return singles.has(entry); }) });
+        }
+      }
       return choices;
     }
 
@@ -350,14 +380,6 @@
         letter + ' \u00b7 ' + total + (items.length === 1 ? ' symbol' : ' symbols'));
     }
     function jump(value) { chooseLetter(value); showBrowse(); }
-    letters.forEach(function (value) {
-      var button = document.createElement('button');
-      button.type = 'button'; button.textContent = button.value = value;
-      button.disabled = !byLetter.has(value);
-      button.setAttribute('aria-label', 'Jump to ' + value);
-      buttons.appendChild(button);
-      if (!button.disabled) letterPicker.add(new Option(value, value));
-    });
     buttons.addEventListener('click', function (event) {
       if (event.target.tagName === 'BUTTON') jump(event.target.value);
     });
@@ -402,9 +424,11 @@
         }
       }
     }
-    rail.classList.add('indexed'); tools.hidden = false;
-    tools.querySelector('.symbol-total').textContent = entries.length.toLocaleString('en');
-    jump(letterPicker.options[0].value);
+    rail.onclick = rail.onchange = null;
+    jump(rail.dataset.pendingLetter || letterPicker.value);
+    if (rail.dataset.extraBatches) appendUntil(shown + Number(rail.dataset.extraBatches) * batchSize);
+    delete rail.dataset.pendingLetter;
+    delete rail.dataset.extraBatches;
     return { filter: filter, reveal: reveal };
   }
 

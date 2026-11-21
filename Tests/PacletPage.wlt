@@ -251,15 +251,32 @@ VerificationTest[
 ]
 
 VerificationTest[
-    StringCases[symbolsHTML[repositoryCatalog, <||>], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id],
+    StringCases[symbolRailSlots[repositoryCatalog, <||>, True]["symbols"], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id],
     {"ref/apple", "ref/Foo", "ref/LongCamelCaseName", "ref/$Bar"},
     TestID -> "Site: symbols alphabetically, ignoring case, $ names last"
 ]
 
 VerificationTest[
-    StringContainsQ[symbolsHTML[repositoryCatalog, <||>], ">Long<wbr>Camel<wbr>Case<wbr>Name</a>"],
+    StringContainsQ[symbolRailSlots[repositoryCatalog, <||>, True]["symbols"], ">Long<wbr>Camel<wbr>Case<wbr>Name</a>"],
     True,
     TestID -> "Site: a long name may break at its CamelCase steps"
+]
+
+VerificationTest[
+    Module[{names, catalog, slots, ids},
+        names = Join[{"0Before", "$Last", "\[Beta]Symbol"}, "Apple" <> IntegerString[#, 10, 2] & /@ Range[47]];
+        catalog = <|"Pages" -> AssociationMap[Function[id, With[{name = StringDrop[id, 4]},
+            fixturePage["ref", name, name, id <> ".nb"]]], "ref/" <> # & /@ names]|>;
+        slots = symbolRailSlots[catalog, <||>, True];
+        ids = StringCases[slots["symbols"] <> slots["remainingSymbols"], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id];
+        {
+            slots["symbolCount"], slots["moreText"], slots["prefixHidden"], slots["initialGroup"],
+            StringCount[slots["symbols"], "data-id="], DuplicateFreeQ[ids], Sort[ids] === Sort[esc /@ Keys[catalog["Pages"]]],
+            StringContainsQ[slots["letterOptions"], "<option value=\"$\">$</option>"]
+        }
+    ],
+    {"A &#183; 47 symbols", "Show 2 more", "", "All A names", 45, True, True, True},
+    TestID -> "Site: the first batch, count and letter picker precede the remaining symbol links; every id appears once"
 ]
 
 VerificationTest[
@@ -322,7 +339,7 @@ VerificationTest[
         <|"kind" -> "cloud", "definition" -> "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Name-ResourceDefinition.nb",
           "resource" -> "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/"|>,
         0,
-        {"resource/Name", "guide/Name", "ref/$Var"}
+        {"ref/$Var", "resource/Name", "guide/Name"}
     },
     TestID -> "Site: a deployed resource's site opens on its definition notebook, first in the rail; ids name the notebooks"
 ]
@@ -350,7 +367,7 @@ VerificationTest[
             StringCases[files["index.html"], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id]
         }
     ],
-    {"guide/Name", "", {"guide/Name", "ref/$Var"}},
+    {"guide/Name", "", {"ref/$Var", "guide/Name"}},
     TestID -> "Site: \"DefinitionPage\" -> False leaves the definition notebook out of the site"
 ]
 

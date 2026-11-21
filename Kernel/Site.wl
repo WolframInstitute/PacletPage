@@ -160,12 +160,47 @@ sidebarHTML[catalog_Association, notebooks_Association, rootGuide_ : True, strip
     ]
 ];
 
-(* the right rail: the symbols *)
-symbolsHTML[catalog_Association, notebooks_Association] := With[
-    {ids = SortBy[Select[Keys[catalog["Pages"]], StringStartsQ[#, "ref/"] &], symbolKey[catalog["Pages"][#]] &]},
-    StringJoin["<ul class=\"nav-symbols\">",
-        Map["<li>" <> navLink[#, catalog["Pages"][#], "sym", notebooks] <> "</li>" &, ids],
-        "</ul>"]
+(* The shell streams the first letter and its links before the guide tree and the rest of the
+   symbol catalog. Each link appears once. The positions restore the original alphabetical order
+   for searches when the shell has finished loading. *)
+symbolRailSlots[catalog_Association, notebooks_Association, enabled_] := Module[
+    {pages = catalog["Pages"], ids, indexed, letters, buckets, initial, group, batch, batchSize = 45,
+        positions, label, remaining, rows, button, option, count, initialOf},
+    ids = SortBy[Select[Keys[pages], StringStartsQ[#, "ref/"] &], symbolKey[pages[#]] &];
+    indexed = TrueQ[enabled] && Length[ids] > 24;
+    initialOf[id_String] := Replace[ToUpperCase[StringTake[StringDrop[id, 4], UpTo[1]]], "" -> "#"];
+    buckets = If[indexed, GroupBy[ids, initialOf], <||>];
+    letters = Join[CharacterRange["A", "Z"], Select[Keys[buckets], ! StringMatchQ[#, RegularExpression["[A-Z]"] | "$"] &],
+        If[KeyExistsQ[buckets, "$"], {"$"}, {}]];
+    initial = SelectFirst[letters, KeyExistsQ[buckets, #] &, ""];
+    group = Lookup[buckets, initial, {}];
+    batch = Which[indexed, Take[group, UpTo[batchSize]], TrueQ[enabled], ids, True, {}];
+    positions = If[indexed, KeyTake[AssociationThread[ids -> Range[0, Length[ids] - 1]], batch], <||>];
+    remaining = Which[indexed, Select[ids, ! KeyExistsQ[positions, #] &], TrueQ[enabled], {}, True, ids];
+    label = If[indexed, "All " <> esc[initial] <> " names", ""];
+    count[number_Integer] := StringReplace[IntegerString[number], RegularExpression["(?<=\\d)(?=(?:\\d{3})+$)"] -> ","];
+    rows[names_List] := StringJoin[Map[Function[id, StringJoin[
+        "<li", If[KeyExistsQ[positions, id], " data-position=\"" <> IntegerString[positions[id]] <> "\"", ""],
+        If[indexed && ! StringStartsQ[id, "ref/" ~~ RegularExpression["[a-zA-Z$]"]],
+            " data-letter=\"" <> esc[initialOf[id]] <> "\"", ""], ">",
+        navLink[id, pages[id], "sym", notebooks], "</li>"]], names]];
+    button[letter_String] := StringJoin["<button type=\"button\" value=\"", esc[letter], "\" aria-label=\"Jump to ", esc[letter],
+        "\" aria-pressed=\"", If[letter === initial, "true", "false"], "\"", If[KeyExistsQ[buckets, letter], "", " disabled"],
+        ">", esc[letter], "</button>"];
+    option[letter_String] := "<option value=\"" <> esc[letter] <> "\">" <> esc[letter] <> "</option>";
+    <|
+        "railClass" -> If[indexed, "indexed", ""], "batchSize" -> IntegerString[batchSize],
+        "indexHidden" -> If[indexed, "", "hidden"], "symbolTotal" -> count[Length[ids]],
+        "letterButtons" -> If[indexed, StringJoin[button /@ letters], ""],
+        "letterOptions" -> StringJoin[option /@ Select[letters, KeyExistsQ[buckets, #] &]],
+        "prefixHidden" -> If[Length[group] > batchSize, "", "hidden"],
+        "initialOption" -> "<option value=\"\">" <> label <> "</option>", "initialGroup" -> label,
+        "symbolCount" -> If[indexed, esc[initial] <> " &#183; " <> count[Length[group]] <> If[Length[group] === 1, " symbol", " symbols"], ""],
+        "symbols" -> "<ul class=\"nav-symbols\">" <> rows[batch] <> "</ul>",
+        "moreHidden" -> If[Length[group] > batchSize, "", "hidden"],
+        "moreText" -> If[Length[group] > batchSize, "Show " <> IntegerString[Min[batchSize, Length[group] - batchSize]] <> " more", ""],
+        "remainingSymbols" -> If[remaining === {}, "", "<template id=\"symbol-rest\">" <> rows[remaining] <> "</template>"]
+    |>
 ];
 
 (* ==================== notebooks ==================== *)
@@ -393,7 +428,7 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
         ":root { --pp-accent: " <> accent <> "; --pp-active-bg: " <> cssColor[Lighter[RGBColor[accent], 0.92]] <>
         "; --pp-active-fg: " <> accent <> "; }", 1];
     <|
-        "index.html" -> fillTemplate[readAsset["site.html"], <|
+        "index.html" -> fillTemplate[readAsset["site.html"], Join[symbolRailSlots[catalog, notebooks, OptionValue["SymbolsRail"]], <|
             "title" -> esc[title],
             (* the parts of the shell a switch leaves out, hidden by the stylesheet *)
             "bodyClass" -> StringRiffle[Join[
@@ -407,10 +442,9 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
             "resourceLabel" -> Switch[kind, "cloud", "Resource page", "local", "Open page", _, "Paclet Repository"],
             "css" -> css,
             "sidebar" -> sidebarHTML[catalog, notebooks, OptionValue["RootGuide"], OptionValue["StripTitleNumbers"]],
-            "symbols" -> symbolsHTML[catalog, notebooks],
             "config" -> toJSON[shellConfig],
             "js" -> readAsset["site.js"]
-        |>],
+        |>]],
         "page.html" -> fillTemplate[readAsset["page.html"], <|
             "title" -> esc[title],
             "accent" -> accent,

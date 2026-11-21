@@ -21,12 +21,15 @@ function checkRail() {
   const mobile = window.matchMedia('(max-width: 900px)').matches;
   if (mobile) document.getElementById('symToggle').click();
   const labels = Array.from(prefix.options, option => option.label);
-  check(labels.includes('Abstract (28)') && labels.includes('AbundantQ (1)'), 'Families and single symbols must be named in full');
-  check(labels.every(label => !label.includes('…') && !label.includes('...')), 'Group labels must not abbreviate names');
-  prefix.value = 'ap'; change(prefix);
+  check(labels.includes('Abstract… (28)') && labels.includes('AbundantQ (1)'), 'An ellipsis must mark omitted text');
+  check(labels.includes('Adele… (2)') && labels.includes('Adjoint… (2)') && labels.includes('Approximate… (3)'),
+    'Different families under Ad and Ap must have recognizable prefixes');
+  check(!labels.some(label => /^(?:Ad|Ap)…| – /.test(label)), 'A mixed prefix must not become a stub or an endpoint range');
+  check(labels.includes('Astronomical… (1)'), 'A long menu label should end on a word boundary');
+  prefix.value = 'adjoint'; change(prefix);
   const caption = rail.querySelector('.symbol-selection'), text = document.createRange();
-  check(caption.textContent === 'ApollonianGasket – ApproximateSupremum (5)' && list.children.length === 5,
-    'A partial word must be labelled with both full range endpoints');
+  check(caption.textContent === 'Adjoint… (2)' && Array.from(list.querySelectorAll('a'), a => a.textContent).join(' ') ===
+    'AdjointOperator AdjointRepresentation', 'A family must open its full symbol names');
   text.selectNodeContents(caption);
   const control = prefix.getBoundingClientRect(), displayed = text.getBoundingClientRect();
   check(displayed.right <= control.right - 22 && displayed.bottom <= control.bottom,
@@ -51,10 +54,21 @@ function checkRail() {
   check(active() === 'ref/$Version', 'Enter must search keywords beyond the selected prefix');
   filter('');
   check(rail.querySelector('.symbol-letter-picker select').value === '$', 'The selected result must be revealed');
+  const letter = rail.querySelector('.symbol-letter-picker select');
+  letter.value = 'C'; change(letter);
+  check(Array.from(prefix.options, option => option.label).includes('Other C names (48)'),
+    'A crowded menu must keep its one-off names accessible together');
+  prefix.value = ':other'; change(prefix);
+  const more = rail.querySelector('.symbol-more');
+  while (!more.hidden) more.click();
+  check(list.children.length === 48 && !list.textContent.includes('Cauchy'), 'The remaining group must contain only the one-off names');
 }
 
 function sampleHTML() {
   const names = ['AbelianGroupQ', 'AbelTransform', 'AbsoluteValue', 'AbstractCategory', 'AbstractGroup', 'AbundantQ',
+    'AdaptedProcessQ', 'AdditiveEnergy', 'AdeleQ', 'AdeleRing', 'AdjointOperator', 'AdjointRepresentation',
+    'AstronomicalObservationCatalogue', 'CauchyIntegral', 'CauchySequence',
+    ...Array.from({ length: 48 }, (_, i) => 'C' + String.fromCodePoint(0x4e00 + i) + 'Value'),
     'ApollonianGasket', 'ApolloniusCircles', 'ApproximateIdentity', 'ApproximateIntermediateValue', 'ApproximateSupremum',
     ...Array.from({ length: 26 }, (_, i) => 'AbstractSymbol' + i),
     ...Array.from({ length: 70 }, (_, i) => 'Algebra' + i), 'AzureTail'].sort().concat('$Version');
@@ -62,7 +76,11 @@ function sampleHTML() {
     (name === '$Version' ? ' data-kw="package setting"' : '') + '>' + name + '</a></li>');
   const config = { title: 'Index test', resource: 'about:blank', page: 'viewer.html',
     home: { type: 'resource', url: 'about:blank' }, routes: [], filter: true };
+  const initials = [...new Set(names.map(name => name[0]))];
   const slots = { title: config.title, css: read('site.css') + '\n* { transition: none !important; }',
+    railClass: 'indexed', indexHidden: '', symbolTotal: names.length, batchSize: '45',
+    letterButtons: initials.map(ch => '<button type="button" value="' + ch + '" aria-label="Jump to ' + ch + '">' + ch + '</button>').join(''),
+    letterOptions: initials.map(ch => '<option value="' + ch + '">' + ch + '</option>').join(''),
     js: read('site.js'), config: JSON.stringify(config), symbols: '<ul class="nav-symbols">' + rows.join('') + '</ul>' };
   return read('site.html').replace(/<link rel="stylesheet"[^>]+>/, '')
     .replace(/`(\w+)`/g, (_, slot) => slots[slot] || '');
