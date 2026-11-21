@@ -78,7 +78,8 @@ withDependencySelection[ownerSpec_, selection_, action_] := Module[{owner = depe
 ]
 
 dependencyMap[action_, ownerSpec_, selection_, filter_: Identity] := withDependencySelection[ownerSpec, selection,
-    Function[{owner, entries}, If[dependencyCancelledQ[], dependencyCancelled[], action[owner, #]] & /@ filter[entries]]]
+    Function[{owner, entries}, If[dependencyCancelledQ[], dependencyCancelled[],
+        If[KeyExistsQ[#, "Git"], withDependencyGitLock[#["Name"], action[owner, #]], action[owner, #]]] & /@ filter[entries]]]
 
 (* Exact-name lookups are cheaper for a small selection. For a long one the paclet manager can
    enumerate the same local index once. Keep its own version and directory precedence in each group. *)
@@ -92,27 +93,35 @@ dependencySupportedQ[entry_] := With[{systems = Lookup[entry, "Platforms", All]}
 If[! AssociationQ[$dependencyRestarts], $dependencyRestarts = <||>]
 dependencyLoadedQ[p_PacletObject] := ! DisjointQ[$Packages, Flatten[{p["Context"]}]]
 
-(* The messages of loading the consumer and of its check are what explain a failed check: they are
-   kept in the failure, as well as issued. *)
-dependencyReadiness[owner_, entry_] := Module[{check = entry["Check"], context, run, loading = {}},
-    Block[{$ContextPath = $ContextPath},
+(* Capture both stages together. EvaluationData otherwise converts an escaping Throw into
+   an uncaught-throw message, even when the caller has a matching Catch. *)
+dependencyReadiness[owner_, entry_] := Module[{check = entry["Check"], context, run, completed, thrown, result, failure, messages},
+    run = EvaluationData[Catch[Catch[completed[Block[{$ContextPath = $ContextPath},
         If[! NameQ[check],
             context = SelectFirst[Flatten[{owner["PrimaryContext"], owner["Context"]}],
                 StringQ[#] && StringStartsQ[check, #] &, None];
-            If[StringQ[context], loading = EvaluationData[Needs[context]]["MessagesText"]]];
-        If[! NameQ[check], Return[Failure["DependencyCheckUnavailable", <|"MessageTemplate" -> "The readiness function `1` could not be loaded.",
-            "MessageParameters" -> {check}, "Messages" -> loading|>]]];
-        run = EvaluationData[Symbol[check][]]];
-    Which[run["Result"] === True, True, MatchQ[run["Result"], _Failure], run["Result"],
-        True, Failure["DependencyCheckFailed", <|"MessageTemplate" -> "The readiness check `1` did not succeed.",
-            "MessageParameters" -> {check}, "Messages" -> run["MessagesText"]|>]]
+            If[StringQ[context], Needs[context]]];
+        If[NameQ[check], Symbol[check][],
+            Failure["DependencyCheckUnavailable", <|"MessageTemplate" -> "The readiness function `1` could not be loaded.",
+                "MessageParameters" -> {check}, "Messages" -> {}|>]]]], _, thrown]]];
+    result = Replace[run["Result"], {completed[value_] :> value,
+        thrown[value_, tag_] :> Throw[value, tag], value_ :> Throw[value]}];
+    If[result === True, Return[True]];
+    failure = If[FailureQ[result], result, Failure["DependencyCheckFailed", <|
+        "MessageTemplate" -> "The readiness check `1` did not succeed.", "MessageParameters" -> {check}, "Messages" -> {}|>]];
+    messages = run["MessagesText"];
+    If[messages === {}, failure, MapAt[Function[data,
+        If[ListQ[Lookup[data, "Messages", {}]],
+            Append[data, "Messages" -> Join[Lookup[data, "Messages", {}], messages]],
+            Append[data, "ReadinessMessages" -> messages]]], failure, 2]]
 ]
 
-dependencyLocalStatus[entry_, installed_] := Which[
+dependencyLocalStatus[entry_, installed_, git_: Automatic] := Which[
     ! dependencySupportedQ[entry], "Unsupported",
     installed === {}, "Not installed",
     KeyExistsQ[$dependencyRestarts, entry["Name"]], "Restart required",
     ! dependencyCompatibleQ[First[installed]["Version"], Lookup[entry, "Version", All]], "Version mismatch",
+    KeyExistsQ[entry, "Git"] && ! dependencyGitMatchesQ[Replace[git, Automatic :> dependencyInstalledGit[First[installed]]], entry], "Revision mismatch",
     True, "Installed"
 ]
 
@@ -136,16 +145,22 @@ PacletDependencyInformation[owner : (_String | File[_String] | _PacletObject), n
         ]]]
     ]
 
-dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{result, readiness, latest, sources, description},
-    result = Join[entry, <|"Status" -> dependencyLocalStatus[entry, installed],
+dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{result, readiness, latest, sources, description, git},
+    git = If[installed =!= {} && KeyExistsQ[entry, "Git"], dependencyInstalledGit[First[installed]], None];
+    result = Join[entry, <|"Status" -> dependencyLocalStatus[entry, installed, git],
         "InstalledVersion" -> If[installed === {}, Missing["NotInstalled"], First[installed]["Version"]]|>];
+    If[git =!= None,
+        AssociateTo[result, {"InstalledGitSource" -> git, "GitRevisionMatch" -> dependencyGitMatchesQ[git, entry],
+            "GitUserInstallation" -> dependencyGitUserCopyQ[First[installed]]}]];
     If[probe && result["Status"] === "Installed" && StringQ[entry["Check"]],
         readiness = dependencyReadiness[owner, entry];
         If[readiness === True, result["Status"] = "Ready",
             AssociateTo[result, {"Status" -> "Needs setup", "ReadinessFailure" -> readiness}]]];
     If[updates && dependencySupportedQ[entry],
-        latest = TimeConstrained[dependencyRelease[owner, entry], $dependencyVersionTimeout,
-            dependencyFailure["DependencyTimeout", "The version check for `1` timed out. Try checking for updates again.", entry["Name"]]];
+        latest = If[TrueQ[result["GitRevisionMatch"]] && dependencyCompatibleQ[result["InstalledVersion"], Lookup[entry, "Version", All]],
+            <|"Version" -> result["InstalledVersion"]|>,
+            TimeConstrained[dependencyRelease[owner, entry], $dependencyVersionTimeout,
+                dependencyFailure["DependencyTimeout", "The version check for `1` timed out. Try checking for updates again.", entry["Name"]]]];
         result["LatestVersion"] = If[FailureQ[latest], latest, latest["Version"]]];
     If[StringTrim[Lookup[entry, "Description", ""]] === "",
         sources = {First[installed, None], If[AssociationQ[latest], Lookup[latest, "SitePaclet", None], None]};
@@ -170,19 +185,22 @@ dependencyChecked[owner_, entry_, paclet_] := Module[{readiness},
         "InstalledVersion" -> paclet["Version"], "Cause" -> readiness|>]]
 ]
 
-dependencyInstall[owner_, entry_, update_] := Module[{name = entry["Name"], installed, current, release, result, loaded},
+dependencyInstall[owner_, entry_, update_] := Module[{name = entry["Name"], installed, current, release, result, loaded, git = KeyExistsQ[entry, "Git"]},
     If[! dependencySupportedQ[entry], Return[dependencyFailure["UnsupportedSystem", "`1` is unavailable on `2`.", name, $SystemID]]];
     installed = PacletFind[name];
     current = First[installed, None];
     If[update && current === None, Return[dependencyFailure["DependencyNotInstalled", "Install `1` before updating it.", name]]];
-    If[! update && current =!= None && dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]],
+    If[current =!= None && dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]] &&
+            If[git, dependencyGitMatchesQ[dependencyInstalledGit[current], entry], ! update],
         Return[dependencyChecked[owner, entry, current]]];
     $dependencyProgress["Checking release", None];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     release = dependencyRelease[owner, entry];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     If[FailureQ[release], Return[release]];
-    If[current =!= None && ! PacletNewerQ[release["Version"], current["Version"]],
+    If[git && current =!= None,
+        With[{conflict = dependencyGitConflict[current, release["Version"]]}, If[FailureQ[conflict], Return[conflict]]]];
+    If[! git && current =!= None && ! PacletNewerQ[release["Version"], current["Version"]],
         Return[If[dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]], dependencyChecked[owner, entry, current],
             dependencyFailure["DependencyVersionConflict", "Installed `1` `2` does not satisfy `3`.", name, current["Version"], entry["Version"]]]]];
     loaded = AnyTrue[installed, dependencyLoadedQ];

@@ -101,9 +101,11 @@ dependencyDetails[row_, label_] := Module[{name = row["Name"], size, license, re
 ]
 
 dependencyRowActions[row_] := If[! StringQ[row["InstalledVersion"]], {"Install"}, {
-    If[dependencyRemovableQ[row], "Uninstall", Nothing],
+    If[dependencyRemovableQ[row] && row["GitUserInstallation"] =!= False, "Uninstall", Nothing],
     If[row["Status"] =!= "Unsupported" && StringQ[row["LatestVersion"]] &&
-        PacletNewerQ[row["LatestVersion"], row["InstalledVersion"]], "Update", Nothing]}]
+        (PacletNewerQ[row["LatestVersion"], row["InstalledVersion"]] ||
+            row["GitRevisionMatch"] === False && row["GitUserInstallation"] =!= False &&
+                ! PacletNewerQ[row["InstalledVersion"], row["LatestVersion"]]), "Update", Nothing]}]
 
 dependencyRowState[row_, notice_ : Automatic] := With[{actions = dependencyRowActions[row]}, With[{first = First[actions, None]},
     Join[<|"Installed" -> Replace[row["InstalledVersion"], _Missing -> "Not installed"],
@@ -128,18 +130,22 @@ dependencyDialogMessage[text_String] := StringReplace[text, (c : Except["."]) ~~
 dependencyNotice[label_, detail_ : ""] := <|"Notice" -> label, "NoticeDetail" -> detail|>
 
 dependencyRowNotice[row_] := Which[
-    FailureQ[row["ReadinessFailure"]], dependencyNotice["Needs setup", row["ReadinessFailure"]["Message"]],
+    FailureQ[row["ReadinessFailure"]], dependencyNotice["Needs setup", dependencyReadinessDetail[row["ReadinessFailure"]]],
     row["Status"] === "Needs setup", dependencyNotice["Needs setup", "Check readiness for details."],
     row["Status"] === "Restart required", dependencyNotice["Restart required", "Restart the kernel to use the changed library."],
     StringQ[row["InstalledVersion"]] && MatchQ[row["LatestVersion"], Failure[Except["DependencyInternetDisabled"], _]],
         dependencyNotice["Check failed", row["LatestVersion"]["Message"]],
     row["Status"] === "Unsupported", dependencyNotice["Unsupported", "No release for " <> $SystemID],
+    row["Status"] === "Revision mismatch", If[row["GitUserInstallation"] === False,
+        dependencyNotice["External installation", "The active copy is outside the user repository. The requested Git commit is " <> row["Commit"] <> "."],
+        dependencyNotice["Revision mismatch", "This library requires Git commit " <> row["Commit"] <> "."]],
     True, dependencyNotice[""]
 ]
 
 dependencyActionNotice[action_, result_, fresh_] := Which[
     MatchQ[result, Failure["DependencyCancelled", _]], dependencyNotice["Cancelled"],
-    MatchQ[result, Failure["DependencySetupRequired", _]], dependencyNotice["Needs setup", result["Message"]],
+    MatchQ[result, Failure["DependencySetupRequired", _]], dependencyNotice["Needs setup",
+        If[FailureQ[result["Cause"]], dependencyReadinessDetail[result["Cause"], result["Message"]], result["Message"]]],
     MatchQ[result, _Failure], dependencyNotice["Failed", result["Message"]],
     MatchQ[fresh, _Failure], dependencyNotice["Unconfirmed", fresh["Message"]],
     ! AssociationQ[fresh] || ! If[action === "Uninstall", result === Null,
@@ -180,7 +186,8 @@ dependencyCheckAvailability[rows_] := With[{installed = Select[rows, StringQ[#["
 
 (* Keep a known release across installation changes. A failed lookup belongs to the installation that was checked. *)
 dependencyCachedMetadata[old_, fresh_] := KeyTake[old, {"Description",
-    If[StringQ[old["LatestVersion"]] || (StringQ[fresh["InstalledVersion"]] && fresh["InstalledVersion"] === old["InstalledVersion"]),
+    If[KeyTake[old, {"Git", "Commit", "Path"}] === KeyTake[fresh, {"Git", "Commit", "Path"}] &&
+        (StringQ[old["LatestVersion"]] || (StringQ[fresh["InstalledVersion"]] && fresh["InstalledVersion"] === old["InstalledVersion"])),
         "LatestVersion", Nothing]}]
 
 (* Local inventory does not reproduce readiness results. Keep the existing row and its
@@ -190,7 +197,9 @@ dependencyLocalChanges[owner_, rows_] := Module[{fresh, old},
     If[! AssociationQ[fresh], Return[<||>]];
     Association@KeyValueMap[Function[{name, row},
         old = rows[name];
-        If[row["InstalledVersion"] === old["InstalledVersion"] &&
+        If[row["InstalledVersion"] === old["InstalledVersion"] && row["InstalledGitSource"] === old["InstalledGitSource"] &&
+            row["GitUserInstallation"] === old["GitUserInstallation"] &&
+            KeyTake[row, {"Git", "Commit", "Path"}] === KeyTake[old, {"Git", "Commit", "Path"}] &&
             row["Status"] === Replace[old["Status"], ("Ready" | "Needs setup") -> "Installed"], Nothing,
             name -> dependencyDialogRow[Join[dependencyCachedMetadata[old, row], row], old["Label"]]]], fresh]
 ]
@@ -220,7 +229,8 @@ dependencyCheckLibraries[owner_, rows_, probe_, started_, publish_] := withDepen
             If[eligible, started[old["Label"]]];
             fresh = dependencyInfo[paclet, entries[name], installed[name], eligible && probe, eligible && ! probe];
             row = dependencyDialogRow[Join[dependencyCachedMetadata[old, fresh], fresh,
-                If[! (eligible && probe) && fresh["Status"] === "Installed" && old["InstalledVersion"] === fresh["InstalledVersion"],
+                If[! (eligible && probe) && fresh["Status"] === "Installed" && old["InstalledVersion"] === fresh["InstalledVersion"] &&
+                        old["InstalledGitSource"] === fresh["InstalledGitSource"],
                     KeyTake[old, {"Status", "ReadinessFailure"}], <||>]], old["Label"]];
             If[eligible || row =!= old, publish[name, row]];
             If[eligible, checked[name] = row],
@@ -329,12 +339,12 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, 
             CellMargins -> {{25, 28}, {0, 0}}, FontColor -> ink],
         ExpressionCell[Framed[Grid[{{Pane[dependencyFlow[{
             dependencyCheckControl["Check readiness", "Run the readiness tests supplied for installed libraries that can run in this kernel.",
-                startCheck[True, ButtonNotebook[]], stopCheck[], Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyChecks", "Readiness"}]]],
+                startCheck[True, ButtonNotebook[]], stopCheck[ButtonNotebook[]], Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyChecks", "Readiness"}]]],
             dependencyCheckControl["Check for updates", "Look up compatible releases for installed libraries.",
-                startCheck[False, ButtonNotebook[]], stopCheck[], Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyChecks", "Updates"}]]],
+                startCheck[False, ButtonNotebook[]], stopCheck[ButtonNotebook[]], Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyChecks", "Updates"}]]],
             Style[Dynamic[CurrentValue[EvaluationNotebook[], {TaggingRules, "DependencyCheckFeedback"}]], Small, dependencyDialogColor[.97, .35, .72]]},
             6], ImageSize -> Full, Alignment -> Left],
-            DefaultButton["Close", stopCheck[True]; NotebookClose[ButtonNotebook[]], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
+            DefaultButton["Close", NotebookClose[ButtonNotebook[]], ImageSize -> {90, Automatic}, Method -> "Preemptive"]}},
             ItemSize -> {{Automatic, Full}}, Alignment -> {{Left, Right}, Bottom}, Spacings -> {.6, 0}],
             FrameMargins -> {{0, 0}, {17, 7}}, FrameStyle -> None], "DialogStyle",
             CellTags -> "DependencyDialogControls", CellMargins -> {{25, 28}, {0, 0}},
@@ -344,7 +354,7 @@ dependencyDialogContent[owner_, commandOwner_, initial_] := Module[{startCheck, 
 
 dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCheck_Symbol] := With[{
         initialRows = dependencyDialogRows[initial], packageFile = FileNameJoin[{$packageDirectory, "PacletPage.wl"}]}, DynamicModule[
-    {rows = initialRows, operation = None, cancelled = False, wasSelected = True, focus, refresh, perform, copy, cancelTransfer},
+    {rows = initialRows, operation = None, cancelled = False, wasSelected = True, window, focus, refresh, perform, copy, cancelTransfer},
     (* The observer shares the controls' lifetime and responds to tracked front-end values. *)
     DynamicWrapper[Pane[If[initialRows === <||>, "This paclet declares no dependencies",
             Column[KeyValueMap[dependencyRowPanel[#1, #2, perform, copy, cancelTransfer] &, initialRows],
@@ -371,13 +381,16 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                 CurrentValue[nb, {TaggingRules, "DependencyCheckFeedback"}] = ""]]];
         copy[name_, action_, nb_] := (CopyToClipboard[dependencyCommand[commandOwner, action, name]];
             CurrentValue[nb, {TaggingRules, "DependencyCopied"}] = name);
-        stopCheck[closing_ : False] := (cancelled = True; If[closing && operation =!= None, cancelDependencyDownload[]]);
-        startCheck[probe_, nb_NotebookObject] := If[operation === None, With[{label = If[probe, "Check readiness", "Check for updates"]},
-            dependencyRunCheck[nb, label,
-                operation = label; cancelled = False;
-                Block[{dependencyCancelledQ = Function[Null, cancelled || ! MemberQ[Notebooks[], nb]]}, refresh[probe, nb]],
-                operation = None]
-        ]];
+        (* Rendering a copy of the notebook creates another module with the same footer symbols. *)
+        window = EvaluationNotebook[];
+        With[{nb = window},
+            stopCheck[nb] := (cancelled = True);
+            startCheck[probe_, nb] := If[operation === None, With[{label = If[probe, "Check readiness", "Check for updates"]},
+                dependencyRunCheck[nb, label,
+                    operation = label; cancelled = False;
+                    Block[{dependencyCancelledQ = Function[Null, cancelled || ! MemberQ[Notebooks[], nb]]}, refresh[probe, nb]],
+                    operation = None]
+            ]]];
         refresh[probe_, nb_] := Module[{checked},
             checked = dependencyCheckLibraries[owner, rows, probe,
                 Function[label, CurrentValue[nb, {TaggingRules, "DependencyCheckFeedback"}] = label <> "…"],
@@ -421,8 +434,11 @@ dependencyLibraryList[owner_, commandOwner_, initial_, startCheck_Symbol, stopCh
                         dependencySetActivity[nb, None]]]
             ]]
     ),
-    Deinitialization :> (cancelled = True; If[operation =!= None, cancelDependencyDownload[]]; Clear[startCheck, stopCheck]),
-    SynchronousInitialization -> True
+    Deinitialization :> (cancelled = True; If[operation =!= None, cancelDependencyDownload[]];
+        With[{nb = window}, startCheck[probe_, nb] =.; stopCheck[nb] =.];
+        If[MemberQ[Values[$dependencyDialogs], window],
+            dependencyRemember[owner["Name"]]; $dependencyDialogs = DeleteCases[$dependencyDialogs, window]]),
+    UnsavedVariables :> {window}, SynchronousInitialization -> True
 ]]
 
 dependencyDialogTags[rows_, text_ : Automatic] := With[{defaultTitle = dependencyDialogHeading[rows]},
@@ -468,14 +484,13 @@ PacletDependencyDialog[spec : (_String | File[_String] | _PacletObject), Options
     windowArguments = If[MatchQ[previous, _NotebookObject],
         {previous, WindowSize -> CurrentValue[previous, WindowSize], WindowMargins -> CurrentValue[previous, WindowMargins]},
         {WindowSize -> {740, All}}];
-    dialog = With[{name = owner["Name"], location = key, appearance = dependencyAppearanceOptions[source]}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows],
+    dialog = With[{appearance = dependencyAppearanceOptions[source]}, CreateDialog[dependencyDialogContent[owner, dependencyCommandOwner[spec, owner], rows],
         Sequence @@ windowArguments, WindowTitle -> windowTitle, WindowFrame -> "Normal",
         WindowFrameElements -> {"CloseBox", "MinimizeBox", "ZoomBox", "ResizeArea"}, WindowElements -> {},
         ScrollingOptions -> {"VerticalScrollRange" -> Fit}, Evaluator -> evaluator,
         Sequence @@ appearance, Background -> dependencyDialogBackground[appearance],
         Visible -> False, TaggingRules -> Join[dependencyDialogTags[rows, text],
-            <|"DependencyAppearanceSource" -> source, "PacletPageDependencyDialog" -> windowKey|>],
-        NotebookEventActions -> {"WindowClose" :> (dependencyRemember[name]; KeyDropFrom[$dependencyDialogs, {location}]), PassEventsDown -> True}]];
+            <|"DependencyAppearanceSource" -> source, "PacletPageDependencyDialog" -> windowKey|>]]];
     If[MatchQ[dialog, _NotebookObject],
         dependencyFitList[dialog];
         AssociateTo[$dependencyDialogs, key -> dialog];

@@ -1087,6 +1087,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
         pattern_ :> Select[all, StringMatchQ[FileNameTake[#], pattern] &]
     }];
     If[ files === {}, Message[BuildPacletDocumentation::source, source]; Return[$Failed, Module]];
+    refreshPacletSites[];
     (* the paclet itself, and the dependencies given as directories, for the examples *)
     PacletDirectoryLoad[dir];
     Scan[PacletDirectoryLoad, Select[Replace[OptionValue["Dependencies"], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &]];
@@ -3489,18 +3490,6 @@ DeployPacletResource::nocommit = "`1` is already published and records no commit
    delivered as a byte array on CURLLink's own thread, can crash the kernel (a freed chunk read in
    libcurllink), as it did in the middle of a deploy's definition notebook three times. The
    information is then read from the local cache, as it is between refreshes. *)
-(* The paclet manager's weekly update of its sites likewise starts asynchronous transfers, from a task
-   it schedules when it starts, which can fire in the middle of a deploy: on 15.0 one in flight was
-   followed by those crashes each time, and a kernel that ends with one in flight crashes too. A
-   deploy keeps the weekly update from starting, and refreshes the sites itself, synchronously, once
-   a kernel, before it deploys. *)
-$sitesRefreshed = False;
-refreshPacletSites[] := If[ ! TrueQ[$sitesRefreshed] && TrueQ[$AllowInternet],
-    $sitesRefreshed = True;
-    monitor["the paclet sites refreshed"];
-    TimeConstrained[Scan[PacletSiteUpdate[#, Asynchronous -> False] &, PacletSites[]], 60]
-];
-
 (* The sites whose last update succeeded over three days ago, or never, by the paclet manager's own
    record, which its weekly update reads; none where that record is not at hand *)
 staleSites[] := If[ DownValues[PacletManager`Services`Private`getPacletSiteData] === {} || DownValues[PacletManager`Package`differenceInDays] === {}, {},
@@ -3508,23 +3497,16 @@ staleSites[] := If[ DownValues[PacletManager`Services`Private`getPacletSiteData]
         {url_String, _, _, _, last_, ___} /; ! MatchQ[last, {__Integer} | {__?NumericQ}] || PacletManager`Package`differenceInDays[last, Date[]] > 3 :> url]
 ];
 
-(* When PacletPage loads in a kernel whose sites are stale, such as each container of a build on a
-   new pod, and internet access is allowed, it refreshes them synchronously at once, so that the weekly update the paclet manager
-   scheduled when the kernel started finds them fresh when it fires, later, in the middle of
-   whatever the kernel does then, and starts nothing. Not on parallel kernels, which start no weekly
-   update. It is a convenience, so loading never waits on it long nor reports it: each site has twelve
-   seconds, and a site that cannot be reached, its connection refused or timed out, ends it, the
-   network being down; its messages, the transfer's and the update's, are the expected answer of an
-   unreachable site, kept off the output, the one purpose of this Quiet, and the paclet manager's
-   own weekly update then runs as it would have. *)
-refreshStaleSites[] := If[ $KernelID === 0 && TrueQ[$AllowInternet],
-    With[{stale = staleSites[]},
-        Catch[Scan[
-            If[ ! MatchQ[TimeConstrained[Quiet[PacletSiteUpdate[#, Asynchronous -> False], {URLFetch::invhttp, PacletSiteUpdate::err, General::stop}], 12, $TimedOut], _PacletSiteObject],
-                Throw[Null, "sites"]] &,
-            stale
-        ], "sites"]
-    ]
+(* Fresh build containers can have stale indexes. Refresh them synchronously before an explicit
+   build or deploy, while the weekly updater is suppressed. Bound the entire attempt, even with
+   several configured sites. A stalled or unreachable site need not hold up later builds. *)
+$sitesRefreshed = False;
+refreshPacletSites[] := If[$KernelID === 0 && ! TrueQ[$sitesRefreshed] && ! TrueQ[$skipSiteRefresh] && TrueQ[$AllowInternet] && TrueQ[$AllowDataUpdates],
+    $sitesRefreshed = True;
+    TimeConstrained[
+        Do[If[ ! MatchQ[Quiet[PacletSiteUpdate[site, Asynchronous -> False],
+                    {URLFetch::invhttp, PacletSiteUpdate::err, General::stop}], _PacletSiteObject], Break[]],
+            {site, staleSites[]}], 12, Null]
 ];
 
 DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],
@@ -3850,6 +3832,7 @@ PublishPacletPage::cloud = DeployPacletResource::cloud;
 PublishPacletPage::account = "Connected to the Wolfram Cloud as `1`, not as `2`; nothing was built or published. Connect as `2` to publish this paclet.";
 
 PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],
+    $skipSiteRefresh = TrueQ[$skipSiteRefresh] || TrueQ[OptionValue["DryRun"]],
     ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, Catch[Module[
     {build, resource, catalog, site, check, monitored = TrueQ[OptionValue["Monitor"]]},
     (* the account first: a paclet's documentation may publish as it is built, as PacletPage's own
