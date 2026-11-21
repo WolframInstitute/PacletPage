@@ -2328,7 +2328,8 @@ VerificationTest[
 
 VerificationTest[
     Module[{script = FileNameJoin[{$TemporaryDirectory, CreateUUID["tree-"] <> ".wl"}], process, pid, children, start},
-        Export[script, "LaunchKernels[1]; Pause[120];", "Text"];
+        (* a child that starts at once, where a subkernel's start waits on a license and on a busy machine *)
+        Export[script, "StartProcess[{\"sleep\", \"120\"}]; Pause[120];", "Text"];
         process = StartProcess[{kernelExecutable[], "-noprompt", "-script", script}];
         pid = process["PID"];
         start = AbsoluteTime[];
