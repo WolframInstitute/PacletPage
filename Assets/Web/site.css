@@ -105,6 +105,36 @@ a { text-decoration: none; color: inherit; }
 
 /* right: symbols */
 #side-right a.sym { color: #1a6ba5; }
+#side-right.indexed { display: flex; flex-direction: column; padding: 0; overflow: hidden; container-type: inline-size; }
+#side-right [hidden] { display: none; }
+.symbol-index { flex: none; padding: 12px; border-bottom: 1px solid #dedfe0; }
+.symbol-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.symbol-heading h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.symbol-total, .symbol-count { color: #575e63; font-size: 13px; font-variant-numeric: tabular-nums; }
+.symbol-count { margin-top: 6px; overflow-wrap: anywhere; }
+.symbol-letters { display: grid; grid-template-columns: repeat(auto-fit, minmax(26px, 1fr)); gap: 2px; margin-top: 8px; }
+.symbol-letters button, .symbol-more, .symbol-index select {
+  font: inherit; color: #1a6ba5; border: 1px solid #cbd0d3; border-radius: 3px; background: #fff;
+}
+.symbol-letters button { min-width: 0; padding: 3px 0; font-size: 13px; cursor: pointer; }
+.symbol-letters button:disabled { border-color: transparent; background: transparent; color: #92989c; cursor: default; }
+.symbol-letters button[aria-pressed="true"] { background: var(--pp-active-bg); color: var(--pp-active-fg); border-color: currentColor; font-weight: 600; }
+.symbol-letters button:enabled:hover, .symbol-more:hover { background: #edf2f5; }
+.symbol-index label { display: block; margin-top: 7px; font-size: 13px; font-weight: 600; }
+.symbol-index select { display: block; width: 100%; margin-top: 2px; padding: 4px; font-weight: 400; color: inherit; }
+.symbol-index .symbol-letter-picker { display: none; }
+.symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letters { display: none; }
+.symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letter-picker { display: block; }
+.indexed .symbol-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 3px 0 12px; }
+.symbol-more { display: block; margin: 6px auto; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+@container (max-width: 196px) {
+  .symbol-letters { display: none; }
+  .symbol-index .symbol-letter-picker { display: block; }
+}
+@media (max-width: 900px), (max-height: 540px), (pointer: coarse) {
+  .symbol-letters { display: none; }
+  .symbol-index .symbol-letter-picker { display: block; }
+}
 
 /* collapsible guides */
 #side details { margin: 0; }
@@ -139,12 +169,12 @@ a { text-decoration: none; color: inherit; }
   /* drawers slide over the content instead of taking width from it */
   #side, #side-right {
     position: fixed; top: 56px; bottom: 0; z-index: 40; width: 82vw; max-width: 340px;
-    transform: translateX(-102%); transition: transform .18s ease-out;
+    visibility: hidden; transform: translateX(-102%); transition: transform .18s ease-out;
     box-shadow: 0 0 24px rgba(0, 0, 0, .28);
   }
   #side { left: 0; }
-  #side-right { right: 0; left: auto; transform: translateX(102%); }
-  #side.open, #side-right.open { transform: translateX(0); }
+  #side-right { right: 0; left: auto; height: auto; transform: translateX(102%); }
+  #side.open, #side-right.open { visibility: visible; transform: translateX(0); }
 
   #scrim.on { display: block; position: fixed; inset: 56px 0 0; background: rgba(0, 0, 0, .38); z-index: 35; }
   .with-footer #side, .with-footer #side-right { bottom: 22px; }
@@ -160,6 +190,7 @@ a { text-decoration: none; color: inherit; }
 @media (pointer: coarse) {
   #side a, #side-right a { padding-top: 7px; padding-bottom: 7px; }
   #side summary { padding-top: 7px; padding-bottom: 7px; }
+  .symbol-index select, .symbol-more { min-height: 44px; font-size: 16px; }
 }
 
 /* ---- rail splitters ---------------------------------------------------------------------

@@ -20,6 +20,7 @@
     var lid = links[i].getAttribute('data-id');
     (KNOWN[lid] = KNOWN[lid] || []).push(links[i]);
   }
+  var symbolIndex = document.body.classList.contains('no-symbols') ? null : makeSymbolIndex(sideRight);
 
   // routes given relative to the site, a local site's, resolve against it
   C.routes = C.routes.map(function (r) {
@@ -139,9 +140,17 @@
     while (n && n !== side) { if (n.tagName === 'DETAILS') n.open = true; n = n.parentNode; }
   }
   function setActive(a) {
-    if (cur) cur.classList.remove('active');
+    if (cur) { cur.classList.remove('active'); cur.removeAttribute('aria-current'); }
     cur = a;
-    if (a) { a.classList.add('active'); openAnc(a); a.scrollIntoView({ block: 'nearest' }); }
+    if (!a) return;
+    if (symbolIndex && a.classList.contains('sym')) {
+      if (qBox && qBox.value.trim() && !matches(a, qBox.value.trim().toLowerCase())) {
+        qBox.value = ''; runFilter();
+      }
+      symbolIndex.reveal(a);
+    }
+    a.classList.add('active'); a.setAttribute('aria-current', 'page');
+    openAnc(a); a.scrollIntoView({ block: 'nearest' });
   }
   // A guide appears under every guide that links it, so an id can match several links: take the
   // one nearest what is open (most <details> ancestors shared with the current link), then the
@@ -233,6 +242,157 @@
     if (!hostPageQ()) { injectHide(); hookFrame(); watchFrame(); }
   });
 
+  // ---- alphabetical symbol index ------------------------------------------------------------
+  // Index the links the shell already knows. Only the current batch occupies the scroll pane;
+  // the same links retain their keywords, notebook paths and identities while off screen.
+  function makeSymbolIndex(rail) {
+    var list = rail && rail.querySelector('.nav-symbols'), batchSize = 45;
+    if (!list || list.children.length <= 24) return null;
+    var tools = rail.querySelector('.symbol-index'), browse = tools.querySelector('.symbol-browse'),
+        buttons = tools.querySelector('.symbol-letters'), letterPicker = tools.querySelector('.symbol-letter-picker select'),
+        prefixLabel = tools.querySelector('.symbol-prefix'), prefixPicker = prefixLabel.querySelector('select'),
+        count = tools.querySelector('.symbol-count'), more = rail.querySelector('.symbol-more'),
+        scroll = rail.querySelector('.symbol-scroll'), byLetter = new Map(), byLink = new Map(), prefixCache = new Map();
+    var entries = Array.from(list.children, function (row) {
+      var link = row.querySelector('a'), name = link.getAttribute('data-id').slice(4),
+          initial = (Array.from(name)[0] || '#').toUpperCase(),
+          entry = { row: row, link: link, name: name, folded: name.toLowerCase(), letter: initial };
+      if (!byLetter.has(initial)) byLetter.set(initial, []);
+      byLetter.get(initial).push(entry);
+      byLink.set(link, entry);
+      return entry;
+    });
+    var letters = Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+    byLetter.forEach(function (_, initial) {
+      if (initial !== '$' && !letters.includes(initial)) letters.push(initial);
+    });
+    if (byLetter.has('$')) letters.push('$');
+
+    // Partition a crowded letter by its actual common prefixes. Keep a readable family such as
+    // Abstract together; split short, crowded openings such as Ab until they distinguish names.
+    function prefixesFor(group) {
+      var choices = new Map();
+      function split(items, depth) {
+        var branches = new Map();
+        items.forEach(function (entry) {
+          var next = entry.folded.charAt(depth);
+          if (!branches.has(next)) branches.set(next, []);
+          branches.get(next).push(entry);
+        });
+        branches.forEach(function (branch) {
+          var first = branch[0], prefix = first.folded;
+          branch.forEach(function (entry) {
+            while (!entry.folded.startsWith(prefix)) prefix = prefix.slice(0, -1);
+          });
+          if (branch.length > 24 && prefix.length > depth && (prefix.length < 4 || branch.length > 60)) {
+            split(branch, prefix.length);
+          } else {
+            var label = branch.length === 1 ? first.name : first.name.slice(0, prefix.length) + '\u2026';
+            choices.set(prefix, { entries: branch, label: label });
+          }
+        });
+      }
+      if (group.length > batchSize) split(group, (Array.from(group[0].folded)[0] || '').length);
+      return choices;
+    }
+
+    var letter, prefixes, visible, shown, term = '', savedTop, savedCount, searchSelection;
+    function chooseLetter(value) {
+      letter = value; letterPicker.value = value;
+      Array.from(buttons.children).forEach(function (button) {
+        button.setAttribute('aria-pressed', String(button.value === value));
+      });
+      if (!prefixCache.has(value)) prefixCache.set(value, prefixesFor(byLetter.get(value)));
+      prefixes = prefixCache.get(value);
+      prefixPicker.replaceChildren(new Option('All ' + value + ' names', ''));
+      prefixes.forEach(function (group, key) {
+        prefixPicker.add(new Option(group.label + ' (' + group.entries.length + ')', key));
+      });
+      prefixLabel.hidden = prefixes.size < 2;
+    }
+    function browseEntries() {
+      var prefix = prefixes.get(prefixPicker.value);
+      return prefix ? prefix.entries : byLetter.get(letter);
+    }
+    function appendUntil(end) {
+      var fragment = document.createDocumentFragment();
+      end = Math.min(end, visible.length);
+      while (shown < end) fragment.appendChild(visible[shown++].row);
+      list.appendChild(fragment);
+      more.hidden = shown === visible.length;
+      if (!more.hidden) more.textContent = 'Show ' + Math.min(batchSize, visible.length - shown) + ' more';
+    }
+    function showEntries(items, label) {
+      visible = items; shown = 0;
+      list.replaceChildren();
+      appendUntil(batchSize);
+      scroll.scrollTop = 0;
+      count.textContent = label;
+    }
+    function showBrowse() {
+      var items = browseEntries(), prefix = prefixes.get(prefixPicker.value);
+      showEntries(items, (prefix ? prefix.label : letter) + ' \u00b7 ' + items.length.toLocaleString('en') +
+        (items.length === 1 ? ' symbol' : ' symbols'));
+    }
+    function jump(value) { chooseLetter(value); showBrowse(); }
+    letters.forEach(function (value) {
+      var button = document.createElement('button');
+      button.type = 'button'; button.textContent = button.value = value;
+      button.disabled = !byLetter.has(value);
+      button.setAttribute('aria-label', 'Jump to ' + value);
+      buttons.appendChild(button);
+      if (!button.disabled) letterPicker.add(new Option(value, value));
+    });
+    buttons.addEventListener('click', function (event) {
+      if (event.target.tagName === 'BUTTON') jump(event.target.value);
+    });
+    letterPicker.addEventListener('change', function () { jump(letterPicker.value); });
+    prefixPicker.addEventListener('change', showBrowse);
+    more.addEventListener('click', function () {
+      var first = visible[shown];
+      appendUntil(shown + batchSize);
+      if (first) first.link.focus();
+    });
+    scroll.addEventListener('scroll', function () {
+      if (!more.hidden && scroll.clientHeight && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48) {
+        appendUntil(shown + batchSize);
+      }
+    });
+    function reveal(link) {
+      var entry = byLink.get(link), index = visible.indexOf(entry);
+      if (!entry) return;
+      if (term) {
+        searchSelection = link;
+        if (!browseEntries().includes(entry)) chooseLetter(entry.letter);
+      } else if (index < 0) {
+        jump(entry.letter);
+        index = visible.indexOf(entry);
+      }
+      if (index >= shown) appendUntil(index + 1);
+    }
+    function filter(value) {
+      if (value === term) return;
+      if (!term) { savedTop = scroll.scrollTop; savedCount = shown; searchSelection = null; }
+      term = value; browse.hidden = !!term;
+      if (term) {
+        var hits = entries.filter(function (entry) { return matches(entry.link, term); });
+        showEntries(hits, hits.length ? hits.length.toLocaleString('en') +
+          (hits.length === 1 ? ' matching symbol' : ' matching symbols') : 'No matching symbols');
+      } else {
+        showBrowse();
+        if (searchSelection) {
+          reveal(searchSelection); searchSelection.scrollIntoView({ block: 'nearest' });
+        } else {
+          appendUntil(savedCount); scroll.scrollTop = savedTop;
+        }
+      }
+    }
+    rail.classList.add('indexed'); tools.hidden = false;
+    tools.querySelector('.symbol-total').textContent = entries.length.toLocaleString('en');
+    jump(letterPicker.options[0].value);
+    return { filter: filter, reveal: reveal };
+  }
+
   // ---- filter --------------------------------------------------------------------------------
   // Hide what does not match in place: a guide stays visible when it or anything below it
   // matches, and clearing the box restores the tree as it was.
@@ -307,7 +467,8 @@
       for (var i = 0; i < ds.length; i++) openState.set(ds[i], ds[i].open);
     }
     filterRail(side, term);
-    filterRail(sideRight, term);
+    if (symbolIndex) symbolIndex.filter(term);
+    else filterRail(sideRight, term);
     if (!term) openState = null;
   }
 
@@ -336,9 +497,9 @@
   }
   var KIND = { resource: 0, guide: 0, tutorial: 0, ref: 1 };
   function bestMatch(term) {
-    var as = document.querySelectorAll('#side a[data-id], #side-right a[data-id]'), best = null, bk = null;
-    for (var i = 0; i < as.length; i++) {
-      var a = as[i], r = titleRank(a, term);
+    var best = null, bk = null;
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i], r = titleRank(a, term);
       if (r < 0) continue;
       var k = [r, KIND[a.getAttribute('data-id').split('/')[0]] || 0, a.classList.contains('stub') ? 1 : 0, (a.textContent || '').trim().length];
       for (var j = 0; j < k.length && bk; j++) { if (k[j] !== bk[j]) break; }
@@ -370,15 +531,23 @@
       navToggle = document.getElementById('navToggle'),
       symToggle = document.getElementById('symToggle');
   function closeDrawers() {
+    if (side.contains(document.activeElement) && side.classList.contains('open')) navToggle.focus();
+    if (sideRight && sideRight.contains(document.activeElement) && sideRight.classList.contains('open')) symToggle.focus();
     side.classList.remove('open');
     if (sideRight) sideRight.classList.remove('open');
+    navToggle.setAttribute('aria-expanded', 'false');
+    symToggle.setAttribute('aria-expanded', 'false');
     if (scrim) scrim.classList.remove('on');
   }
   function toggleDrawer(el) {
     if (!el) return;
     var open = el.classList.contains('open');
     closeDrawers();
-    if (!open) { el.classList.add('open'); if (scrim) scrim.classList.add('on'); }
+    if (!open) {
+      el.classList.add('open');
+      (el === side ? navToggle : symToggle).setAttribute('aria-expanded', 'true');
+      if (scrim) scrim.classList.add('on');
+    }
   }
   if (navToggle) navToggle.addEventListener('click', function () { toggleDrawer(side); });
   if (symToggle) symToggle.addEventListener('click', function () { toggleDrawer(sideRight); });

@@ -58,7 +58,9 @@ Declare the libraries in the consumer's `PacletInfo.wl` `"Dependencies"`, an opt
   definition notebook, the guides and the tutorials in the left rail, the symbols in the right, and
   each page painted at once from the cloud's static render, then made live. Every page has its own
   address, Back and Forward step through the pages read, links to the paclet's own pages stay in
-  the site, and any other link opens in a new tab. A label under the site's name can show the
+  the site, and any other link opens in a new tab. Large symbol lists have an A–Z index with
+  prefix choices under crowded letters. The header filter searches the whole catalog from any letter.
+  A label under the site's name can show the
   paclet's version, and a footer the PacletPage the site was made with.
 - Feedback on every page: text in any language and attachments, kept in a Databin of the
   publishing account and confirmed to the reader once stored, with an email fallback. The team
@@ -149,6 +151,9 @@ PacletPage/
 wl -f run-tests.wls    # offline: no network, no cloud
 wl -f release.wls      # the whole release: documentation, resource, archive, site, check
 ```
+
+With Chrome and `playwright-core` installed, `node --test Tests/symbol-index.test.cjs` exercises
+the desktop index and the narrow-screen drawer on a local sample. Set `CHROME_BIN` to use another Chromium executable.
 
 PacletPage releases itself with `PublishPacletPage`, into the account `PACLETPAGE_ACCOUNT` (by
 default the Wolfram Institute's; any other connected account is refused). Its tutorial *Publishing
