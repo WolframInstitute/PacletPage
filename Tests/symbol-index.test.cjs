@@ -20,6 +20,19 @@ function checkRail() {
   check(window.ppSite.has('ref/$Version'), 'The registry must retain off-screen links');
   const mobile = window.matchMedia('(max-width: 900px)').matches;
   if (mobile) document.getElementById('symToggle').click();
+  const labels = Array.from(prefix.options, option => option.label);
+  check(labels.includes('Abstract (28)') && labels.includes('AbundantQ (1)'), 'Families and single symbols must be named in full');
+  check(labels.every(label => !label.includes('…') && !label.includes('...')), 'Group labels must not abbreviate names');
+  prefix.value = 'ap'; change(prefix);
+  const caption = rail.querySelector('.symbol-selection'), text = document.createRange();
+  check(caption.textContent === 'ApollonianGasket – ApproximateSupremum (5)' && list.children.length === 5,
+    'A partial word must be labelled with both full range endpoints');
+  text.selectNodeContents(caption);
+  const control = prefix.getBoundingClientRect(), displayed = text.getBoundingClientRect();
+  check(displayed.right <= control.right - 22 && displayed.bottom <= control.bottom,
+    'The complete selected label must fit before the arrow');
+  check(document.elementFromPoint(control.right - 15, control.top + control.height / 2) === prefix,
+    'The arrow must activate the native picker');
   prefix.value = 'abstract'; change(prefix);
   check(list.children.length === 28, 'Abstract should contain all 28 family members');
   const category = list.querySelector('[data-id="ref/AbstractCategory"]');
@@ -41,7 +54,8 @@ function checkRail() {
 }
 
 function sampleHTML() {
-  const names = ['AbelianGroupQ', 'AbelTransform', 'AbsoluteValue', 'AbstractCategory', 'AbstractGroup',
+  const names = ['AbelianGroupQ', 'AbelTransform', 'AbsoluteValue', 'AbstractCategory', 'AbstractGroup', 'AbundantQ',
+    'ApollonianGasket', 'ApolloniusCircles', 'ApproximateIdentity', 'ApproximateIntermediateValue', 'ApproximateSupremum',
     ...Array.from({ length: 26 }, (_, i) => 'AbstractSymbol' + i),
     ...Array.from({ length: 70 }, (_, i) => 'Algebra' + i), 'AzureTail'].sort().concat('$Version');
   const rows = names.map(name => '<li><a class="sym" data-id="ref/' + name + '" href="#ref/' + name + '"' +

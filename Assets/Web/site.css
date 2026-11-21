@@ -121,7 +121,24 @@ a { text-decoration: none; color: inherit; }
 .symbol-letters button[aria-pressed="true"] { background: var(--pp-active-bg); color: var(--pp-active-fg); border-color: currentColor; font-weight: 600; }
 .symbol-letters button:enabled:hover, .symbol-more:hover { background: #edf2f5; }
 .symbol-index label { display: block; margin-top: 7px; font-size: 13px; font-weight: 600; }
-.symbol-index select { display: block; width: 100%; margin-top: 2px; padding: 4px; font-weight: 400; color: inherit; }
+.symbol-select { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; margin-top: 2px; font-size: 13px; }
+.symbol-index select {
+  grid-area: 1 / 1 / 2 / -1; align-self: stretch; width: 100%; min-width: 0; margin: 0;
+  padding: 5px 8px; padding-inline-end: 30px; font-weight: 400; color: inherit; -webkit-appearance: none; appearance: none;
+}
+/* Keep the native picker and its focus ring. Its face can wrap a long name range within the rail. */
+.symbol-selection {
+  grid-area: 1 / 1 / 2 / -1; align-self: stretch; display: flex; align-items: center; min-width: 0;
+  margin: 1px; padding: 4px 7px; padding-inline-end: 29px; background: #fff; border-radius: 2px;
+  overflow-wrap: anywhere; pointer-events: none;
+}
+.symbol-select::after {
+  content: ''; grid-area: 1 / 2; justify-self: center; width: 10px; height: 6px; background: currentColor;
+  clip-path: polygon(0 18%,12% 0,50% 65%,88% 0,100% 18%,50% 100%); pointer-events: none;
+}
+@media (forced-colors: active) {
+  .symbol-select::after { background: ButtonText; forced-color-adjust: none; }
+}
 .symbol-index .symbol-letter-picker { display: none; }
 .symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letters { display: none; }
 .symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letter-picker { display: block; }
@@ -190,6 +207,7 @@ a { text-decoration: none; color: inherit; }
 @media (pointer: coarse) {
   #side a, #side-right a { padding-top: 7px; padding-bottom: 7px; }
   #side summary { padding-top: 7px; padding-bottom: 7px; }
+  .symbol-select { font-size: 16px; }
   .symbol-index select, .symbol-more { min-height: 44px; font-size: 16px; }
 }
 

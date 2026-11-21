@@ -251,6 +251,7 @@
     var tools = rail.querySelector('.symbol-index'), browse = tools.querySelector('.symbol-browse'),
         buttons = tools.querySelector('.symbol-letters'), letterPicker = tools.querySelector('.symbol-letter-picker select'),
         prefixLabel = tools.querySelector('.symbol-prefix'), prefixPicker = prefixLabel.querySelector('select'),
+        selection = prefixLabel.querySelector('.symbol-selection'),
         count = tools.querySelector('.symbol-count'), more = rail.querySelector('.symbol-more'),
         scroll = rail.querySelector('.symbol-scroll'), byLetter = new Map(), byLink = new Map(), prefixCache = new Map();
     var entries = Array.from(list.children, function (row) {
@@ -267,6 +268,19 @@
       if (initial !== '$' && !letters.includes(initial)) letters.push(initial);
     });
     if (byLetter.has('$')) letters.push('$');
+
+    // Show a complete leading word when the shared prefix ends at a word boundary in a name.
+    // For a fragment such as Ap, the first and last symbol names spell out the range instead.
+    function groupLabel(items, prefix) {
+      var first = items[0].name;
+      if (items.length === 1) return first;
+      var family = items.find(function (entry) {
+        var head = entry.name.slice(0, prefix.length), tail = entry.name.slice(prefix.length);
+        return head.toLowerCase() === prefix && (!tail || /^\p{Lu}\p{Ll}/u.test(tail) ||
+          (/\p{Ll}$/u.test(head) && /^\p{Lu}/u.test(tail)) || (/\p{N}$/u.test(head) !== /^\p{N}/u.test(tail)));
+      });
+      return family ? family.name.slice(0, prefix.length) : first + ' \u2013 ' + items[items.length - 1].name;
+    }
 
     // Partition a crowded letter by its actual common prefixes. Keep a readable family such as
     // Abstract together; split short, crowded openings such as Ab until they distinguish names.
@@ -287,8 +301,7 @@
           if (branch.length > 24 && prefix.length > depth && (prefix.length < 4 || branch.length > 60)) {
             split(branch, prefix.length);
           } else {
-            var label = branch.length === 1 ? first.name : first.name.slice(0, prefix.length) + '\u2026';
-            choices.set(prefix, { entries: branch, label: label });
+            choices.set(prefix, { entries: branch, label: groupLabel(branch, prefix) });
           }
         });
       }
@@ -331,8 +344,10 @@
     }
     function showBrowse() {
       var items = browseEntries(), prefix = prefixes.get(prefixPicker.value);
-      showEntries(items, (prefix ? prefix.label : letter) + ' \u00b7 ' + items.length.toLocaleString('en') +
-        (items.length === 1 ? ' symbol' : ' symbols'));
+      selection.textContent = prefixPicker.selectedOptions[0].textContent;
+      var total = byLetter.get(letter).length.toLocaleString('en');
+      showEntries(items, prefix ? items.length.toLocaleString('en') + ' of ' + total + ' ' + letter + ' symbols' :
+        letter + ' \u00b7 ' + total + (items.length === 1 ? ' symbol' : ' symbols'));
     }
     function jump(value) { chooseLetter(value); showBrowse(); }
     letters.forEach(function (value) {

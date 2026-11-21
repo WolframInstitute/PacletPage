@@ -36,8 +36,17 @@
       <div class="symbol-heading"><h2>Symbol index</h2><span class="symbol-total"></span></div>
       <div class="symbol-browse">
         <div class="symbol-letters" role="group" aria-label="First letter"></div>
-        <div class="symbol-letter-picker"><label for="symbol-first-letter">First letter</label><select id="symbol-first-letter"></select></div>
-        <div class="symbol-prefix" hidden><label for="symbol-prefix">Prefix</label><select id="symbol-prefix"></select></div>
+        <div class="symbol-letter-picker">
+          <label for="symbol-first-letter">First letter</label>
+          <div class="symbol-select"><select id="symbol-first-letter"></select></div>
+        </div>
+        <div class="symbol-prefix" hidden>
+          <label for="symbol-prefix">Symbol group</label>
+          <div class="symbol-select">
+            <select id="symbol-prefix"></select>
+            <span class="symbol-selection" aria-hidden="true"></span>
+          </div>
+        </div>
       </div>
       <div class="symbol-count" role="status"></div>
     </div>
