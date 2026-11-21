@@ -21,17 +21,26 @@ function checkRail() {
   const mobile = window.matchMedia('(max-width: 900px)').matches;
   if (mobile) document.getElementById('symToggle').click();
   const labels = Array.from(prefix.options, option => option.label);
-  check(labels.includes('Abstract… (28)') && labels.includes('AbundantQ (1)'), 'An ellipsis must mark omitted text');
-  check(labels.includes('Adele… (2)') && labels.includes('Adjoint… (2)') && labels.includes('Approximate… (3)'),
-    'Different families under Ad and Ap must have recognizable prefixes');
-  check(!labels.some(label => /^(?:Ad|Ap)…| – /.test(label)), 'A mixed prefix must not become a stub or an endpoint range');
-  check(labels.includes('Astronomical… (1)'), 'A long menu label should end on a word boundary');
-  prefix.value = 'adjoint'; change(prefix);
+  check(labels.includes('AbstractCategory… (28)') && labels.includes('AbundantQ (1)'),
+    'Only a family with additional symbols gets a continuation mark');
+  check(labels.includes('AdeleQ… (2)') && labels.includes('AdjointOperator… (2)') && labels.includes('ApproximateIdentity… (3)'),
+    'Each family must use the complete name of its first link');
+  const longName = 'AstronomicalObservationCatalogue';
+  check(labels.includes(longName + ' (1)'), 'A long singleton keeps its full name');
+  prefix.value = longName.toLowerCase(); change(prefix);
   const caption = rail.querySelector('.symbol-selection'), text = document.createRange();
-  check(caption.textContent === 'Adjoint… (2)' && Array.from(list.querySelectorAll('a'), a => a.textContent).join(' ') ===
+  check(caption.textContent === longName + ' (1)' && list.firstElementChild.textContent === longName,
+    'The selected singleton and its link must match');
+  text.selectNodeContents(caption);
+  let control = prefix.getBoundingClientRect();
+  check(Array.from(text.getClientRects()).every(rect => rect.right <= control.right - 22 && rect.bottom <= control.bottom),
+    'Even long names must stay inside the control and clear of the arrow');
+  prefix.value = 'adjoint'; change(prefix);
+  check(caption.textContent === 'AdjointOperator… (2)' && Array.from(list.querySelectorAll('a'), a => a.textContent).join(' ') ===
     'AdjointOperator AdjointRepresentation', 'A family must open its full symbol names');
   text.selectNodeContents(caption);
-  const control = prefix.getBoundingClientRect(), displayed = text.getBoundingClientRect();
+  control = prefix.getBoundingClientRect();
+  const displayed = text.getBoundingClientRect();
   check(displayed.right <= control.right - 22 && displayed.bottom <= control.bottom,
     'The complete selected label must fit before the arrow');
   check(document.elementFromPoint(control.right - 15, control.top + control.height / 2) === prefix,

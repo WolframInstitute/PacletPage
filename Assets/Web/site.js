@@ -281,25 +281,8 @@
         (/\p{N}$/u.test(head) !== /^\p{N}/u.test(tail));
     }
 
-    // Keep a short prefix intact. For a long one prefer a word break within 18 characters,
-    // keeping the character that distinguishes this group from its siblings even if it is later.
-    function groupLabel(items, prefix, depth) {
-      var name = items[0].name, head = '', short = '', word = '', length = 0;
-      for (var character of name) {
-        var next = head + character, folded = next.toLowerCase();
-        if (!prefix.startsWith(folded)) break;
-        head = next; length++;
-        if (folded.length > depth && (length <= 18 || !short)) {
-          short = head;
-          if (length >= 6 && endsWord(name, head)) word = head;
-        }
-      }
-      var label = length <= 18 ? head : (word || short || head), key = label.toLowerCase();
-      return label + (items.some(function (entry) { return entry.folded !== key; }) ? '\u2026' : '');
-    }
-
-    // Split Ad into families such as Adele and Adjoint. A four-letter word such as Abel
-    // can stand on its own; a partial word needs at least six characters to be a useful label.
+    // Split Ad into families such as Adele and Adjoint. Group on a whole word of four
+    // characters, such as Abel, or on at least six shared characters of a longer word.
     function prefixesFor(group) {
       var choices = new Map();
       function split(items, depth) {
@@ -322,7 +305,8 @@
           if (branch.length > 1 && prefix.length > depth && (!readable || branch.length > 60)) {
             split(branch, prefix.length);
           } else {
-            choices.set(prefix, { entries: branch, label: groupLabel(branch, prefix, depth) });
+            // The first link names the group. An ellipsis means more symbols follow it.
+            choices.set(prefix, { entries: branch, label: first.name + (branch.length > 1 ? '\u2026' : '') });
           }
         });
       }

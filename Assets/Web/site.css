@@ -139,7 +139,7 @@ a { text-decoration: none; color: inherit; }
   grid-area: 1 / 1 / 2 / -1; align-self: stretch; width: 100%; min-width: 0; margin: 0;
   padding: 5px 8px; padding-inline-end: 30px; font-weight: 400; color: inherit; -webkit-appearance: none; appearance: none;
 }
-/* Keep the native picker and its focus ring. Its face can wrap a long name range within the rail. */
+/* Keep the native picker and its focus ring. A long symbol name can wrap before the arrow. */
 .symbol-selection {
   grid-area: 1 / 1 / 2 / -1; align-self: stretch; display: flex; align-items: center; min-width: 0;
   margin: 1px; padding: 4px 7px; padding-inline-end: 29px; background: #fff; border-radius: 2px;

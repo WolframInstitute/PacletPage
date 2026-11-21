@@ -59,7 +59,8 @@ Declare the libraries in the consumer's `PacletInfo.wl` `"Dependencies"`, an opt
   each page painted at once from the cloud's static render, then made live. Every page has its own
   address, Back and Forward step through the pages read, links to the paclet's own pages stay in
   the site, and any other link opens in a new tab. Large symbol lists show the A–Z index and the
-  first letter’s links (up to 45) as the page loads. Crowded letters have groups such as `Adjoint…`.
+  first letter’s links (up to 45) as the page loads. In crowded letters, each family shows its
+  first symbol and its size, such as `AdjointOperator… (2)`.
   The header filter searches the whole catalog from any letter.
   A label under the site's name can show the
   paclet's version, and a footer the PacletPage the site was made with.
