@@ -2,12 +2,12 @@
 
 (* ==================== a paclet's documentation as a WL XML expression ====================
 
-   PacletPageDOM gives a documentation page of a local or installed paclet as an XMLElement shell
+   PacletPage gives a documentation page of a local or installed paclet as an XMLElement shell
    holding the three-column PacletPage layout (header, collapsible guide tree, tutorials and
    applications, live Notebook[...] in the center frame, symbols rail, footer). Nothing is read
    from the cloud, built or rendered, and no front end is asked, so any Wolfram kernel computes it. *)
 
-Options[PacletPageDOM] = {
+Options[PacletPage] = {
     "Filter" -> "",
     "StripTitleNumbers" -> True,
     "SymbolsRail" -> True,
@@ -19,14 +19,14 @@ Options[PacletPageDOM] = {
     "LayoutControls" -> False
 };
 
-$domCatalogCache = <||>;
+$pageCatalogCache = <||>;
 
-PacletPageDOM[spec_, opts : OptionsPattern[]] := Replace[spec, {
-    uri_String /; StringStartsQ[uri, "paclet:"] :> domFromURI[uri, opts],
-    other_ :> PacletPageDOM[other, Automatic, opts]
+PacletPage[spec_, opts : OptionsPattern[]] := Replace[spec, {
+    uri_String /; StringStartsQ[uri, "paclet:"] :> pageFromURI[uri, opts],
+    other_ :> PacletPage[other, Automatic, opts]
 }];
 
-PacletPageDOM[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Module[
+PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Module[
     {controls, dir, catalog, pages, rootOpt, homeID, id, file, nb, filter, strip, showSymbols,
         showHeader, showFooter, title, subtitle, version, desc, activeTitle,
         leftItems, rightItems, hasSymbols, hasLeft, layoutEl, shellClass, parts},
@@ -41,7 +41,7 @@ PacletPageDOM[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := M
     ];
     catalog = If[ catalogQ[spec],
         spec,
-        dir = domPacletDirectory[spec];
+        dir = pagePacletDirectory[spec];
         If[ ! StringQ[dir] || ! DirectoryQ[dir],
             Return[Failure["PacletNotFound", <|
                 "MessageTemplate" -> "No paclet was found for `1`.",
@@ -49,7 +49,7 @@ PacletPageDOM[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := M
                 "Spec" -> spec
             |>], Module]
         ];
-        domLocalCatalog[dir]
+        pageLocalCatalog[dir]
     ];
     If[ FailureQ[catalog], Return[catalog, Module]];
     pages = catalog["Pages"];
@@ -57,9 +57,9 @@ PacletPageDOM[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := M
     homeID = Replace[rootOpt, {
         r_String /; KeyExistsQ[pages, r] :> r,
         r_String /; KeyExistsQ[pages, "guide/" <> r] :> "guide/" <> r,
-        _ :> domDefaultHome[catalog]
+        _ :> pageDefaultHome[catalog]
     }];
-    id = domPageID[catalog, homeID, page];
+    id = pageResolveID[catalog, homeID, page];
     If[ ! StringQ[id] || ! KeyExistsQ[pages, id],
         Return[Failure["PacletPageNotFound", <|
             "MessageTemplate" -> "`1` has no documentation page `2`.",
@@ -84,30 +84,30 @@ PacletPageDOM[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := M
     showFooter = TrueQ[OptionValue["Footer"]];
     title = Replace[OptionValue["Title"], Automatic -> catalog["Title"]];
     subtitle = Replace[OptionValue["Subtitle"], {
-        Automatic :> domSubtitle[catalog["Name"]],
+        Automatic :> pageSubtitle[catalog["Name"]],
         None | "" -> ""
     }];
     version = Replace[Lookup[catalog, "Version", ""], Except[_String] -> ""];
     desc = Replace[Lookup[catalog, "Description", ""], Except[_String] -> ""];
     activeTitle = If[strip, shownPage[pages[id]]["Title"], pages[id]["Title"]];
-    leftItems = domLeftRail[catalog, homeID, id, filter, strip, ! showSymbols];
-    rightItems = If[showSymbols, domSymbolsRail[catalog, id, filter], {}];
+    leftItems = pageLeftRail[catalog, homeID, id, filter, strip, ! showSymbols];
+    rightItems = If[showSymbols, pageSymbolsRail[catalog, id, filter], {}];
     hasSymbols = rightItems =!= {};
     hasLeft = leftItems =!= {};
-    layoutEl = domLayoutControlsXML[controls, hasLeft, hasSymbols, ! showHeader];
+    layoutEl = pageLayoutControlsXML[controls, hasLeft, hasSymbols, ! showHeader];
     shellClass = StringRiffle[DeleteCases[{
         "pp-shell",
         If[! hasSymbols, "pp-no-symbols", Nothing],
         If[! hasLeft, "pp-no-left", Nothing]
     }, ""], " "];
     parts = DeleteCases[{
-        If[showHeader, domHeader[catalog, If[StringQ[homeID], homeID, id], title, subtitle, version, filter, layoutEl], layoutEl],
+        If[showHeader, pageHeader[catalog, If[StringQ[homeID], homeID, id], title, subtitle, version, filter, layoutEl], layoutEl],
         XMLElement["div", {"class" -> "pp-main"}, DeleteCases[{
             If[hasLeft, XMLElement["nav", {"class" -> "pp-side", "aria-label" -> "Guides and tutorials"}, leftItems], Nothing],
             XMLElement["main", {"class" -> "pp-content"}, {nb}],
             If[hasSymbols, XMLElement["nav", {"class" -> "pp-side-right", "aria-label" -> "Symbols"}, rightItems], Nothing]
         }, Nothing]],
-        If[showFooter, domFooter[catalog["Name"], version, desc], Nothing]
+        If[showFooter, pageFooter[catalog["Name"], version, desc], Nothing]
     }, Nothing];
     XMLElement["div", {
         "class" -> shellClass,
@@ -119,7 +119,7 @@ PacletPageDOM[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := M
 
 (* ==================== paclet & page resolution ==================== *)
 
-domFromURI[uri_String, opts : OptionsPattern[PacletPageDOM]] := With[
+pageFromURI[uri_String, opts : OptionsPattern[PacletPage]] := With[
     {clean = StringReplace[uri, "#" ~~ ___ ~~ EndOfString -> ""]},
     Replace[
         StringCases[clean, {
@@ -129,8 +129,8 @@ domFromURI[uri_String, opts : OptionsPattern[PacletPageDOM]] := With[
                 ! MemberQ[{"guide", "ref", "tutorial"}, p] :> {p, rest}
         }, 1],
         {
-            {{name_String, ""}} :> PacletPageDOM[name, Automatic, opts],
-            {{name_String, _String}} :> PacletPageDOM[name, clean, opts],
+            {{name_String, ""}} :> PacletPage[name, Automatic, opts],
+            {{name_String, _String}} :> PacletPage[name, clean, opts],
             _ :> Failure["PacletNotFound", <|
                 "MessageTemplate" -> "`1` is not a paclet documentation URI.",
                 "MessageParameters" -> {uri},
@@ -140,16 +140,16 @@ domFromURI[uri_String, opts : OptionsPattern[PacletPageDOM]] := With[
     ]
 ];
 
-domPacletDirectory[paclet_PacletObject] := Replace[paclet["Location"], Except[_String] -> None];
-domPacletDirectory[File[dir_String]] := If[DirectoryQ[dir], dir, None];
-domPacletDirectory[spec_String] := If[ DirectoryQ[spec],
+pagePacletDirectory[paclet_PacletObject] := Replace[paclet["Location"], Except[_String] -> None];
+pagePacletDirectory[File[dir_String]] := If[DirectoryQ[dir], dir, None];
+pagePacletDirectory[spec_String] := If[ DirectoryQ[spec],
     spec,
     Replace[PacletFind[spec], {
         {p_PacletObject, ___} :> Replace[p["Location"], Except[_String] -> None],
         _ -> None
     }]
 ];
-domPacletDirectory[_] := None;
+pagePacletDirectory[_] := None;
 
 fileUnixTime[file_String] := If[ FileExistsQ[file],
     Replace[UnixTime[FileDate[file]], Except[_?NumericQ] -> 0],
@@ -158,7 +158,7 @@ fileUnixTime[file_String] := If[ FileExistsQ[file],
 
 (* Cache the local catalog per directory keyed by notebook count and modification times, so
    navigating between pages of a paclet does not reread every documentation notebook. *)
-domLocalCatalog[dir_String] := Module[{files, stamp, cached, catalog},
+pageLocalCatalog[dir_String] := Module[{files, stamp, cached, catalog},
     files = If[AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ[FileNameJoin[{dir, #}]] &], localDocumentation[dir], <||>];
     If[ files === <||>,
         Return[Failure["PacletPageCatalog", <|
@@ -173,16 +173,16 @@ domLocalCatalog[dir_String] := Module[{files, stamp, cached, catalog},
         fileUnixTime[FileNameJoin[{dir, "PacletInfo.wl"}]],
         fileUnixTime[FileNameJoin[{dir, "PacletInfo.m"}]]
     };
-    cached = Lookup[$domCatalogCache, dir, None];
+    cached = Lookup[$pageCatalogCache, dir, None];
     If[ AssociationQ[cached] && Lookup[cached, "Stamp", None] === stamp,
         Return[cached["Catalog"], Module]
     ];
     catalog = PacletPageCatalog[File[dir]];
-    If[ ! FailureQ[catalog], $domCatalogCache[dir] = <|"Stamp" -> stamp, "Catalog" -> catalog|>];
+    If[ ! FailureQ[catalog], $pageCatalogCache[dir] = <|"Stamp" -> stamp, "Catalog" -> catalog|>];
     catalog
 ];
 
-domDefaultHome[catalog_Association] := Module[{pages = catalog["Pages"], root = catalog["RootGuide"]},
+pageDefaultHome[catalog_Association] := Module[{pages = catalog["Pages"], root = catalog["RootGuide"]},
     If[ StringQ[root] && KeyExistsQ[pages, root], Return[root, Module]];
     SelectFirst[
         Join[
@@ -197,34 +197,34 @@ domDefaultHome[catalog_Association] := Module[{pages = catalog["Pages"], root = 
 
 (* the page a link or a name means: the home page; a paclet: URI of the paclet; an id such as
    "ref/Name"; or a bare page or symbol name *)
-domPageID[_, homeID_, Automatic] := homeID;
-domPageID[catalog_Association, _, uri_String /; StringStartsQ[uri, "paclet:"]] :=
+pageResolveID[_, homeID_, Automatic] := homeID;
+pageResolveID[catalog_Association, _, uri_String /; StringStartsQ[uri, "paclet:"]] :=
     Replace[{uriPageID[catalog["Name"], uri]}, {{id_String} :> id, _ -> None}];
-domPageID[_, _, id_String /; StringMatchQ[id, ("guide" | "ref" | "tutorial") ~~ "/" ~~ Except["/"] ..]] := id;
-domPageID[catalog_Association, _, name_String] := SelectFirst[
+pageResolveID[_, _, id_String /; StringMatchQ[id, ("guide" | "ref" | "tutorial") ~~ "/" ~~ Except["/"] ..]] := id;
+pageResolveID[catalog_Association, _, name_String] := SelectFirst[
     {"ref/" <> name, "guide/" <> name, "tutorial/" <> name},
     KeyExistsQ[catalog["Pages"], #] &,
     "ref/" <> name
 ];
 
-domSubtitle[name_String] := If[StringContainsQ[name, "/"], publisherLabel[name], ""];
+pageSubtitle[name_String] := If[StringContainsQ[name, "/"], publisherLabel[name], ""];
 
 (* ==================== XMLElement builders ==================== *)
 
 (* Break long CamelCase names cleanly at word boundaries with <wbr> *)
-domCamelBreaks[s_String] := Module[{parts},
+pageCamelBreaks[s_String] := Module[{parts},
     parts = StringSplit[s, RegularExpression["(?<=[a-z0-9])(?=[A-Z])"]];
     If[Length[parts] <= 1, {s}, Riffle[parts, XMLElement["wbr", {}, {}]]]
 ];
 
-domPageMatchesFilterQ[page_Association, filter_String] := With[{q = StringTrim[filter]},
+pageMatchesFilterQ[page_Association, filter_String] := With[{q = StringTrim[filter]},
     q === "" ||
     StringContainsQ[page["Title"], q, IgnoreCase -> True] ||
     StringContainsQ[page["Name"], q, IgnoreCase -> True] ||
     AnyTrue[Lookup[page, "Keywords", {}], StringContainsQ[#, q, IgnoreCase -> True] &]
 ];
 
-domAnchor[pacletName_String, id_String, page_Association, class_String, activeQ_] := With[
+pageAnchor[pacletName_String, id_String, page_Association, class_String, activeQ_] := With[
     {kw = If[Lookup[page, "Keywords", {}] === {}, {}, {"data-kw" -> ToLowerCase[StringRiffle[page["Keywords"], " "]]}]},
     XMLElement["a", Join[
         {
@@ -233,19 +233,19 @@ domAnchor[pacletName_String, id_String, page_Association, class_String, activeQ_
             "data-id" -> id
         },
         kw
-    ], domCamelBreaks[page["Title"]]]
+    ], pageCamelBreaks[page["Title"]]]
 ];
 
-domGuideTreeLI[pacletName_String, pages_Association, node_Association, current_String] := With[
+pageGuideTreeLI[pacletName_String, pages_Association, node_Association, current_String] := With[
     {id = node["ID"], kids = node["Children"]},
-    With[{a = domAnchor[pacletName, id, pages[id], "gd", id === current], activeCls = If[id === current, " active", ""]},
+    With[{a = pageAnchor[pacletName, id, pages[id], "gd", id === current], activeCls = If[id === current, " active", ""]},
         If[ kids === {},
             XMLElement["li", {"class" -> "leaf" <> activeCls}, {a}],
             With[{openAttr = If[id === current || MemberQ[treeIDs[node], current], {"open" -> "open"}, {}]},
                 XMLElement["li", {"class" -> "branch" <> activeCls}, {
                     XMLElement["details", openAttr, {
                         XMLElement["summary", {}, {a}],
-                        XMLElement["ul", {}, domGuideTreeLI[pacletName, pages, #, current] & /@ kids]
+                        XMLElement["ul", {}, pageGuideTreeLI[pacletName, pages, #, current] & /@ kids]
                     }]
                 }]
             ]
@@ -255,7 +255,7 @@ domGuideTreeLI[pacletName_String, pages_Association, node_Association, current_S
 
 (* Layout-control placeholder slot (safe div element; hydrated by the host into toggle buttons).
    Emitted only when "LayoutControls" enables at least one applicable control. *)
-domLayoutControlsXML[controls_List, hasLeft_, hasSymbols_, standalone_] := Module[{kinds},
+pageLayoutControlsXML[controls_List, hasLeft_, hasSymbols_, standalone_] := Module[{kinds},
     kinds = DeleteCases[{
         If[MemberQ[controls, "LeftSidebar"] && TrueQ[hasLeft], "left", Nothing],
         If[MemberQ[controls, "RightSidebar"] && TrueQ[hasSymbols], "right", Nothing],
@@ -272,7 +272,7 @@ domLayoutControlsXML[controls_List, hasLeft_, hasSymbols_, standalone_] := Modul
     ]
 ];
 
-domHeader[catalog_Association, homeID_String, title_String, subtitle_String, version_String, filter_String, layoutEl_] := Module[
+pageHeader[catalog_Association, homeID_String, title_String, subtitle_String, version_String, filter_String, layoutEl_] := Module[
     {pages = catalog["Pages"], nGuides, nTuts, nSyms, summary, nameChildren, brandChildren},
     nGuides = Count[Keys[pages], _?(StringStartsQ[#, "guide/"] &)];
     nTuts = Count[Keys[pages], _?(StringStartsQ[#, "tutorial/"] &)];
@@ -298,7 +298,7 @@ domHeader[catalog_Association, homeID_String, title_String, subtitle_String, ver
     }, Nothing]]
 ];
 
-domLeftRail[catalog_Association, homeID_, current_String, filter_String, strip_, includeSymbols_] := Module[
+pageLeftRail[catalog_Association, homeID_, current_String, filter_String, strip_, includeSymbols_] := Module[
     {name = catalog["Name"], pages = catalog["Pages"], shown, tree, reached, others, tutorials, tuts, apps, syms, out = {}, listSection},
     shown = If[strip, Map[shownPage, pages], pages];
     tree = If[StringQ[homeID] && StringStartsQ[homeID, "guide/"] && KeyExistsQ[shown, homeID], guideTree[shown, homeID, {}], None];
@@ -309,23 +309,23 @@ domLeftRail[catalog_Association, homeID_, current_String, filter_String, strip_,
         If[ AssociationQ[tree],
             AppendTo[out, XMLElement["div", {"class" -> "pp-nav-label"}, {"Guides"}]];
             AppendTo[out, XMLElement["ul", {"class" -> "pp-nav-root"}, Join[
-                {XMLElement["li", {"class" -> "leaf" <> If[homeID === current, " active", ""]}, {domAnchor[name, homeID, shown[homeID], "gd", homeID === current]}]},
-                domGuideTreeLI[name, shown, #, current] & /@ tree["Children"]
+                {XMLElement["li", {"class" -> "leaf" <> If[homeID === current, " active", ""]}, {pageAnchor[name, homeID, shown[homeID], "gd", homeID === current]}]},
+                pageGuideTreeLI[name, shown, #, current] & /@ tree["Children"]
             ]]]
         ];
         If[ others =!= {},
             AppendTo[out, XMLElement["div", {"class" -> "pp-nav-label"}, {If[AssociationQ[tree], "Other guides", "Guides"]}]];
-            AppendTo[out, XMLElement["ul", {"class" -> "pp-nav-root"}, domGuideTreeLI[name, shown, guideTree[shown, #, reached], current] & /@ others]]
+            AppendTo[out, XMLElement["ul", {"class" -> "pp-nav-root"}, pageGuideTreeLI[name, shown, guideTree[shown, #, reached], current] & /@ others]]
         ],
-        With[{matchedGuides = Select[Join[reached, others], domPageMatchesFilterQ[shown[#], filter] &]},
+        With[{matchedGuides = Select[Join[reached, others], pageMatchesFilterQ[shown[#], filter] &]},
             If[ matchedGuides =!= {},
                 AppendTo[out, XMLElement["div", {"class" -> "pp-nav-label"}, {"Guides"}]];
                 AppendTo[out, XMLElement["ul", {"class" -> "pp-nav-root"},
-                    XMLElement["li", {"class" -> "leaf" <> If[# === current, " active", ""]}, {domAnchor[name, #, shown[#], "gd", # === current]}] & /@ matchedGuides]]
+                    XMLElement["li", {"class" -> "leaf" <> If[# === current, " active", ""]}, {pageAnchor[name, #, shown[#], "gd", # === current]}] & /@ matchedGuides]]
             ]
         ]
     ];
-    listSection[ids_List, heading_String, cls_String] := Module[{kept = Select[ids, domPageMatchesFilterQ[shown[#], filter] &]},
+    listSection[ids_List, heading_String, cls_String] := Module[{kept = Select[ids, pageMatchesFilterQ[shown[#], filter] &]},
         If[kept === {}, Return[{}, Module]];
         {
             XMLElement["div", {"class" -> "pp-nav-label"}, {heading}],
@@ -333,25 +333,25 @@ domLeftRail[catalog_Association, homeID_, current_String, filter_String, strip_,
                 Map[Function[id,
                     With[{p = railPage[shown[id]]},
                         XMLElement["li", {"class" -> If[id === current, "active", ""]}, {
-                            domAnchor[name, id, p, cls <> If[TrueQ[Lookup[p, "Stub", False]], " stub", ""], id === current]
+                            pageAnchor[name, id, p, cls <> If[TrueQ[Lookup[p, "Stub", False]], " stub", ""], id === current]
                         }]
                     ]
                 ], kept]
             ]
         }
     ];
-    tuts = Select[tutorials, ! applicationQ[shown[#]] && domPageMatchesFilterQ[shown[#], filter] &];
-    apps = Select[tutorials, applicationQ[shown[#]] && domPageMatchesFilterQ[shown[#], filter] &];
+    tuts = Select[tutorials, ! applicationQ[shown[#]] && pageMatchesFilterQ[shown[#], filter] &];
+    apps = Select[tutorials, applicationQ[shown[#]] && pageMatchesFilterQ[shown[#], filter] &];
     If[(tuts =!= {} || apps =!= {}) && out =!= {}, AppendTo[out, XMLElement["div", {"class" -> "pp-nav-sep"}, {}]]];
     out = Join[out, listSection[tuts, "Tutorials", "tut"], listSection[apps, "Applications", "app"]];
     If[ includeSymbols,
-        syms = Select[SortBy[Select[Keys[shown], StringStartsQ[#, "ref/"] &], symbolKey[shown[#]] &], domPageMatchesFilterQ[shown[#], filter] &];
+        syms = Select[SortBy[Select[Keys[shown], StringStartsQ[#, "ref/"] &], symbolKey[shown[#]] &], pageMatchesFilterQ[shown[#], filter] &];
         If[ syms =!= {},
             If[out =!= {}, AppendTo[out, XMLElement["div", {"class" -> "pp-nav-sep"}, {}]]];
             out = Join[out, {
                 XMLElement["div", {"class" -> "pp-nav-label"}, {"Symbols"}],
                 XMLElement["ul", {"class" -> "pp-nav-symbols"},
-                    Map[Function[id, XMLElement["li", {"class" -> If[id === current, "active", ""]}, {domAnchor[name, id, shown[id], "sym", id === current]}]], syms]
+                    Map[Function[id, XMLElement["li", {"class" -> If[id === current, "active", ""]}, {pageAnchor[name, id, shown[id], "sym", id === current]}]], syms]
                 ]
             }]
         ]
@@ -359,11 +359,11 @@ domLeftRail[catalog_Association, homeID_, current_String, filter_String, strip_,
     DeleteCases[out, Nothing]
 ];
 
-domSymbolsRail[catalog_Association, current_String, filter_String] := Module[
+pageSymbolsRail[catalog_Association, current_String, filter_String] := Module[
     {name = catalog["Name"], pages = catalog["Pages"], syms},
     syms = Select[
         SortBy[Select[Keys[pages], StringStartsQ[#, "ref/"] &], symbolKey[pages[#]] &],
-        domPageMatchesFilterQ[pages[#], filter] &
+        pageMatchesFilterQ[pages[#], filter] &
     ];
     If[syms === {}, Return[{}, Module]];
     {
@@ -371,14 +371,14 @@ domSymbolsRail[catalog_Association, current_String, filter_String] := Module[
         XMLElement["ul", {"class" -> "pp-nav-symbols"},
             Map[Function[id,
                 XMLElement["li", {"class" -> If[id === current, "active", ""]}, {
-                    domAnchor[name, id, pages[id], "sym", id === current]
+                    pageAnchor[name, id, pages[id], "sym", id === current]
                 }]
             ], syms]
         ]
     }
 ];
 
-domFooter[name_String, version_String, desc_String] := XMLElement["footer", {"class" -> "pp-ftr"}, DeleteCases[{
+pageFooter[name_String, version_String, desc_String] := XMLElement["footer", {"class" -> "pp-ftr"}, DeleteCases[{
     XMLElement["span", {"class" -> "pp-ftr-pkg"}, {name <> If[version =!= "", " " <> version, ""]}],
     If[desc =!= "", XMLElement["span", {"class" -> "pp-ftr-desc"}, {desc}], Nothing]
 }, Nothing]];

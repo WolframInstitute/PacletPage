@@ -1,9 +1,9 @@
 ---
 Template: Symbol
-Name: PacletPageDOM
+Name: PacletPage
 Context: WolframInstitute`PacletPage`
 Paclet: WolframInstitute/PacletPage
-URI: WolframInstitute/PacletPage/ref/PacletPageDOM
+URI: WolframInstitute/PacletPage/ref/PacletPage
 Keywords: [page, documentation, guide tree, XMLElement, offline, notebook, layout]
 SeeAlso: [PacletPageCatalog, PacletPageFiles, BuildPacletPageSite, BuildPacletDocumentation]
 RelatedGuides: [PacletPage]
@@ -11,13 +11,13 @@ RelatedGuides: [PacletPage]
 
 ## Usage
 
-<code>[PacletPageDOM]()[*spec*, *page*]</code> gives the documentation page *page* of the local or installed paclet *spec* as an [XMLElement]() shell holding the three-column PacletPage layout: header, guide tree and tutorials, the page's live [Notebook]() in the center frame, symbols rail, and footer.
+<code>[PacletPage]()[*spec*, *page*]</code> gives the documentation page *page* of the local or installed paclet *spec* as an [XMLElement]() shell holding the three-column PacletPage layout: header, guide tree and tutorials, the page's live [Notebook]() in the center frame, symbols rail, and footer.
 
-<code>[PacletPageDOM]()[*spec*]</code> gives the paclet's main guide, or the addressed page when *spec* is a `paclet:` URI.
+<code>[PacletPage]()[*spec*]</code> gives the paclet's main guide, or the addressed page when *spec* is a `paclet:` URI.
 
 ## Details & Options
 
-- *spec* is a paclet directory, `File[dir]`, a `PacletObject`, the name of an installed paclet such as `"WolframInstitute/PacletPage"`, a local catalog from `PacletPageCatalog`, or a `paclet:` URI such as `"paclet:WolframInstitute/PacletPage/ref/PacletPageDOM"`.
+- *spec* is a paclet directory, `File[dir]`, a `PacletObject`, the name of an installed paclet such as `"WolframInstitute/PacletPage"`, a local catalog from `PacletPageCatalog`, or a `paclet:` URI such as `"paclet:WolframInstitute/PacletPage/ref/PacletPage"`.
 - *page* is `Automatic` for the main guide (or first tutorial or symbol when the paclet has no guide), a `paclet:` URI of the paclet, a page id such as `"ref/Function"`, `"guide/Name"` or `"tutorial/Name"`, or a bare page or symbol name.
 - The result is `XMLElement["div", {"class" -> "pp-shell ...", "data-paclet-page" -> ..., "data-paclet-id" -> ..., "data-paclet-title" -> ...}, {...}]`, holding the header (`.pp-hdr`), the main layout (`.pp-main`) with the left navigation rail (`.pp-side`), the center frame (`.pp-content`) containing the page's live `Notebook[...]` expression, and the right symbols rail (`.pp-side-right`), followed by the footer (`.pp-ftr`).
 - Navigation links carry `href` set to each page's `paclet:` URI, `data-id` set to its page id, and `data-kw` with its lowercase keywords. The active page carries the `active` class and expands its enclosing guide branches.
@@ -43,19 +43,19 @@ The main guide of an installed paclet:
 
 ```wl
 #| eval: false
-PacletPageDOM["WolframInstitute/PacletPage"]
+PacletPage["WolframInstitute/PacletPage"]
 ```
 
 A symbol's page, addressed directly by its `paclet:` URI:
 
 ```wl
 #| eval: false
-PacletPageDOM["paclet:WolframInstitute/PacletPage/ref/PacletPageDOM"]
+PacletPage["paclet:WolframInstitute/PacletPage/ref/PacletPage"]
 ```
 
 Include optional sidebar and fullscreen layout controls:
 
 ```wl
 #| eval: false
-PacletPageDOM["WolframInstitute/PacletPage", "LayoutControls" -> True]
+PacletPage["WolframInstitute/PacletPage", "LayoutControls" -> True]
 ```

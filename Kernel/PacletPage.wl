@@ -21,10 +21,10 @@ each page's title, its published page, the notebook behind it, and the guide tre
 Paclet Repository URL for a paclet on the repository, or the URL or CloudObject of a paclet resource deployed to a cloud account. \
 PacletPageCatalog[File[dir]] or PacletPageCatalog[paclet] gives the catalog of a local or installed paclet's documentation notebooks, without the cloud.";
 
-PacletPageDOM::usage = "PacletPageDOM[spec, page] gives the documentation page of a local or installed paclet as an XMLElement \
+PacletPage::usage = "PacletPage[spec, page] gives the documentation page of a local or installed paclet as an XMLElement \
 shell holding the three-column PacletPage layout (header, guide tree and tutorials, live Notebook[...] in the center frame, \
 symbols rail, and footer). spec is a paclet directory, File[dir], PacletObject, installed paclet name, local catalog, or paclet: URI; \
-page is a paclet: URI, an id such as \"ref/Name\", a bare page name, or Automatic. PacletPageDOM[spec] gives the paclet's main guide, \
+page is a paclet: URI, an id such as \"ref/Name\", a bare page name, or Automatic. PacletPage[spec] gives the paclet's main guide, \
 or the page addressed when spec is a paclet: URI.";
 
 BuildPacletPageSite::usage = "BuildPacletPageSite[dir] renders the documentation notebooks of the paclet in dir to HTML \
@@ -121,7 +121,7 @@ $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage"
 
 (* Reading definitions in a fresh kernel must use locally available paclets. *)
 Block[{$AllowInternet = False, $AllowDataUpdates = False},
-    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl", "DOM.wl"}]];
+    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl", "Page.wl"}]];
 
 (* the paclet sites refreshed when they are stale, outside the offline load above, so that it sees
    whether this kernel may reach the internet *)

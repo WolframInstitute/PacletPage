@@ -5,7 +5,7 @@ Context: WolframInstitute`PacletPage`
 Paclet: WolframInstitute/PacletPage
 URI: WolframInstitute/PacletPage/ref/PacletPageCatalog
 Keywords: [paclet, documentation, catalog, Paclet Repository, guide tree]
-SeeAlso: [PacletPageFiles, PacletPageDOM, DeployPacletPage, CheckPacletPage]
+SeeAlso: [PacletPageFiles, PacletPage, DeployPacletPage, CheckPacletPage]
 RelatedGuides: [PacletPage]
 RelatedTutorials: [PublishingADocumentationSite]
 ---
@@ -20,7 +20,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 
 - `resource` is `"Publisher/Name"` or a Paclet Repository URL for a paclet on the Paclet Repository, or the URL or `CloudObject` of a paclet resource deployed to a cloud account, under `DeployedResources/Paclet`.
 - The catalog is an association with keys `"Name"`, `"Title"`, `"Kind"` (`"Repository"` or `"Cloud"`), `"Resource"`, `"DocBase"`, `"RootGuide"`, `"Pages"`, `"Unpublished"`, `"LeftOut"`, `"Version"` and `"Date"`.
-- `File[dir]` (or a `PacletObject`) is a local or installed paclet with its documentation notebooks under `Documentation/English`, as `BuildPacletDocumentation` writes them. Its catalog has `"Kind"` `"Local"`, the paclet's `"Version"` and `"Description"`, and each page's notebook file as `"File"`, read from the directory alone. `PacletPageDOM` builds its documentation page expression on it.
+- `File[dir]` (or a `PacletObject`) is a local or installed paclet with its documentation notebooks under `Documentation/English`, as `BuildPacletDocumentation` writes them. Its catalog has `"Kind"` `"Local"`, the paclet's `"Version"` and `"Description"`, and each page's notebook file as `"File"`, read from the directory alone. `PacletPage` builds its documentation page expression on it.
 - `"Pages"` associates each page id, such as `"guide/X"`, `"ref/X"` or `"tutorial/X"`, with the page's `"Kind"`, `"Name"`, `"Title"`, `"Keywords"`, `"Guides"`, `"HTML"` and `"Notebook"`. A page name keeps any `$` it has.
 - The pages are the ones the resource page links to, and the ones its guides link to in turn, when they are published. `"Unpublished"` lists the pages a guide links to that are not published, such as pages added since the resource was last deployed. A page that does not read is read again twice, four at a time, after 5 and then 20 seconds, as a page the cloud is redeploying answers as private now and then; `"LeftOut"` lists the published pages whose notebook still could not be read, which the site lacks.
 - A page's title is its link's text, without the right guillemet that a sub-guide heading ends in.

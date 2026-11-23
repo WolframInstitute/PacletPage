@@ -1711,23 +1711,23 @@ VerificationTest[
         anchors[expr_] := Cases[expr, XMLElement["a", attrs_List, kids_List] /; KeyExistsQ[Association[attrs], "data-id"] :>
             With[{a = Association[attrs]}, {xmlText[kids], a["href"], StringContainsQ[Lookup[a, "class", ""], "active"]}], Infinity];
         safeTags = {"div", "header", "nav", "main", "footer", "a", "span", "ul", "li", "details", "summary", "wbr"};
-        main = PacletPageDOM[dir];
-        symbol = PacletPageDOM[dir, "paclet:Pub/Name/ref/F"];
-        filtered = PacletPageDOM[dir, "Filter" -> "tutorial"];
-        noSym = PacletPageDOM[dir, "SymbolsRail" -> False];
-        controlsAll = PacletPageDOM[dir, "LayoutControls" -> True];
-        controlsSub = PacletPageDOM[dir, "LayoutControls" -> {"LeftSidebar", "Fullscreen"}];
-        controlsNoHdr = PacletPageDOM[dir, "Header" -> False, "Footer" -> False, "LayoutControls" -> True];
+        main = PacletPage[dir];
+        symbol = PacletPage[dir, "paclet:Pub/Name/ref/F"];
+        filtered = PacletPage[dir, "Filter" -> "tutorial"];
+        noSym = PacletPage[dir, "SymbolsRail" -> False];
+        controlsAll = PacletPage[dir, "LayoutControls" -> True];
+        controlsSub = PacletPage[dir, "LayoutControls" -> {"LeftSidebar", "Fullscreen"}];
+        controlsNoHdr = PacletPage[dir, "Header" -> False, "Footer" -> False, "LayoutControls" -> True];
         allTags = DeleteDuplicates[Cases[{main, controlsAll, controlsNoHdr}, XMLElement[t_String, _, _] :> t, Infinity]];
         PacletDirectoryLoad[dir];
         loaded = WithCleanup[
             {
-                PacletPageDOM["Pub/Name", "F"] === symbol,
-                PacletPageDOM["paclet:Pub/Name/ref/F#section"] === symbol,
-                PacletPageDOM["paclet:Pub/Name"] === main,
-                PacletPageDOM[First[PacletFind["Pub/Name"]], "F"] === symbol,
-                PacletPageDOM[File[dir], "F"] === symbol,
-                PacletPageDOM[PacletPageCatalog[File[dir]], "F"] === symbol
+                PacletPage["Pub/Name", "F"] === symbol,
+                PacletPage["paclet:Pub/Name/ref/F#section"] === symbol,
+                PacletPage["paclet:Pub/Name"] === main,
+                PacletPage[First[PacletFind["Pub/Name"]], "F"] === symbol,
+                PacletPage[File[dir], "F"] === symbol,
+                PacletPage[PacletPageCatalog[File[dir]], "F"] === symbol
             },
             PacletDirectoryUnload[dir]
         ];
@@ -1738,7 +1738,7 @@ VerificationTest[
                 Cases[main, XMLElement["div", {___, "class" -> "pp-nav-label", ___}, {label_String}] :> label, Infinity],
                 FirstCase[main, XMLElement["main", _, {nb_Notebook}] :> FirstCase[nb, Cell[c_, "GuideTitle", ___] :> c, None, Infinity], None, Infinity],
                 FirstCase[symbol, XMLElement["main", _, {nb_Notebook}] :> FirstCase[nb, Cell[c_, "ObjectName", ___] :> c, None, Infinity], None, Infinity],
-                symbol === PacletPageDOM[dir, "F"] === PacletPageDOM[dir, "ref/F"],
+                symbol === PacletPage[dir, "F"] === PacletPage[dir, "ref/F"],
                 loaded,
                 First /@ anchors[filtered],
                 {
@@ -1750,15 +1750,15 @@ VerificationTest[
                     Cases[main, XMLElement["div", {___, "data-pp-layout-controls" -> _, ___}, _], Infinity] === {},
                     FirstCase[controlsAll, XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
                     FirstCase[controlsSub, XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
-                    FirstCase[PacletPageDOM[dir, "SymbolsRail" -> False, "LayoutControls" -> True], XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
+                    FirstCase[PacletPage[dir, "SymbolsRail" -> False, "LayoutControls" -> True], XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
                     Cases[controlsNoHdr, XMLElement["header" | "footer", _, _], Infinity] === {},
                     FirstCase[controlsNoHdr, XMLElement["div", {___, "class" -> c_, ___, "data-pp-layout-controls" -> v_, ___}, _] :> {c, v}, None, Infinity]
                 },
                 SubsetQ[safeTags, allTags],
                 {
-                    MatchQ[PacletPageDOM[dir, "ref/Nope"], Failure["PacletPageNotFound", _]],
-                    MatchQ[PacletPageDOM["NoSuchPublisher/NoSuchPaclet"], Failure["PacletNotFound", _]],
-                    MatchQ[PacletPageDOM[dir, "LayoutControls" -> "Bad"], Failure["InvalidOption", _]]
+                    MatchQ[PacletPage[dir, "ref/Nope"], Failure["PacletPageNotFound", _]],
+                    MatchQ[PacletPage["NoSuchPublisher/NoSuchPaclet"], Failure["PacletNotFound", _]],
+                    MatchQ[PacletPage[dir, "LayoutControls" -> "Bad"], Failure["InvalidOption", _]]
                 }
             },
             DeleteDirectory[dir, DeleteContents -> True]]
@@ -1773,7 +1773,7 @@ VerificationTest[
         {True, "left,right,fullscreen", "left,fullscreen", "left,fullscreen", True, {"pp-layout-controls pp-layout-controls-bar", "left,right,fullscreen"}},
         True,
         {True, True, True}},
-    TestID -> "DOM: a page of a local or installed paclet as the three-column XMLElement shell with its live notebook and optional layout controls"
+    TestID -> "Page: a page of a local or installed paclet as the three-column XMLElement shell with its live notebook and optional layout controls"
 ]
 
 VerificationTest[
