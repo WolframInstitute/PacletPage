@@ -27,14 +27,16 @@ RelatedGuides: [PacletPage]
 
 | Option | Default | Description |
 |---|---|---|
-| `"Filter"` | `""` | text that the titles, names, or keywords of listed pages must match |
+| `"Filter"` | `""` | initial filter text matching titles, names, or keywords; `False` or `None` omits the filter box |
 | `"StripTitleNumbers"` | `True` | whether leading numbering on a tutorial's or guide's title is left out of its entry |
 | `"SymbolsRail"` | `True` | whether symbols appear in the right rail; with `False`, symbols are listed in the left rail |
 | `"Header"` | `True` | whether to include the top header bar |
 | `"Footer"` | `True` | whether to include the bottom footer bar |
 | `"Title"` | `Automatic` | the title shown in the header; by default the catalog's title |
 | `"Subtitle"` | `Automatic` | the subtitle shown beside the title; by default the publisher name |
-| `"RootGuide"` | `Automatic` | the guide id or name used as the home page and root of the guide tree |
+| `"Accent"` | `Automatic` | custom accent color (a hex string or color), setting `--pp-accent`, `--pp-active-bg`, and `--pp-active-fg` on the shell |
+| `"VersionLabel"` | `Automatic` | the version tag under the title: `Automatic` or `True` for the paclet's version, a string for a custom label, or `False` to omit it |
+| `"RootGuide"` | `Automatic` | the guide id or name used as the home page and root of the guide tree, or `False` to omit the root guide link above its children |
 | `"LayoutControls"` | `False` | whether to include a layout-controls slot (`data-pp-layout-controls`) for toggling the left sidebar, right sidebar, and fullscreen view; accepts `False`, `True`, `All`, or a list of `"LeftSidebar"`, `"RightSidebar"`, and `"Fullscreen"` |
 
 ## Basic Examples

@@ -52,18 +52,6 @@ publisherLabel[name_String] := StringTrim @ StringReplace[First[StringSplit[name
 
 (* ==================== the navigation ==================== *)
 
-(* a link of the rails: the page's id, its title, the words the filter also matches, and the
-   notebook behind it when that is not named by the id *)
-navLink[id_String, page_Association, class_String, notebooks_Association] := StringJoin[
-    "<a class=\"", class, "\" data-id=\"", esc[id], "\"",
-    If[page["Keywords"] === {}, "", " data-kw=\"" <> esc[ToLowerCase[StringRiffle[page["Keywords"], " "]]] <> "\""],
-    If[KeyExistsQ[notebooks, id], " data-nb=\"" <> esc[notebooks[id]] <> "\"", ""],
-    " href=\"#", esc[id], "\">", camelBreaks[esc[page["Title"]]], "</a>"
-];
-
-(* a line may break at each CamelCase step of a long name, rather than at any letter *)
-camelBreaks[s_String] := StringReplace[s, RegularExpression["([a-z0-9])(?=[A-Z])"] -> "$1<wbr>"];
-
 (* The guide tree: a guide's children are the guides it links from its section headings, in its
    order. A guide sits under every guide that links it; only a guide already on the path from the
    root is left out, which breaks cycles. *)
@@ -71,15 +59,6 @@ guideTree[pages_Association, id_String, path_List] := If[
     MemberQ[path, id] || ! KeyExistsQ[pages, id],
     Nothing,
     <|"ID" -> id, "Children" -> Map[guideTree[pages, #, Append[path, id]] &, pages[id]["Guides"]]|>
-];
-
-treeItem[pages_Association, notebooks_Association, node_Association] := With[
-    {a = navLink[node["ID"], pages[node["ID"]], "gd", notebooks]},
-    If[ node["Children"] === {},
-        "<li class=\"leaf\">" <> a <> "</li>",
-        StringJoin["<li class=\"branch\"><details><summary>", a, "</summary><ul>",
-            treeItem[pages, notebooks, #] & /@ node["Children"], "</ul></details></li>"]
-    ]
 ];
 
 treeIDs[node_Association] := Prepend[Catenate[treeIDs /@ node["Children"]], node["ID"]];
@@ -122,51 +101,20 @@ railPage[page_Association] := If[ overviewQ[page] && ! StringContainsQ[page["Tit
     page
 ];
 
-(* the left rail: the resource's definition notebook, the root guide, unless rootGuide is False,
-   and its tree, the guides it does not reach under a label of their own, then the tutorials and
-   the applications (tutorials with the keyword "application") *)
-sidebarHTML[catalog_Association, notebooks_Association, rootGuide_ : True, strip_ : True] := Module[
-    {pages = catalog["Pages"], root = catalog["RootGuide"], tree, reached, others, tutorials, list, definitions},
-    definitions = Select[Keys[pages], StringStartsQ[#, "resource/"] &];
-    tree = If[KeyExistsQ[pages, root], guideTree[pages, root, {}], Nothing];
-    reached = If[AssociationQ[tree], treeIDs[tree], {}];
-    others = SortBy[Select[Keys[pages], StringStartsQ[#, "guide/"] && ! MemberQ[reached, #] &], guideKey[pages[#]] &];
-    tutorials = SortBy[Select[Keys[pages], StringStartsQ[#, "tutorial/"] &], tutorialKey[pages[#]] &];
-    (* ordered by their numbered titles, the tutorials and guides are shown without the numbering
-       unless strip is False *)
-    If[TrueQ[strip], pages = Map[shownPage, pages]];
-    list[ids_List, label_String, class_String] := If[ ids === {},
-        "",
-        StringJoin["<div class=\"nav-label\">", label, "</div><ul class=\"nav-tutorials\">",
-            Map["<li>" <> navLink[#, railPage[pages[#]], class <> If[TrueQ[Lookup[pages[#], "Stub", False]], " stub", ""], notebooks] <> "</li>" &, ids], "</ul>"]
-    ];
-    StringJoin[
-        "<ul class=\"nav-root\">",
-        Map["<li class=\"leaf\">" <> navLink[#, pages[#], "res", notebooks] <> "</li>" &, definitions],
-        If[ AssociationQ[tree],
-            {If[TrueQ[rootGuide], {"<li class=\"leaf\">", navLink[root, pages[root], "gd", notebooks], "</li>"}, ""],
-                treeItem[pages, notebooks, #] & /@ tree["Children"]},
-            ""
-        ],
-        "</ul>",
-        If[ others === {},
-            "",
-            {"<div class=\"nav-label\">Other guides</div><ul class=\"nav-root\">",
-                treeItem[pages, notebooks, guideTree[pages, #, reached]] & /@ others, "</ul>"}
-        ],
-        If[tutorials === {}, "", "<div class=\"nav-sep\"></div>"],
-        list[Select[tutorials, ! applicationQ[pages[#]] &], "Tutorials", "tut"],
-        list[Select[tutorials, applicationQ[pages[#]] &], "Applications", "app"]
-    ]
-];
+(* HTML serialization wrappers over Shell.wl's unified XMLElement rail builders *)
+sidebarHTML[catalog_Association, notebooks_Association, rootGuide_ : True, strip_ : True] :=
+    xmlToHTML[leftRailXML[catalog, <|
+        "Mode" -> "HTML", "Name" -> catalog["Name"], "Prefix" -> "", "Notebooks" -> notebooks,
+        "HomeID" -> catalog["RootGuide"], "ShowRootGuide" -> TrueQ[rootGuide],
+        "StripTitleNumbers" -> TrueQ[strip], "Filter" -> "", "Current" -> None,
+        "IncludeSymbols" -> False, "GuidesHeading" -> False
+    |>]];
 
-(* the right rail: the symbols *)
-symbolsHTML[catalog_Association, notebooks_Association] := With[
-    {ids = SortBy[Select[Keys[catalog["Pages"]], StringStartsQ[#, "ref/"] &], symbolKey[catalog["Pages"][#]] &]},
-    StringJoin["<ul class=\"nav-symbols\">",
-        Map["<li>" <> navLink[#, catalog["Pages"][#], "sym", notebooks] <> "</li>" &, ids],
-        "</ul>"]
-];
+symbolsHTML[catalog_Association, notebooks_Association] :=
+    xmlToHTML[symbolsRailXML[catalog, <|
+        "Mode" -> "HTML", "Name" -> catalog["Name"], "Prefix" -> "", "Notebooks" -> notebooks,
+        "Filter" -> "", "Current" -> None
+    |>]];
 
 (* ==================== notebooks ==================== *)
 
@@ -304,79 +252,15 @@ Options[PacletPageFiles] = {
     "LayoutControls" -> False
 };
 
-$layoutControlNames = {"LeftSidebar", "RightSidebar", "Fullscreen"};
-
-(* normalize "LayoutControls" into an ordered list of canonical control names, or $Failed *)
-normalizeLayoutControls[False | None | {}] := {};
-normalizeLayoutControls[True | All] := $layoutControlNames;
-normalizeLayoutControls[name_String] /; MemberQ[$layoutControlNames, name] := {name};
-normalizeLayoutControls[names_List] /; AllTrue[names, StringQ[#] && MemberQ[$layoutControlNames, #] &] :=
-    Select[$layoutControlNames, MemberQ[names, #] &];
-normalizeLayoutControls[_] := $Failed;
-
-$layoutControlSpecs = <|
-    "LeftSidebar" -> <|
-        "ID" -> "toggleSideL",
-        "Kind" -> "left",
-        "Label" -> "Toggle left sidebar",
-        "Pressed" -> True,
-        "SVG" -> "<rect x=\"3\" y=\"4\" width=\"14\" height=\"12\" rx=\"2\"/><path d=\"M8 4v12\"/>"
-    |>,
-    "RightSidebar" -> <|
-        "ID" -> "toggleSideR",
-        "Kind" -> "right",
-        "Label" -> "Toggle right sidebar",
-        "Pressed" -> True,
-        "SVG" -> "<rect x=\"3\" y=\"4\" width=\"14\" height=\"12\" rx=\"2\"/><path d=\"M12 4v12\"/>"
-    |>,
-    "Fullscreen" -> <|
-        "ID" -> "toggleFull",
-        "Kind" -> "fullscreen",
-        "Label" -> "Toggle fullscreen",
-        "Pressed" -> False,
-        "SVG" -> "<path d=\"M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5\"/>"
-    |>
-|>;
-
-layoutSVG[inner_String] := "<svg aria-hidden=\"true\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\">" <> inner <> "</svg>";
-
-layoutButtonHTML[spec_Association] := With[{pressed = TrueQ[spec["Pressed"]]},
-    StringJoin[
-        "<button id=\"", spec["ID"], "\" class=\"pp-layout-btn", If[pressed, " on", ""], "\" type=\"button\" data-pp-layout=\"", spec["Kind"],
-        "\" aria-label=\"", spec["Label"], "\" title=\"", spec["Label"], "\" aria-pressed=\"", If[pressed, "true", "false"], "\">",
-        layoutSVG[spec["SVG"]], "</button>"
-    ]
-];
-
-layoutControlsHTML[controls_List, showSymbols_] := With[
-    {active = Select[controls, # =!= "RightSidebar" || TrueQ[showSymbols] &]},
-    If[ active === {}, "",
-        "<div class=\"pp-layout-controls\" role=\"group\" aria-label=\"Layout\">" <>
-        StringJoin[layoutButtonHTML[$layoutControlSpecs[#]] & /@ active] <>
-        "</div>\n  "
-    ]
-];
-
-fullExitHTML[controls_List] := If[ MemberQ[controls, "Fullscreen"],
-    "<button id=\"ppFullExit\" class=\"pp-full-exit\" type=\"button\" data-pp-layout=\"fullscreen-exit\" aria-label=\"Exit fullscreen\" title=\"Exit fullscreen (Esc)\">" <>
-    layoutSVG["<path d=\"M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5\"/>"] <> "</button>\n",
-    ""
-];
-
 (* The label under the site's name: the version given, or with True the catalog's "Version", the
    paclet's published version; none otherwise. *)
 versionLabel[label_String, _] := label;
 versionLabel[True, catalog_Association] := Replace[Lookup[catalog, "Version", None], Except[_String] -> None];
 versionLabel[_, _] := None;
 
-(* the site's name in the header, with its version label under it where it has one *)
-brandHTML[title_String, None] := esc[title];
-brandHTML[title_String, label_String] := "<span class=\"name\">" <> esc[title] <> "<span class=\"ver\">" <>
-    esc[If[StringMatchQ[label, DigitCharacter ~~ ___], "v" <> label, label]] <> "</span></span>";
+brandHTML[title_String, label_] := xmlToHTML[brandNameXML[title, label, "", False]];
 
-(* the footer: the PacletPage the site was published with, linked to its documentation *)
-footerHTML[version_] := "<footer id=\"ftr\">Published with <a href=\"" <> $pacletPageSite <> "\" target=\"_blank\" rel=\"noopener\">PacletPage" <>
-    If[StringQ[version], " " <> esc[version], ""] <> "</a></footer>";
+footerHTML[version_] := xmlToHTML[footerXML[<|"Mode" -> "HTML", "PacletPageVersion" -> version|>]];
 
 PacletPageFiles::accent = "`1` is not a color; give a color or a hex string such as \"#dd1100\".";
 PacletPageFiles::home = "`1` is not a home page; use \"Definition\", \"RootGuide\", \"Resource\" or Automatic.";
@@ -453,7 +337,7 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
     |>;
     (* the stylesheet's first rule holds its colors *)
     css = StringReplace[readAsset["site.css"], RegularExpression["^:root \\{[^}]*\\}"] ->
-        ":root { --pp-accent: " <> accent <> "; --pp-active-bg: " <> cssColor[Lighter[RGBColor[accent], 0.92]] <>
+        ":root { --pp-accent: " <> accent <> "; --pp-active-bg: " <> cssTintHex[accent, 0.92] <>
         "; --pp-active-fg: " <> accent <> "; }", 1];
     <|
         "index.html" -> fillTemplate[readAsset["site.html"], <|
@@ -463,16 +347,28 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
                 Pick[{"no-filter", "no-symbols", "no-resource-link"}, ! TrueQ[OptionValue[#]] & /@ {"Filter", "SymbolsRail", "ResourceLink"}],
                 If[TrueQ[OptionValue["Footer"]], {"with-footer"}, {}]
             ], " "],
-            "brand" -> brandHTML[title, versionLabel[OptionValue["VersionLabel"], catalog]],
-            "layoutControls" -> layoutControlsHTML[controls, OptionValue["SymbolsRail"]],
-            "fullExit" -> fullExitHTML[controls],
-            "footer" -> If[TrueQ[OptionValue["Footer"]], footerHTML[$pacletPageVersion], ""],
-            "subtitle" -> If[subtitle === "" || subtitle === None, "", "<span class=\"sub\">" <> esc[subtitle] <> "</span>"],
-            "resource" -> esc[catalog["Resource"]],
-            "resourceLabel" -> Switch[kind, "cloud", "Resource page", "local", "Open page", _, "Paclet Repository"],
             "css" -> css,
-            "sidebar" -> sidebarHTML[catalog, notebooks, OptionValue["RootGuide"], OptionValue["StripTitleNumbers"]],
-            "symbols" -> symbolsHTML[catalog, notebooks],
+            "body" -> xmlToHTML[shellXML[catalog, <|
+                "Mode" -> "HTML",
+                "Name" -> catalog["Name"],
+                "Prefix" -> "",
+                "Title" -> title,
+                "Subtitle" -> If[subtitle === "" || subtitle === None, "", subtitle],
+                "VersionTag" -> versionLabel[OptionValue["VersionLabel"], catalog],
+                "Resource" -> catalog["Resource"],
+                "ResourceLabel" -> Switch[kind, "cloud", "Resource page", "local", "Open page", _, "Paclet Repository"],
+                "Notebooks" -> notebooks,
+                "HomeID" -> catalog["RootGuide"],
+                "ShowRootGuide" -> TrueQ[OptionValue["RootGuide"]],
+                "StripTitleNumbers" -> TrueQ[OptionValue["StripTitleNumbers"]],
+                "SymbolsRail" -> TrueQ[OptionValue["SymbolsRail"]],
+                "LayoutControls" -> controls,
+                "Footer" -> TrueQ[OptionValue["Footer"]],
+                "PacletPageVersion" -> $pacletPageVersion,
+                "Filter" -> "",
+                "Current" -> None,
+                "GuidesHeading" -> False
+            |>]],
             "config" -> toJSON[shellConfig],
             "js" -> readAsset["site.js"]
         |>],

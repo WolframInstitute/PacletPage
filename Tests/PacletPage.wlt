@@ -1777,6 +1777,40 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = localFixture[], catalog, html, expr, accentExpr, noFilter, customVer, noVer, noRoot},
+        catalog = PacletPageCatalog[File[dir]];
+        html = PacletPageFiles[catalog, "PageURL" -> "", "LayoutControls" -> True]["index.html"];
+        expr = PacletPage[dir, "LayoutControls" -> True];
+        accentExpr = PacletPage[dir, "Accent" -> "#1a66cc"];
+        noFilter = PacletPage[dir, "Filter" -> False];
+        customVer = PacletPage[dir, "VersionLabel" -> "preview"];
+        noVer = PacletPage[dir, "VersionLabel" -> False];
+        noRoot = PacletPage[dir, "RootGuide" -> False];
+        WithCleanup[
+            {
+                (* Unified shell parity: identical data-id order across HTML site and WL expression *)
+                StringCases[html, "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id] ===
+                    Cases[expr, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity],
+                (* Accent sets custom CSS variables on the shell *)
+                StringContainsQ[FirstCase[accentExpr, XMLElement["div", attrs_List, _] :> Lookup[Association[attrs], "style", ""], "", {0}], "--pp-accent: #1a66cc;"],
+                (* Filter -> False omits the filter slot *)
+                Cases[noFilter, XMLElement["div", {___, "class" -> "pp-filter-slot", ___}, _], Infinity] === {},
+                (* VersionLabel custom and False *)
+                FirstCase[customVer, XMLElement["span", {___, "class" -> "pp-ver", ___}, {v_String}] :> v, None, Infinity],
+                Cases[noVer, XMLElement["span", {___, "class" -> "pp-ver", ___}, _], Infinity] === {},
+                (* RootGuide -> False omits root link from left rail while keeping children *)
+                Cases[noRoot, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity],
+                (* Invalid Accent returns InvalidOption Failure *)
+                MatchQ[PacletPage[dir, "Accent" -> "not-a-color"], Failure["InvalidOption", _]]
+            },
+            DeleteDirectory[dir, DeleteContents -> True]
+        ]
+    ],
+    {True, True, True, "preview", True, {"guide/Sub", "tutorial/T", "ref/F"}, True},
+    TestID -> "Shell: static HTML site and PacletPage XMLElement share one shell builder and option parity"
+]
+
+VerificationTest[
     Module[{dir = localFixture[], catalog},
         catalog = localCatalog["Pub/Name", localDocumentation[dir]];
         DeleteDirectory[dir, DeleteContents -> True];

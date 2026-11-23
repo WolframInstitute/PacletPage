@@ -6,7 +6,9 @@
    collects, the permissions each of them needs, and a check that everything is reachable.
 
    Catalog.wl    the published pages: titles, URLs, the notebook behind each page, the guide tree
-   Site.wl       the site's HTML, CSS and JavaScript, from the templates in Assets/Web
+   Shell.wl      the unified XMLElement shell and ASCII HTML serializer
+   Site.wl       the site's HTML, CSS and JavaScript, serialized from Shell.wl into Assets/Web
+   Page.wl       PacletPage[spec, page], returning Shell.wl's XMLElement shell with a live notebook
    Cloud.wl      publishing: the account, the pages, the source notebooks, cleanup, permissions
    Feedback.wl   the feedback form, its Databin and the team's pages
    Check.wl      reachability and version checks
@@ -121,7 +123,7 @@ $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage"
 
 (* Reading definitions in a fresh kernel must use locally available paclets. *)
 Block[{$AllowInternet = False, $AllowDataUpdates = False},
-    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl", "Page.wl"}]];
+    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Shell.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl", "Page.wl"}]];
 
 (* the paclet sites refreshed when they are stale, outside the offline load above, so that it sees
    whether this kernel may reach the internet *)
