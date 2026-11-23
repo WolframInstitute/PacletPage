@@ -44,6 +44,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Footer"` | `False` | whether a footer names the PacletPage the site was made with, linked to its documentation |
 | `"RootGuide"` | `True` | whether the left rail lists the root guide above its tree; guides the tree does not reach are listed under "Other guides" |
 | `"StripTitleNumbers"` | `True` | whether the rails show a tutorial's or a guide's title without its numbering, such as `"1. "`, `"2.3 "` or `"4) "`, which still orders it |
+| `"LayoutControls"` | `False` | whether the header includes buttons to show/hide the left sidebar, show/hide the right sidebar, and toggle fullscreen view of the center frame; accepts `False`, `True`, `All`, or a list of `"LeftSidebar"`, `"RightSidebar"`, and `"Fullscreen"` |
 
 - With `"Home" -> Automatic`, the site opens on the resource, with its Feedback button and its source, when the catalog has its definition notebook, else on the root guide. `"DefinitionPage" -> False` leaves the definition notebook out of the site; the resource page itself stays its home on request, with `"Home" -> "Resource"`, which hides an empty Examples section and the author's Paclet Source link.
 - Without the symbols rail, the symbols stay pages of the site, reached from the guides and by the filter's Enter.

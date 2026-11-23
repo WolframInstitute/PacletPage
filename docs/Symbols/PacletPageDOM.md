@@ -4,44 +4,58 @@ Name: PacletPageDOM
 Context: WolframInstitute`PacletPage`
 Paclet: WolframInstitute/PacletPage
 URI: WolframInstitute/PacletPage/ref/PacletPageDOM
-Keywords: [Wolfram Studio, page, documentation, guide tree, WebColumn, offline]
-SeeAlso: [PacletPageCatalog, BuildPacletPageSite, BuildPacletDocumentation]
+Keywords: [page, documentation, guide tree, XMLElement, offline, notebook, layout]
+SeeAlso: [PacletPageCatalog, PacletPageFiles, BuildPacletPageSite, BuildPacletDocumentation]
 RelatedGuides: [PacletPage]
 ---
 
 ## Usage
 
-<code>[PacletPageDOM]()[*dir*, *page*]</code> gives the documentation page *page* of the paclet in *dir* as [WebColumn](), [WebRow]() and [WebItem](): the page's notebook beside the paclet's guides, tutorials and symbols, a page of Wolfram Studio.
+<code>[PacletPageDOM]()[*spec*, *page*]</code> gives the documentation page *page* of the local or installed paclet *spec* as an [XMLElement]() shell holding the three-column PacletPage layout: header, guide tree and tutorials, the page's live [Notebook]() in the center frame, symbols rail, and footer.
 
-<code>[PacletPageDOM]()[*dir*]</code> gives the paclet's main guide.
+<code>[PacletPageDOM]()[*spec*]</code> gives the paclet's main guide, or the addressed page when *spec* is a `paclet:` URI.
 
 ## Details & Options
 
-- *dir* is a paclet directory with its documentation notebooks under `Documentation/English`, as `BuildPacletDocumentation` writes them.
-- *page* is a `paclet:` URI of the paclet, such as `"paclet:Publisher/Name/ref/Function"`, a page id, such as `"ref/Function"`, `"guide/Name"` or `"tutorial/Name"`, or the name of a symbol.
-- The result is a `WebRow` of two parts: a `WebColumn` of the paclet's pages, and a `WebItem` that holds the page's notebook as its file has it, links and all.
-- The column lists the guides as a tree from the main guide, then the guides the tree does not reach, the tutorials, the applications and the symbols, in the order and with the titles of the site's rails. Each entry is a `Hyperlink` to its page's `paclet:` URI, and the page shown is marked.
-- Nothing is read from the cloud, built or rendered, and no front end is asked: the kernel of a Wolfram Studio session computes the page from the paclet's files.
-- A page the paclet does not have gives a `Failure` tagged `"PacletPageNotFound"`.
+- *spec* is a paclet directory, `File[dir]`, a `PacletObject`, the name of an installed paclet such as `"WolframInstitute/PacletPage"`, a local catalog from `PacletPageCatalog`, or a `paclet:` URI such as `"paclet:WolframInstitute/PacletPage/ref/PacletPageDOM"`.
+- *page* is `Automatic` for the main guide (or first tutorial or symbol when the paclet has no guide), a `paclet:` URI of the paclet, a page id such as `"ref/Function"`, `"guide/Name"` or `"tutorial/Name"`, or a bare page or symbol name.
+- The result is `XMLElement["div", {"class" -> "pp-shell ...", "data-paclet-page" -> ..., "data-paclet-id" -> ..., "data-paclet-title" -> ...}, {...}]`, holding the header (`.pp-hdr`), the main layout (`.pp-main`) with the left navigation rail (`.pp-side`), the center frame (`.pp-content`) containing the page's live `Notebook[...]` expression, and the right symbols rail (`.pp-side-right`), followed by the footer (`.pp-ftr`).
+- Navigation links carry `href` set to each page's `paclet:` URI, `data-id` set to its page id, and `data-kw` with its lowercase keywords. The active page carries the `active` class and expands its enclosing guide branches.
+- Nothing is read from the cloud, built or rendered, and no front end is asked: any Wolfram kernel computes the expression from the paclet's files, caching each directory's catalog by notebook count and modification times.
+- Missing paclets return `Failure["PacletNotFound", ...]`, directories without documentation notebooks return `Failure["PacletPageCatalog", ...]`, unknown pages return `Failure["PacletPageNotFound", ...]`, unreadable notebooks return `Failure["PacletPageUnreadable", ...]`, and invalid option values return `Failure["InvalidOption", ...]`.
 - The following options can be given:
 
 | Option | Default | Description |
 |---|---|---|
-| `"Filter"` | `""` | text the titles or keywords of the pages listed hold; the guides are then listed rather than shown as a tree |
-| `"StripTitleNumbers"` | `True` | whether the numbering a tutorial's or guide's title starts with is left out of its entry |
+| `"Filter"` | `""` | text that the titles, names, or keywords of listed pages must match |
+| `"StripTitleNumbers"` | `True` | whether leading numbering on a tutorial's or guide's title is left out of its entry |
+| `"SymbolsRail"` | `True` | whether symbols appear in the right rail; with `False`, symbols are listed in the left rail |
+| `"Header"` | `True` | whether to include the top header bar |
+| `"Footer"` | `True` | whether to include the bottom footer bar |
+| `"Title"` | `Automatic` | the title shown in the header; by default the catalog's title |
+| `"Subtitle"` | `Automatic` | the subtitle shown beside the title; by default the publisher name |
+| `"RootGuide"` | `Automatic` | the guide id or name used as the home page and root of the guide tree |
+| `"LayoutControls"` | `False` | whether to include a layout-controls slot (`data-pp-layout-controls`) for toggling the left sidebar, right sidebar, and fullscreen view; accepts `False`, `True`, `All`, or a list of `"LeftSidebar"`, `"RightSidebar"`, and `"Fullscreen"` |
 
 ## Basic Examples
 
-The main guide of a paclet, as a page of Wolfram Studio:
+The main guide of an installed paclet:
 
 ```wl
 #| eval: false
-PacletPageDOM[PacletObject["WolframInstitute/PacletPage"]["Location"]]
+PacletPageDOM["WolframInstitute/PacletPage"]
 ```
 
-A symbol's page, by its `paclet:` URI, as a link on a page gives it:
+A symbol's page, addressed directly by its `paclet:` URI:
 
 ```wl
 #| eval: false
-PacletPageDOM[PacletObject["WolframInstitute/PacletPage"]["Location"], "paclet:WolframInstitute/PacletPage/ref/PacletPageDOM"]
+PacletPageDOM["paclet:WolframInstitute/PacletPage/ref/PacletPageDOM"]
+```
+
+Include optional sidebar and fullscreen layout controls:
+
+```wl
+#| eval: false
+PacletPageDOM["WolframInstitute/PacletPage", "LayoutControls" -> True]
 ```

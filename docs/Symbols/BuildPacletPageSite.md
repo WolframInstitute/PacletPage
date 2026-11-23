@@ -41,6 +41,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"ResourceLink"` | `True` | whether the header links to the page shown, opened on its own |
 | `"VersionLabel"` | `False` | the label under the site's name: a string, or `True` for the paclet's version |
 | `"Footer"` | `False` | whether a footer names the PacletPage the site was made with |
+| `"LayoutControls"` | `False` | whether the header includes buttons to toggle the left sidebar, right sidebar, and fullscreen view |
 | `"Monitor"` | `False` | whether to print how many pages render and how many come from the cache |
 
 ## Basic Examples

@@ -16,7 +16,9 @@ PacletObject[<|
             "Context" -> "WolframInstitute`PacletPage`",
             "Symbols" -> {
                 "WolframInstitute`PacletPage`PacletPageCatalog",
+                "WolframInstitute`PacletPage`PacletPageDOM",
                 "WolframInstitute`PacletPage`PacletPageFiles",
+                "WolframInstitute`PacletPage`BuildPacletPageSite",
                 "WolframInstitute`PacletPage`DeployPacletPage",
                 "WolframInstitute`PacletPage`DeployPacletPageFeedback",
                 "WolframInstitute`PacletPage`PacletPageFeedback",

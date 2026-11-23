@@ -300,8 +300,68 @@ Options[PacletPageFiles] = {
     "VersionLabel" -> False,
     "Footer" -> False,
     "RootGuide" -> True,
-    "StripTitleNumbers" -> True
+    "StripTitleNumbers" -> True,
+    "LayoutControls" -> False
 };
+
+$layoutControlNames = {"LeftSidebar", "RightSidebar", "Fullscreen"};
+
+(* normalize "LayoutControls" into an ordered list of canonical control names, or $Failed *)
+normalizeLayoutControls[False | None | {}] := {};
+normalizeLayoutControls[True | All] := $layoutControlNames;
+normalizeLayoutControls[name_String] /; MemberQ[$layoutControlNames, name] := {name};
+normalizeLayoutControls[names_List] /; AllTrue[names, StringQ[#] && MemberQ[$layoutControlNames, #] &] :=
+    Select[$layoutControlNames, MemberQ[names, #] &];
+normalizeLayoutControls[_] := $Failed;
+
+$layoutControlSpecs = <|
+    "LeftSidebar" -> <|
+        "ID" -> "toggleSideL",
+        "Kind" -> "left",
+        "Label" -> "Toggle left sidebar",
+        "Pressed" -> True,
+        "SVG" -> "<rect x=\"3\" y=\"4\" width=\"14\" height=\"12\" rx=\"2\"/><path d=\"M8 4v12\"/>"
+    |>,
+    "RightSidebar" -> <|
+        "ID" -> "toggleSideR",
+        "Kind" -> "right",
+        "Label" -> "Toggle right sidebar",
+        "Pressed" -> True,
+        "SVG" -> "<rect x=\"3\" y=\"4\" width=\"14\" height=\"12\" rx=\"2\"/><path d=\"M12 4v12\"/>"
+    |>,
+    "Fullscreen" -> <|
+        "ID" -> "toggleFull",
+        "Kind" -> "fullscreen",
+        "Label" -> "Toggle fullscreen",
+        "Pressed" -> False,
+        "SVG" -> "<path d=\"M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5\"/>"
+    |>
+|>;
+
+layoutSVG[inner_String] := "<svg aria-hidden=\"true\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\">" <> inner <> "</svg>";
+
+layoutButtonHTML[spec_Association] := With[{pressed = TrueQ[spec["Pressed"]]},
+    StringJoin[
+        "<button id=\"", spec["ID"], "\" class=\"pp-layout-btn", If[pressed, " on", ""], "\" type=\"button\" data-pp-layout=\"", spec["Kind"],
+        "\" aria-label=\"", spec["Label"], "\" title=\"", spec["Label"], "\" aria-pressed=\"", If[pressed, "true", "false"], "\">",
+        layoutSVG[spec["SVG"]], "</button>"
+    ]
+];
+
+layoutControlsHTML[controls_List, showSymbols_] := With[
+    {active = Select[controls, # =!= "RightSidebar" || TrueQ[showSymbols] &]},
+    If[ active === {}, "",
+        "<div class=\"pp-layout-controls\" role=\"group\" aria-label=\"Layout\">" <>
+        StringJoin[layoutButtonHTML[$layoutControlSpecs[#]] & /@ active] <>
+        "</div>\n  "
+    ]
+];
+
+fullExitHTML[controls_List] := If[ MemberQ[controls, "Fullscreen"],
+    "<button id=\"ppFullExit\" class=\"pp-full-exit\" type=\"button\" data-pp-layout=\"fullscreen-exit\" aria-label=\"Exit fullscreen\" title=\"Exit fullscreen (Esc)\">" <>
+    layoutSVG["<path d=\"M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5\"/>"] <> "</button>\n",
+    ""
+];
 
 (* The label under the site's name: the version given, or with True the catalog's "Version", the
    paclet's published version; none otherwise. *)
@@ -321,11 +381,12 @@ footerHTML[version_] := "<footer id=\"ftr\">Published with <a href=\"" <> $pacle
 PacletPageFiles::accent = "`1` is not a color; give a color or a hex string such as \"#dd1100\".";
 PacletPageFiles::home = "`1` is not a home page; use \"Definition\", \"RootGuide\", \"Resource\" or Automatic.";
 PacletPageFiles::email = "The feedback email `1` is not an address, a template with a To: line, or a File of one.";
+PacletPageFiles::layoutcontrols = "`1` is not a LayoutControls setting; use False, True, All, or a list of \"LeftSidebar\", \"RightSidebar\", and \"Fullscreen\".";
 
 PacletPageFiles[catalog_, opts : OptionsPattern[]] /; ! catalogQ[catalog] := (Message[PacletPageFiles::catalog, catalog]; $Failed);
 
 PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
-    {catalog, title, subtitle, accent, home, mail, prefix, notebooks, routes, kind, page, shellConfig, pageConfig, css},
+    {catalog, title, subtitle, accent, home, mail, controls, prefix, notebooks, routes, kind, page, shellConfig, pageConfig, css},
     (* the definition notebook is a page of the site unless "DefinitionPage" -> False *)
     catalog = If[ TrueQ[OptionValue["DefinitionPage"]], site, MapAt[KeySelect[! StringStartsQ[#, "resource/"] &], site, Key["Pages"]]];
     title = Replace[OptionValue["Title"], Automatic -> catalog["Title"]];
@@ -342,6 +403,8 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
     If[! MatchQ[home, "Definition" | "RootGuide" | "Resource"], Message[PacletPageFiles::home, home]; Return[$Failed, Module]];
     mail = feedbackTemplate[OptionValue["FeedbackEmail"], title];
     If[! StringQ[mail], Message[PacletPageFiles::email, OptionValue["FeedbackEmail"]]; Return[$Failed, Module]];
+    controls = normalizeLayoutControls[OptionValue["LayoutControls"]];
+    If[controls === $Failed, Message[PacletPageFiles::layoutcontrols, OptionValue["LayoutControls"]]; Return[$Failed, Module]];
     kind = Switch[catalog["Kind"], "Cloud", "cloud", "Local", "local", _, "repository"];
     prefix = Switch[kind, "cloud", catalog["DocBase"], "local", "", _, notebookPrefix[catalog]];
     notebooks = If[kind === "local", <||>, notebookNames[catalog, prefix]];
@@ -401,6 +464,8 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
                 If[TrueQ[OptionValue["Footer"]], {"with-footer"}, {}]
             ], " "],
             "brand" -> brandHTML[title, versionLabel[OptionValue["VersionLabel"], catalog]],
+            "layoutControls" -> layoutControlsHTML[controls, OptionValue["SymbolsRail"]],
+            "fullExit" -> fullExitHTML[controls],
             "footer" -> If[TrueQ[OptionValue["Footer"]], footerHTML[$pacletPageVersion], ""],
             "subtitle" -> If[subtitle === "" || subtitle === None, "", "<span class=\"sub\">" <> esc[subtitle] <> "</span>"],
             "resource" -> esc[catalog["Resource"]],

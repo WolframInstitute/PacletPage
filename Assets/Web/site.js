@@ -117,6 +117,12 @@
     try {
       var d = frame.contentDocument;
       if (!d) return;
+      if (!d.__ppEsc) {
+        d.__ppEsc = 1;
+        d.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && document.body.classList.contains('pp-fullscreen')) setFullscreen(false);
+        });
+      }
       var as = d.querySelectorAll('a[href]');
       for (var i = 0; i < as.length; i++) {
         (function (a) {
@@ -230,6 +236,15 @@
 
   frame.addEventListener('load', function () {
     loading.classList.remove('on');
+    try {
+      var d = frame.contentDocument;
+      if (d && !d.__ppEsc) {
+        d.__ppEsc = 1;
+        d.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && document.body.classList.contains('pp-fullscreen')) setFullscreen(false);
+        });
+      }
+    } catch (e) {}
     if (!hostPageQ()) { injectHide(); hookFrame(); watchFrame(); }
   });
 
@@ -383,7 +398,49 @@
   if (navToggle) navToggle.addEventListener('click', function () { toggleDrawer(side); });
   if (symToggle) symToggle.addEventListener('click', function () { toggleDrawer(sideRight); });
   if (scrim) scrim.addEventListener('click', closeDrawers);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawers(); });
+
+  // ---- optional layout controls ----------------------------------------------------------------
+  var toggleSideL = document.getElementById('toggleSideL'),
+      toggleSideR = document.getElementById('toggleSideR'),
+      toggleFull = document.getElementById('toggleFull'),
+      fullExit = document.getElementById('ppFullExit');
+  function setFullscreen(on) {
+    var active = !!on;
+    document.body.classList.toggle('pp-fullscreen', active);
+    if (active) closeDrawers();
+    if (toggleFull) {
+      toggleFull.classList.toggle('on', active);
+      toggleFull.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+  if (toggleSideL) {
+    toggleSideL.addEventListener('click', function () {
+      var hidden = document.body.classList.toggle('pp-hide-left');
+      toggleSideL.classList.toggle('on', !hidden);
+      toggleSideL.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+    });
+  }
+  if (toggleSideR) {
+    toggleSideR.addEventListener('click', function () {
+      var hidden = document.body.classList.toggle('pp-hide-right');
+      toggleSideR.classList.toggle('on', !hidden);
+      toggleSideR.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+    });
+  }
+  if (toggleFull) {
+    toggleFull.addEventListener('click', function () {
+      setFullscreen(!document.body.classList.contains('pp-fullscreen'));
+    });
+  }
+  if (fullExit) {
+    fullExit.addEventListener('click', function () { setFullscreen(false); });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (document.body.classList.contains('pp-fullscreen')) setFullscreen(false);
+      closeDrawers();
+    }
+  });
 
   // ---- rail splitters --------------------------------------------------------------------------
   // Drag a divider to rebalance the columns, double-click to restore it. The widths are kept per
