@@ -1710,7 +1710,8 @@ VerificationTest[
         xmlText[nodes_List] := StringJoin[Cases[nodes, s_String, Infinity]];
         anchors[expr_] := Cases[expr, XMLElement["a", attrs_List, kids_List] /; KeyExistsQ[Association[attrs], "data-id"] :>
             With[{a = Association[attrs]}, {xmlText[kids], a["href"], StringContainsQ[Lookup[a, "class", ""], "active"]}], Infinity];
-        safeTags = {"div", "header", "nav", "main", "footer", "a", "span", "ul", "li", "details", "summary", "wbr"};
+        safeTags = {"div", "header", "nav", "main", "footer", "a", "span", "ul", "li", "details", "summary", "wbr",
+            "input", "button", "svg", "rect", "path"};
         main = PacletPage[dir];
         symbol = PacletPage[dir, "paclet:Pub/Name/ref/F"];
         filtered = PacletPage[dir, "Filter" -> "tutorial"];
@@ -1788,9 +1789,14 @@ VerificationTest[
         noRoot = PacletPage[dir, "RootGuide" -> False];
         WithCleanup[
             {
-                (* Unified shell parity: identical data-id order across HTML site and WL expression *)
+                (* Unified shell parity: identical data-id order, native filter input, splitters, and layout buttons across HTML site and WL expression *)
                 StringCases[html, "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id] ===
                     Cases[expr, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity],
+                Cases[expr, XMLElement["button", {___, "data-pp-layout" -> k_, ___}, _] :> k, Infinity] ===
+                    {"left", "right", "fullscreen", "fullscreen-exit"},
+                ! FreeQ[expr, XMLElement["input", {___, "class" -> "pp-filter", ___}, {}]] &&
+                    ! FreeQ[expr, XMLElement["div", {___, "class" -> "pp-split pp-split-left", ___}, {}]] &&
+                    ! FreeQ[expr, XMLElement["div", {___, "class" -> "pp-split pp-split-right", ___}, {}]],
                 (* Accent sets custom CSS variables on the shell *)
                 StringContainsQ[FirstCase[accentExpr, XMLElement["div", attrs_List, _] :> Lookup[Association[attrs], "style", ""], "", {0}], "--pp-accent: #1a66cc;"],
                 (* Filter -> False omits the filter slot *)
@@ -1806,7 +1812,7 @@ VerificationTest[
             DeleteDirectory[dir, DeleteContents -> True]
         ]
     ],
-    {True, True, True, "preview", True, {"guide/Sub", "tutorial/T", "ref/F"}, True},
+    {True, True, True, True, True, "preview", True, {"guide/Sub", "tutorial/T", "ref/F"}, True},
     TestID -> "Shell: static HTML site and PacletPage XMLElement share one shell builder and option parity"
 ]
 

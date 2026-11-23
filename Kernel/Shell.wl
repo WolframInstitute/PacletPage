@@ -94,47 +94,83 @@ layoutSVGXML[shapes_List] := XMLElement["svg", {
     "stroke-linejoin" -> "round"
 }, shapes];
 
-layoutButtonXML[spec_Association] := With[{pressed = TrueQ[spec["Pressed"]]},
-    XMLElement["button", {
-        "id" -> spec["ID"],
-        "class" -> "pp-layout-btn" <> If[pressed, " on", ""],
-        "type" -> "button",
-        "data-pp-layout" -> spec["Kind"],
-        "aria-label" -> spec["Label"],
-        "title" -> spec["Label"],
-        "aria-pressed" -> If[pressed, "true", "false"]
-    }, {layoutSVGXML[spec["Shapes"]]}]
+layoutButtonXML[spec_Association, mode_String] := With[{pressed = TrueQ[spec["Pressed"]]},
+    XMLElement["button", Join[
+        If[mode === "HTML", {"id" -> spec["ID"]}, {}],
+        {
+            "class" -> "pp-layout-btn" <> If[pressed, " on", ""],
+            "type" -> "button",
+            "data-pp-layout" -> spec["Kind"],
+            "aria-label" -> spec["Label"],
+            "title" -> spec["Label"],
+            "aria-pressed" -> If[pressed, "true", "false"]
+        }
+    ], {layoutSVGXML[spec["Shapes"]]}]
 ];
 
-layoutControlsXML[controls_List, hasLeft_, hasSymbols_, mode_String, standalone_ : False] := Module[{active},
+layoutControlsXML[controls_List, hasLeft_, hasSymbols_, mode_String, standalone_ : False] := Module[{active, cls},
     active = Select[controls, Switch[#,
         "LeftSidebar", TrueQ[hasLeft],
         "RightSidebar", TrueQ[hasSymbols],
         _, True
     ] &];
     If[ active === {}, Return[Nothing, Module]];
-    If[ mode === "HTML",
-        XMLElement["div", {"class" -> "pp-layout-controls", "role" -> "group", "aria-label" -> "Layout"},
-            layoutButtonXML[$layoutControlSpecs[#]] & /@ active],
-        XMLElement["div", {
-            "class" -> If[TrueQ[standalone], "pp-layout-controls pp-layout-controls-bar", "pp-layout-controls"],
-            "role" -> "group",
-            "aria-label" -> "Layout",
-            "data-pp-layout-controls" -> StringRiffle[$layoutControlSpecs[#]["Kind"] & /@ active, ","]
-        }, {}]
-    ]
+    cls = If[mode === "Expression" && TrueQ[standalone], "pp-layout-controls pp-layout-controls-bar", "pp-layout-controls"];
+    XMLElement["div", Join[
+        {"class" -> cls, "role" -> "group", "aria-label" -> "Layout"},
+        If[mode === "Expression", {"data-pp-layout-controls" -> StringRiffle[$layoutControlSpecs[#]["Kind"] & /@ active, ","]}, {}]
+    ], layoutButtonXML[$layoutControlSpecs[#], mode] & /@ active]
 ];
 
-fullExitXML[controls_List, mode_String] := If[ mode === "HTML" && MemberQ[controls, "Fullscreen"],
-    XMLElement["button", {
-        "id" -> "ppFullExit",
-        "class" -> "pp-full-exit",
-        "type" -> "button",
-        "data-pp-layout" -> "fullscreen-exit",
-        "aria-label" -> "Exit fullscreen",
-        "title" -> "Exit fullscreen (Esc)"
-    }, {layoutSVGXML[{XMLElement["path", {"d" -> "M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"}, {}]}]}],
+fullExitXML[controls_List, mode_String] := If[ MemberQ[controls, "Fullscreen"],
+    XMLElement["button", Join[
+        If[mode === "HTML", {"id" -> "ppFullExit"}, {}],
+        {
+            "class" -> "pp-full-exit",
+            "type" -> "button",
+            "data-pp-layout" -> "fullscreen-exit",
+            "aria-label" -> "Exit fullscreen",
+            "title" -> "Exit fullscreen (Esc)"
+        }
+    ], {layoutSVGXML[{XMLElement["path", {"d" -> "M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"}, {}]}]}],
     Nothing
+];
+
+filterInputXML[filter_String, mode_String] := If[ mode === "HTML",
+    XMLElement["input", {
+        "id" -> "q", "type" -> "search", "autocomplete" -> "off", "spellcheck" -> "false",
+        "enterkeyhint" -> "go",
+        "placeholder" -> "Filter guides, tutorials and symbols  (/)",
+        "title" -> "Type to filter; Enter opens the best match; Esc clears",
+        "aria-label" -> "Filter the navigation; Enter opens the best match"
+    }, {}],
+    XMLElement["div", {"class" -> "pp-filter-slot", "data-pp-filter" -> filter}, {
+        XMLElement["input", Join[
+            {
+                "type" -> "search", "class" -> "pp-filter", "autocomplete" -> "off", "spellcheck" -> "false",
+                "placeholder" -> "Filter guides, tutorials and symbols",
+                "aria-label" -> "Filter guides, tutorials and symbols"
+            },
+            If[filter =!= "", {"value" -> filter}, {}]
+        ], {}]
+    }]
+];
+
+splitterXML[side_String, mode_String] := With[
+    {isLeft = (side === "Left")},
+    XMLElement["div", Join[
+        If[mode === "HTML",
+            {"class" -> "splitter", "id" -> If[isLeft, "splitL", "splitR"]},
+            {"class" -> If[isLeft, "pp-split pp-split-left", "pp-split pp-split-right"]}
+        ],
+        {
+            "role" -> "separator",
+            "aria-orientation" -> "vertical",
+            "tabindex" -> "0",
+            "aria-label" -> If[isLeft, "Resize the guides rail", "Resize the symbols rail"],
+            "title" -> "Drag to resize; double-click to reset"
+        }
+    ], {}]
 ];
 
 (* ==================== unified navigation builders ==================== *)
@@ -326,13 +362,7 @@ headerXML[catalog_Association, cfg_Association, layoutEl_] := Module[
         XMLElement["header", {"id" -> "hdr"}, DeleteCases[{
             XMLElement["button", {"id" -> "navToggle", "type" -> "button", "aria-label" -> "Guides and tutorials"}, {"\:2630"}],
             XMLElement["a", {"class" -> "brand", "id" -> "homelink", "href" -> "#"}, brandKids],
-            XMLElement["input", {
-                "id" -> "q", "type" -> "search", "autocomplete" -> "off", "spellcheck" -> "false",
-                "enterkeyhint" -> "go",
-                "placeholder" -> "Filter guides, tutorials and symbols  (/)",
-                "title" -> "Type to filter; Enter opens the best match; Esc clears",
-                "aria-label" -> "Filter the navigation; Enter opens the best match"
-            }, {}],
+            filterInputXML["", "HTML"],
             XMLElement["button", {"id" -> "symToggle", "type" -> "button", "aria-label" -> "Symbols"}, {"\:22ee"}],
             layoutEl,
             XMLElement["a", {
@@ -358,7 +388,7 @@ headerXML[catalog_Association, cfg_Association, layoutEl_] := Module[
         XMLElement["header", {"class" -> "pp-hdr"}, DeleteCases[{
             XMLElement["a", {"class" -> "pp-brand link", "href" -> homeHref}, brandKids],
             If[TrueQ[Lookup[cfg, "ShowFilter", True]],
-                XMLElement["div", {"class" -> "pp-filter-slot", "data-pp-filter" -> Replace[Lookup[cfg, "Filter", ""], Except[_String] -> ""]}, {}],
+                filterInputXML[Replace[Lookup[cfg, "Filter", ""], Except[_String] -> ""], "Expression"],
                 Nothing
             ],
             layoutEl,
@@ -408,14 +438,12 @@ shellXML[catalog_Association, cfg_Association] := Module[
             XMLElement["div", {"id" -> "scrim"}, {}],
             XMLElement["div", {"id" -> "main"}, {
                 XMLElement["nav", {"id" -> "side", "aria-label" -> "Guides and tutorials"}, leftItems],
-                XMLElement["div", {"class" -> "splitter", "id" -> "splitL", "role" -> "separator", "aria-orientation" -> "vertical",
-                    "tabindex" -> "0", "aria-label" -> "Resize the guides rail"}, {}],
+                splitterXML["Left", "HTML"],
                 XMLElement["div", {"id" -> "content"}, {
                     XMLElement["div", {"id" -> "loading"}, {"Loading..."}],
                     XMLElement["iframe", {"id" -> "frame", "title" -> "documentation"}, {}]
                 }],
-                XMLElement["div", {"class" -> "splitter", "id" -> "splitR", "role" -> "separator", "aria-orientation" -> "vertical",
-                    "tabindex" -> "0", "aria-label" -> "Resize the symbols rail"}, {}],
+                splitterXML["Right", "HTML"],
                 XMLElement["nav", {"id" -> "side-right", "aria-label" -> "Symbols"}, rightItems]
             }],
             exitEl,
@@ -436,9 +464,12 @@ shellXML[catalog_Association, cfg_Association] := Module[
             If[showHeader, headerXML[catalog, cfg, layoutEl], layoutEl],
             XMLElement["div", {"class" -> "pp-main"}, DeleteCases[{
                 If[hasLeft, XMLElement["nav", {"class" -> "pp-side", "aria-label" -> "Guides and tutorials"}, leftItems], Nothing],
+                If[hasLeft, splitterXML["Left", "Expression"], Nothing],
                 XMLElement["main", {"class" -> "pp-content"}, {cfg["Notebook"]}],
+                If[hasSymbols, splitterXML["Right", "Expression"], Nothing],
                 If[hasSymbols, XMLElement["nav", {"class" -> "pp-side-right", "aria-label" -> "Symbols"}, rightItems], Nothing]
             }, Nothing]],
+            exitEl,
             If[showFooter, footerXML[cfg], Nothing]
         }, Nothing];
         XMLElement["div", Join[

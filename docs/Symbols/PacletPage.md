@@ -37,7 +37,7 @@ RelatedGuides: [PacletPage]
 | `"Accent"` | `Automatic` | custom accent color (a hex string or color), setting `--pp-accent`, `--pp-active-bg`, and `--pp-active-fg` on the shell |
 | `"VersionLabel"` | `Automatic` | the version tag under the title: `Automatic` or `True` for the paclet's version, a string for a custom label, or `False` to omit it |
 | `"RootGuide"` | `Automatic` | the guide id or name used as the home page and root of the guide tree, or `False` to omit the root guide link above its children |
-| `"LayoutControls"` | `False` | whether to include a layout-controls slot (`data-pp-layout-controls`) for toggling the left sidebar, right sidebar, and fullscreen view; accepts `False`, `True`, `All`, or a list of `"LeftSidebar"`, `"RightSidebar"`, and `"Fullscreen"` |
+| `"LayoutControls"` | `False` | whether to include toggle buttons for showing/hiding the left sidebar, showing/hiding the right sidebar, and toggling a fullscreen view of the center notebook frame; accepts `False`, `True`, `All`, or a list of `"LeftSidebar"`, `"RightSidebar"`, and `"Fullscreen"` |
 
 ## Basic Examples
 
