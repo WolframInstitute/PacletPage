@@ -37,7 +37,17 @@ RelatedGuides: [PacletPage]
 | `"Accent"` | `Automatic` | custom accent color (a hex string or color), setting `--pp-accent`, `--pp-active-bg`, and `--pp-active-fg` on the shell |
 | `"VersionLabel"` | `Automatic` | the version tag under the title: `Automatic` or `True` for the paclet's version, a string for a custom label, or `False` to omit it |
 | `"RootGuide"` | `Automatic` | the guide id or name used as the home page and root of the guide tree, or `False` to omit the root guide link above its children |
+| `"ResourceLink"` | `Automatic` | header link to the published resource page: `Automatic` uses the catalog's resource or paclet URL when present, a URL string sets it directly, `False` omits it |
 | `"LayoutControls"` | `False` | whether to include toggle buttons for showing/hiding the left sidebar, showing/hiding the right sidebar, and toggling a fullscreen view of the center notebook frame; accepts `False`, `True`, `All`, or a list of `"LeftSidebar"`, `"RightSidebar"`, and `"Fullscreen"` |
+| `"ViewSource"` | `True` | whether the page tools bar includes the View source / View built page toggle |
+| `"View"` | `"Built"` | `"Built"` for the built documentation notebook, or `"Source"` for the page's authoring source (authoring notebook, `docs/` markdown, or raw notebook source) |
+| `"Source"` | `Automatic` | optional directory of authoring `.nb` or `.md` files for `"View" -> "Source"` |
+| `"SourceURL"` | `""` | optional published URL for the page's source |
+| `"Feedback"` | `True` | whether the page tools bar includes the Feedback button |
+| `"FeedbackURL"` | `""` | URL of a deployed feedback form opened by the Feedback button |
+| `"FeedbackEmail"` | `None` | an email address, template with `To:` and `Subject:` lines, or `File` of one for the Feedback button's prefilled `mailto:` link |
+| `"FeedbackThanks"` | `Automatic` | confirmation text shown after feedback is submitted |
+| `"AllFeedbackLink"` | `True` | whether the feedback panel links to the team's list of collected feedback |
 
 ## Basic Examples
 

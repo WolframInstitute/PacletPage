@@ -1737,8 +1737,8 @@ VerificationTest[
                 MatchQ[main, XMLElement["div", {___, "class" -> "pp-shell", "data-paclet-page" -> "Pub/Name", "data-paclet-id" -> "guide/Name", "data-paclet-title" -> "Name Guide", ___}, _List]],
                 anchors[main],
                 Cases[main, XMLElement["div", {___, "class" -> "pp-nav-label", ___}, {label_String}] :> label, Infinity],
-                FirstCase[main, XMLElement["main", _, {nb_Notebook}] :> FirstCase[nb, Cell[c_, "GuideTitle", ___] :> c, None, Infinity], None, Infinity],
-                FirstCase[symbol, XMLElement["main", _, {nb_Notebook}] :> FirstCase[nb, Cell[c_, "ObjectName", ___] :> c, None, Infinity], None, Infinity],
+                FirstCase[main, XMLElement["main", _, {___, nb_Notebook, ___}] :> FirstCase[nb, Cell[c_, "GuideTitle", ___] :> c, None, Infinity], None, Infinity],
+                FirstCase[symbol, XMLElement["main", _, {___, nb_Notebook, ___}] :> FirstCase[nb, Cell[c_, "ObjectName", ___] :> c, None, Infinity], None, Infinity],
                 symbol === PacletPage[dir, "F"] === PacletPage[dir, "ref/F"],
                 loaded,
                 First /@ anchors[filtered],
@@ -1814,6 +1814,56 @@ VerificationTest[
     ],
     {True, True, True, True, True, "preview", True, {"guide/Sub", "tutorial/T", "ref/F"}, True},
     TestID -> "Shell: static HTML site and PacletPage XMLElement share one shell builder and option parity"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], built, srcMd, fbMail, fbURL, noTools, withRes},
+        CreateDirectory[FileNameJoin[{dir, "docs", "Symbols"}], CreateIntermediateDirectories -> True];
+        Export[FileNameJoin[{dir, "docs", "Symbols", "F.md"}], "---\nName: F\n---\n\n`F[x]` docs source.\n", "Text"];
+        built = PacletPage[dir, "F"];
+        srcMd = PacletPage[dir, "F", "View" -> "Source"];
+        fbMail = PacletPage[dir, "F", "FeedbackEmail" -> "docs@example.org"];
+        fbURL = PacletPage[dir, "F", "FeedbackURL" -> "https://c.example/obj/u/SiteFeedback/Form"];
+        noTools = PacletPage[dir, "F", "Feedback" -> False, "ViewSource" -> False];
+        withRes = PacletPage[dir, "F", "ResourceLink" -> "https://c.example/obj/u/Resource"];
+        WithCleanup[
+            {
+                (* Default built view includes Feedback and View source in .pp-pagetools *)
+                Cases[built, XMLElement[_, {___, "data-pp-tool" -> t_, ___}, {lbl_String}] :> {t, lbl}, Infinity],
+                (* Source view renders the docs/Symbols/F.md source and flips button to View built page *)
+                {
+                    FirstCase[srcMd, XMLElement["button", {___, "data-pp-tool" -> "viewtoggle", ___, "data-view" -> v_, ___}, {lbl_String}] :> {v, lbl}, None, Infinity],
+                    FirstCase[srcMd, XMLElement["main", _, {___, nb_Notebook, ___}] :> StringContainsQ[FirstCase[nb, Cell[s_String, "Program", ___] :> s, "", Infinity], "`F[x]` docs source."], False, Infinity]
+                },
+                (* FeedbackEmail produces RFC 6068 mailto: href and data-pp-feedback-to *)
+                FirstCase[fbMail, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
+                    With[{a = Association[attrs]}, {StringStartsQ[a["href"], "mailto:docs@example.org?subject="], a["data-pp-feedback-to"]}], None, Infinity],
+                (* FeedbackURL produces form href and All feedback link *)
+                FirstCase[fbURL, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
+                    With[{a = Association[attrs]}, {a["href"], a["data-pp-all-feedback"]}], None, Infinity],
+                (* Feedback -> False and ViewSource -> False omit .pp-pagetools *)
+                Cases[noTools, XMLElement["div", {___, "class" -> "pp-pagetools", ___}, _], Infinity] === {},
+                (* ResourceLink emits .pp-home link in header *)
+                FirstCase[withRes, XMLElement["a", {___, "class" -> "pp-home", ___, "href" -> u_, ___}, _] :> u, None, Infinity],
+                (* Invalid View / FeedbackEmail return InvalidOption Failure *)
+                {
+                    MatchQ[PacletPage[dir, "F", "View" -> "Bogus"], Failure["InvalidOption", _]],
+                    MatchQ[PacletPage[dir, "F", "FeedbackEmail" -> 123], Failure["InvalidOption", _]]
+                }
+            },
+            DeleteDirectory[dir, DeleteContents -> True]
+        ]
+    ],
+    {
+        {{"feedback", "Feedback"}, {"viewtoggle", "View source"}},
+        {{"source", "View built page"}, True},
+        {True, "docs@example.org"},
+        {"https://c.example/obj/u/SiteFeedback/Form", "https://c.example/obj/u/SiteFeedback/All"},
+        True,
+        "https://c.example/obj/u/Resource",
+        {True, True}
+    },
+    TestID -> "Page: Feedback, View source/View built page, and ResourceLink match page.html and site.html"
 ]
 
 VerificationTest[

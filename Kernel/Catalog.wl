@@ -455,6 +455,8 @@ localPacletCatalog[dir_String, opts : OptionsPattern[PacletPageCatalog]] := Modu
         <|
             "Version" -> Replace[paclet["Version"], Except[_String] -> ""],
             "Description" -> Replace[paclet["Description"], Except[_String] -> ""],
+            "URL" -> Replace[paclet["URL"], Except[_String] -> ""],
+            "Directory" -> dir,
             "Pages" -> Association[KeyValueMap[#1 -> Append[#2, "File" -> local[#1]] &, catalog["Pages"]]]
         |>,
         If[StringQ[root], <|"RootGuide" -> root|>, <||>],

@@ -4,8 +4,9 @@
 
    PacletPage gives a documentation page of a local or installed paclet as the unified
    three-column PacletPage XMLElement shell (built by Shell.wl's shellXML) holding the page's live
-   Notebook[...] in the center frame. Nothing is read from the cloud, built or rendered, and no
-   front end is asked, so any Wolfram kernel computes it. *)
+   Notebook[...] in the center frame, with Feedback, View Source, and optional LayoutControls.
+   Nothing is read from the cloud, built or rendered, and no front end is asked, so any Wolfram
+   kernel computes it. *)
 
 Options[PacletPage] = {
     "Filter" -> "",
@@ -18,7 +19,17 @@ Options[PacletPage] = {
     "Accent" -> Automatic,
     "VersionLabel" -> Automatic,
     "RootGuide" -> Automatic,
-    "LayoutControls" -> False
+    "ResourceLink" -> Automatic,
+    "LayoutControls" -> False,
+    "ViewSource" -> True,
+    "View" -> "Built",
+    "Source" -> Automatic,
+    "SourceURL" -> "",
+    "Feedback" -> True,
+    "FeedbackURL" -> "",
+    "FeedbackEmail" -> None,
+    "FeedbackThanks" -> Automatic,
+    "AllFeedbackLink" -> True
 };
 
 $pageCatalogCache = <||>;
@@ -29,8 +40,9 @@ PacletPage[spec_, opts : OptionsPattern[]] := Replace[spec, {
 }];
 
 PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Module[
-    {controls, accentOpt, accent, dir, catalog, pages, rootOpt, showRootGuide, homeID, id, file, nb,
-        filterOpt, showFilter, filter, strip, title, subtitle, version, versionTag, desc, activeTitle},
+    {controls, accentOpt, accent, viewOpt, view, dir, catalog, pages, rootOpt, showRootGuide, homeID, id,
+        file, srcSpec, srcFile, srcType, nb, filterOpt, showFilter, filter, strip, title, subtitle,
+        version, versionTag, desc, activeTitle, mail, resourceURL, showSource},
     controls = normalizeLayoutControls[OptionValue["LayoutControls"]];
     If[ controls === $Failed,
         Return[Failure["InvalidOption", <|
@@ -48,6 +60,20 @@ PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Modu
             "MessageParameters" -> {accentOpt},
             "Option" -> "Accent",
             "Value" -> accentOpt
+        |>], Module]
+    ];
+    viewOpt = OptionValue["View"];
+    view = Replace[viewOpt, {
+        "Built" | "built" | Automatic -> "built",
+        "Source" | "source" -> "source",
+        _ -> $Failed
+    }];
+    If[ view === $Failed,
+        Return[Failure["InvalidOption", <|
+            "MessageTemplate" -> "`1` is not a View setting; use \"Built\" or \"Source\".",
+            "MessageParameters" -> {viewOpt},
+            "Option" -> "View",
+            "Value" -> viewOpt
         |>], Module]
     ];
     catalog = If[ catalogQ[spec],
@@ -80,20 +106,36 @@ PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Modu
             "Page" -> page
         |>], Module]
     ];
+    title = Replace[OptionValue["Title"], Automatic -> catalog["Title"]];
+    mail = feedbackTemplate[OptionValue["FeedbackEmail"], title];
+    If[ ! StringQ[mail],
+        Return[Failure["InvalidOption", <|
+            "MessageTemplate" -> "The feedback email `1` is not an address, a template with a To: line, or a File of one.",
+            "MessageParameters" -> {OptionValue["FeedbackEmail"]},
+            "Option" -> "FeedbackEmail",
+            "Value" -> OptionValue["FeedbackEmail"]
+        |>], Module]
+    ];
     file = Lookup[pages[id], "File", Missing["NoFile"]];
-    nb = If[StringQ[file], localNotebook[file], Missing["NoFile", id]];
+    srcSpec = pageSourceSpec[catalog, id, OptionValue["Source"]];
+    {srcFile, srcType} = srcSpec;
+    showSource = TrueQ[OptionValue["ViewSource"]] && (StringQ[srcFile] || (StringQ[OptionValue["SourceURL"]] && OptionValue["SourceURL"] =!= ""));
+    If[ ! showSource, view = "built"];
+    nb = If[ view === "source",
+        pageSourceNotebook[srcFile, srcType],
+        If[StringQ[file], localNotebook[file], Missing["NoFile", id]]
+    ];
     If[ ! MatchQ[nb, _Notebook],
         Return[Failure["PacletPageUnreadable", <|
             "MessageTemplate" -> "Could not read documentation notebook `1`.",
-            "MessageParameters" -> {file},
-            "File" -> file
+            "MessageParameters" -> {If[view === "source", srcFile, file]},
+            "File" -> If[view === "source", srcFile, file]
         |>], Module]
     ];
     filterOpt = OptionValue["Filter"];
     showFilter = ! MatchQ[filterOpt, False | None];
     filter = If[StringQ[filterOpt], filterOpt, ""];
     strip = TrueQ[OptionValue["StripTitleNumbers"]];
-    title = Replace[OptionValue["Title"], Automatic -> catalog["Title"]];
     subtitle = Replace[OptionValue["Subtitle"], {
         Automatic :> pageSubtitle[catalog["Name"]],
         None | "" -> ""
@@ -106,6 +148,12 @@ PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Modu
     }];
     desc = Replace[Lookup[catalog, "Description", ""], Except[_String] -> ""];
     activeTitle = If[strip, shownPage[pages[id]]["Title"], pages[id]["Title"]];
+    resourceURL = Replace[OptionValue["ResourceLink"], {
+        False | None -> "",
+        u_String :> u,
+        _ :> SelectFirst[{Lookup[catalog, "Resource", ""], Lookup[catalog, "URL", ""]},
+            StringQ[#] && StringStartsQ[#, "http://" | "https://"] &, ""]
+    }];
     shellXML[catalog, <|
         "Mode" -> "Expression",
         "Name" -> catalog["Name"],
@@ -116,6 +164,8 @@ PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Modu
         "Version" -> version,
         "VersionTag" -> versionTag,
         "Description" -> desc,
+        "Resource" -> resourceURL,
+        "ResourceLabel" -> "Resource page",
         "HomeID" -> homeID,
         "BrandHomeID" -> If[StringQ[homeID], homeID, id],
         "ShowRootGuide" -> showRootGuide,
@@ -127,11 +177,78 @@ PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Modu
         "Filter" -> filter,
         "Current" -> id,
         "ActiveTitle" -> activeTitle,
+        "PageFile" -> If[StringQ[file], file, ""],
         "Notebook" -> nb,
+        "View" -> view,
+        "ViewLabel" -> If[view === "source", "authoring source", "built page"],
+        "ViewSource" -> showSource,
+        "SourceType" -> srcType,
+        "SourceURL" -> Replace[OptionValue["SourceURL"], Except[_String] -> ""],
+        "Feedback" -> TrueQ[OptionValue["Feedback"]],
+        "FeedbackURL" -> Replace[OptionValue["FeedbackURL"], Except[_String] -> ""],
+        "FeedbackEmailTemplate" -> mail,
+        "FeedbackThanks" -> Replace[OptionValue["FeedbackThanks"], Except[_String] -> ""],
+        "AllFeedbackLink" -> TrueQ[OptionValue["AllFeedbackLink"]],
         "LayoutControls" -> controls,
         "GuidesHeading" -> True
     |>]
 ];
+
+(* ==================== source resolution ==================== *)
+
+$sourceFolder = <|"guide" -> "Guides", "ref" -> "Symbols", "tutorial" -> "Tutorials"|>;
+
+(* Locate the authoring source behind page id: an explicit Source directory's .nb or .md, else the
+   paclet's own docs/ markdown file, else the built .nb file itself as raw source text. *)
+pageSourceSpec[catalog_Association, id_String, sourceOpt_] := Module[
+    {kind = pageKind[id], name = pageName[id], folder, dir, builtFile, candidates, hit},
+    folder = Lookup[$sourceFolder, kind, ""];
+    dir = Lookup[catalog, "Directory", None];
+    builtFile = Lookup[catalog["Pages"][id], "File", None];
+    candidates = DeleteCases[Join[
+        If[ StringQ[sourceOpt] && DirectoryQ[sourceOpt],
+            {
+                {FileNameJoin[{sourceOpt, kind, name <> ".nb"}], "notebook"},
+                If[folder =!= "", {FileNameJoin[{sourceOpt, folder, name <> ".nb"}], "notebook"}, Nothing],
+                If[folder =!= "", {FileNameJoin[{sourceOpt, folder, name <> ".md"}], "markdown"}, Nothing],
+                {FileNameJoin[{sourceOpt, kind, name <> ".md"}], "markdown"}
+            },
+            {}
+        ],
+        If[ StringQ[dir] && DirectoryQ[dir],
+            If[ kind === "resource",
+                {
+                    {FileNameJoin[{dir, "ResourceDefinition.md"}], "markdown"},
+                    {FileNameJoin[{dir, "ResourceDefinition.nb"}], "notebook"}
+                },
+                If[ folder =!= "",
+                    {
+                        {FileNameJoin[{dir, "docs", folder, name <> ".md"}], "markdown"},
+                        {FileNameJoin[{dir, "docs", "en", folder, name <> ".md"}], "markdown"}
+                    },
+                    {}
+                ]
+            ],
+            {}
+        ]
+    ], Nothing];
+    hit = SelectFirst[candidates, FileExistsQ[First[#]] &, None];
+    Which[
+        ListQ[hit], hit,
+        StringQ[builtFile] && FileExistsQ[builtFile], {builtFile, "raw"},
+        True, {None, ""}
+    ]
+];
+
+pageSourceNotebook[file_String, "notebook"] := localNotebook[file];
+pageSourceNotebook[file_String, "markdown" | "raw"] /; FileExistsQ[file] := With[
+    {text = ByteArrayToString[ReadByteArray[file], "UTF-8"]},
+    Notebook[{
+        Cell[FileNameTake[file], "Subtitle"],
+        Cell[text, "Program"]
+    }]
+];
+pageSourceNotebook[_, _] := Missing["NoSource"];
 
 (* ==================== paclet & page resolution ==================== *)
 

@@ -173,6 +173,126 @@ splitterXML[side_String, mode_String] := With[
     ], {}]
 ];
 
+resourceLinkXML[url_String, label_String, mode_String] := If[ mode === "Expression" && url === "",
+    Nothing,
+    XMLElement["a", Join[
+        If[mode === "HTML", {"class" -> "home", "id" -> "resourcelink"}, {"class" -> "pp-home"}],
+        {"href" -> url, "target" -> "_blank", "rel" -> "noopener"}
+    ], {
+        label,
+        " ",
+        XMLElement["svg", {"viewBox" -> "0 0 24 24"}, {XMLElement["path", {"d" -> "M7 17 17 7M9 7h8v8"}, {}]}]
+    }]
+];
+
+(* Parse a FeedbackEmail template ("To:" and "Subject:" header lines, blank line, body) and fill
+   {title}, {page}, {link}, {view}, {notebook}, {date}, matching Assets/Web/page.html. *)
+parseFeedbackEmail["", _Association] := None;
+parseFeedbackEmail[tpl_String, info_Association] := Module[{lines, i = 1, n, headers = <||>, body, fill, to, subject, filledBody, mailto},
+    lines = StringSplit[StringReplace[tpl, {"\r\n" -> "\n", "\r" -> "\n"}], "\n", All];
+    n = Length[lines];
+    While[i <= n && StringTrim[lines[[i]]] === "", i++];
+    While[i <= n && StringTrim[lines[[i]]] =!= "",
+        Replace[
+            StringCases[lines[[i]], StartOfString ~~ Whitespace ... ~~ k : (LetterCharacter | "-") .. ~~ ":" ~~ Whitespace ... ~~ v : ___ ~~ EndOfString :> {ToLowerCase[k], StringTrim[v]}, 1],
+            {{{k_, v_}} :> (headers[k] = v)}
+        ];
+        i++
+    ];
+    to = StringDelete[Lookup[headers, "to", ""], Whitespace];
+    If[ ! emailAddressQ[to], Return[None, Module]];
+    fill[s_String] := StringReplace[s, "{" ~~ k : WordCharacter .. ~~ "}" /; KeyExistsQ[info, k] :> info[k]];
+    subject = fill[Lookup[headers, "subject", ""]];
+    body = If[i < n, StringRiffle[Drop[lines, i], "\n"], ""];
+    filledBody = fill[body];
+    mailto = "mailto:" <> to <> "?subject=" <> URLEncode[subject] <> "&body=" <> URLEncode[StringReplace[filledBody, "\n" -> "\r\n"]];
+    <|"To" -> to, "Subject" -> subject, "Body" -> filledBody, "Mailto" -> mailto|>
+];
+parseFeedbackEmail[_, _Association] := None;
+
+(* Page tools bar (#pagetools / .pp-pagetools): Feedback and View source / View built page,
+   matching Assets/Web/page.html. *)
+pageToolsXML[cfg_Association] := Module[
+    {showFeedback = TrueQ[Lookup[cfg, "Feedback", True]],
+        showSource = TrueQ[Lookup[cfg, "ViewSource", True]],
+        fbURL = Replace[Lookup[cfg, "FeedbackURL", ""], Except[_String] -> ""],
+        fbMailTpl = Replace[Lookup[cfg, "FeedbackEmailTemplate", ""], Except[_String] -> ""],
+        fbThanks = Replace[Lookup[cfg, "FeedbackThanks", ""], Except[_String] -> ""],
+        allFeedback = TrueQ[Lookup[cfg, "AllFeedbackLink", True]],
+        view = Lookup[cfg, "View", "built"],
+        viewLabel = Lookup[cfg, "ViewLabel", "built page"],
+        sourceType = Replace[Lookup[cfg, "SourceType", ""], Except[_String] -> ""],
+        sourceURL = Replace[Lookup[cfg, "SourceURL", ""], Except[_String] -> ""],
+        info, mailInfo, fbHref, fbTitle, fbEl, srcEl, tools},
+    info = <|
+        "title" -> Lookup[cfg, "ActiveTitle", ""],
+        "page" -> Lookup[cfg, "Current", ""],
+        "link" -> "paclet:" <> cfg["Name"] <> "/" <> Lookup[cfg, "Current", ""],
+        "view" -> viewLabel,
+        "notebook" -> Replace[Lookup[cfg, "PageFile", ""], Except[_String] -> ""],
+        "date" -> DateString[TimeZoneConvert[Now, 0], "ISODate"]
+    |>;
+    mailInfo = parseFeedbackEmail[fbMailTpl, info];
+    fbEl = If[ showFeedback,
+        fbHref = Which[
+            fbURL =!= "", fbURL,
+            AssociationQ[mailInfo], mailInfo["Mailto"],
+            True, "#feedback"
+        ];
+        fbTitle = Which[
+            fbURL =!= "", "Report a problem with this page or suggest an improvement",
+            AssociationQ[mailInfo], "Report a problem with this page (opens an email to " <> mailInfo["To"] <> ")",
+            True, "Report a problem with this page or suggest an improvement"
+        ];
+        XMLElement["a", DeleteCases[Join[
+            {
+                "class" -> "pp-pagetool",
+                "data-pp-tool" -> "feedback",
+                "href" -> fbHref,
+                "title" -> fbTitle,
+                "data-pp-feedback-paclet" -> cfg["Name"],
+                "data-pp-feedback-page" -> Lookup[cfg, "Current", ""],
+                "data-pp-feedback-title" -> Lookup[cfg, "ActiveTitle", ""],
+                "data-pp-feedback-view" -> viewLabel
+            },
+            If[fbURL =!= "", {
+                "data-pp-feedback-url" -> fbURL,
+                If[allFeedback, "data-pp-all-feedback" -> StringReplace[fbURL, RegularExpression["/Form$"] -> "/All"], Nothing]
+            }, {}],
+            If[AssociationQ[mailInfo], {
+                "data-pp-feedback-to" -> mailInfo["To"],
+                "data-pp-feedback-subject" -> mailInfo["Subject"],
+                "data-pp-feedback-body" -> mailInfo["Body"]
+            }, {}],
+            If[fbThanks =!= "", {"data-pp-feedback-thanks" -> fbThanks}, {}],
+            Which[
+                StringStartsQ[fbHref, "mailto:"], {"target" -> "_top"},
+                StringStartsQ[fbHref, "http://" | "https://"], {"target" -> "_blank", "rel" -> "noopener"},
+                True, {}
+            ]
+        ], Nothing], {"Feedback"}],
+        Nothing
+    ];
+    srcEl = If[ showSource,
+        XMLElement["button", DeleteCases[Join[
+            {
+                "class" -> "pp-pagetool",
+                "type" -> "button",
+                "data-pp-tool" -> "viewtoggle",
+                "data-view" -> view,
+                "title" -> If[view === "source",
+                    "Showing the authoring source this page is built from. Click for the built page.",
+                    "Show the authoring source this page is built from."]
+            },
+            If[sourceType =!= "", {"data-pp-source-type" -> sourceType}, {}],
+            If[sourceURL =!= "", {"data-pp-source-url" -> sourceURL}, {}]
+        ], Nothing], {If[view === "source", "View built page", "View source"]}],
+        Nothing
+    ];
+    tools = DeleteCases[{fbEl, srcEl}, Nothing];
+    If[tools === {}, Nothing, XMLElement["div", {"class" -> "pp-pagetools"}, tools]]
+];
+
 (* ==================== unified navigation builders ==================== *)
 
 (* Break long CamelCase names cleanly at word boundaries with <wbr>. *)
@@ -365,15 +485,7 @@ headerXML[catalog_Association, cfg_Association, layoutEl_] := Module[
             filterInputXML["", "HTML"],
             XMLElement["button", {"id" -> "symToggle", "type" -> "button", "aria-label" -> "Symbols"}, {"\:22ee"}],
             layoutEl,
-            XMLElement["a", {
-                "class" -> "home", "id" -> "resourcelink",
-                "href" -> Lookup[cfg, "Resource", ""],
-                "target" -> "_blank", "rel" -> "noopener"
-            }, {
-                Lookup[cfg, "ResourceLabel", "Resource page"],
-                " ",
-                XMLElement["svg", {"viewBox" -> "0 0 24 24"}, {XMLElement["path", {"d" -> "M7 17 17 7M9 7h8v8"}, {}]}]
-            }]
+            resourceLinkXML[Lookup[cfg, "Resource", ""], Lookup[cfg, "ResourceLabel", "Resource page"], "HTML"]
         }, Nothing]],
         (* Expression mode *)
         nGuides = Count[Keys[pages], _?(StringStartsQ[#, "guide/"] &)];
@@ -392,7 +504,8 @@ headerXML[catalog_Association, cfg_Association, layoutEl_] := Module[
                 Nothing
             ],
             layoutEl,
-            XMLElement["span", {"class" -> "pp-meta"}, {summary}]
+            XMLElement["span", {"class" -> "pp-meta"}, {summary}],
+            resourceLinkXML[Replace[Lookup[cfg, "Resource", ""], Except[_String] -> ""], Lookup[cfg, "ResourceLabel", "Resource page"], "Expression"]
         }, Nothing]]
     ]
 ];
@@ -465,7 +578,7 @@ shellXML[catalog_Association, cfg_Association] := Module[
             XMLElement["div", {"class" -> "pp-main"}, DeleteCases[{
                 If[hasLeft, XMLElement["nav", {"class" -> "pp-side", "aria-label" -> "Guides and tutorials"}, leftItems], Nothing],
                 If[hasLeft, splitterXML["Left", "Expression"], Nothing],
-                XMLElement["main", {"class" -> "pp-content"}, {cfg["Notebook"]}],
+                XMLElement["main", {"class" -> "pp-content"}, DeleteCases[{pageToolsXML[cfg], cfg["Notebook"]}, Nothing]],
                 If[hasSymbols, splitterXML["Right", "Expression"], Nothing],
                 If[hasSymbols, XMLElement["nav", {"class" -> "pp-side-right", "aria-label" -> "Symbols"}, rightItems], Nothing]
             }, Nothing]],
@@ -478,7 +591,8 @@ shellXML[catalog_Association, cfg_Association] := Module[
             {
                 "data-paclet-page" -> catalog["Name"],
                 "data-paclet-id" -> cfg["Current"],
-                "data-paclet-title" -> cfg["ActiveTitle"]
+                "data-paclet-title" -> cfg["ActiveTitle"],
+                "data-paclet-view" -> Lookup[cfg, "View", "built"]
             }
         ], parts]
     ]
