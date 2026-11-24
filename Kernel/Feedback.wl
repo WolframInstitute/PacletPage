@@ -673,3 +673,270 @@ statusUpdate[update_Association] /; StringQ[Lookup[update, "ID", Lookup[update, 
     <|"id" -> Lookup[update, "ID", update["id"]], "status" -> Lookup[update, "Status", update["status"]],
       "note" -> Replace[Lookup[update, "Note", Lookup[update, "note", ""]], Except[_String] -> ""]|>;
 statusUpdate[_] := $Failed;
+
+(* ==================== submitting feedback to a paclet's published Databin ==================== *)
+
+(* Normalize a feedback or site URL into <|Site, Directory, Form, All|>. *)
+endpointsFromSiteURL[url_String, pacletName_String : ""] := Module[{clean = StringTrim[url, "/"], dir, form, site},
+    Which[
+        StringEndsQ[clean, "/Form"],
+            form = clean;
+            dir = StringDrop[clean, -5];
+            site = StringReplace[dir, RegularExpression["Feedback$"] -> ""],
+        StringEndsQ[clean, "Feedback"],
+            dir = clean;
+            form = clean <> "/Form";
+            site = StringReplace[clean, RegularExpression["Feedback$"] -> ""],
+        True,
+            site = clean;
+            dir = clean <> "Feedback";
+            form = dir <> "/Form"
+    ];
+    <|"Site" -> site, "Directory" -> dir, "Form" -> form, "All" -> dir <> "/All", "Paclet" -> pacletName|>
+];
+
+endpointsFromFormURL[url_String, pacletName_String : ""] := Module[{clean = StringTrim[url, "/"]},
+    Which[
+        StringEndsQ[clean, "/Form"] || StringEndsQ[clean, "Feedback"],
+            endpointsFromSiteURL[clean, pacletName],
+        True,
+            <|"Site" -> "", "Directory" -> clean, "Form" -> clean, "All" -> "", "Paclet" -> pacletName|>
+    ]
+];
+
+(* Deduce the default feedback endpoints from a paclet's metadata, PublisherID, and name:
+   https://www.wolframcloud.com/obj/<ToLowerCase[PublisherID]>/<ShortName>Feedback/Form *)
+endpointsFromRecord[record_Association] := Module[
+    {name = Replace[Lookup[record, "Name", ""], Except[_String] -> ""],
+        fbURL = Replace[Lookup[record, "FeedbackURL", ""], Except[_String] -> ""],
+        siteOpt = Replace[Lookup[record, "SiteURL", ""], Except[_String] -> ""],
+        pub = Replace[Lookup[record, "PublisherID", ""], Except[_String] -> ""],
+        parts, short},
+    Which[
+        StringStartsQ[fbURL, "http://" | "https://"],
+            endpointsFromFormURL[fbURL, name],
+        StringStartsQ[siteOpt, "http://" | "https://"],
+            endpointsFromSiteURL[siteOpt, name],
+        True,
+            parts = StringSplit[name, "/"];
+            If[pub === "" && Length[parts] >= 2, pub = First[parts]];
+            short = If[Length[parts] >= 1, Last[parts], ""];
+            If[ pub === "" || short === "",
+                None,
+                endpointsFromSiteURL["https://www.wolframcloud.com/obj/" <> ToLowerCase[pub] <> "/" <> short, name]
+            ]
+    ]
+];
+
+pacletMetadataRecord[paclet_PacletObject] := <|
+    "Name" -> Replace[paclet["Name"], Except[_String] -> ""],
+    "PublisherID" -> Replace[paclet["PublisherID"], Except[_String] -> ""],
+    "FeedbackURL" -> Replace[paclet["FeedbackURL"], Except[_String] -> ""],
+    "SiteURL" -> Replace[paclet["SiteURL"], Except[_String] -> ""]
+|>;
+
+defaultFeedbackEndpoints[url_String /; StringStartsQ[url, "http://" | "https://"]] := endpointsFromSiteURL[url, ""];
+defaultFeedbackEndpoints[uri_String /; StringStartsQ[uri, "paclet:"]] := With[
+    {parsed = splitFeedbackURI[uri]},
+    If[ListQ[parsed], defaultFeedbackEndpoints[First[parsed]], None]
+];
+defaultFeedbackEndpoints[a_Association] := endpointsFromRecord[a];
+defaultFeedbackEndpoints[paclet_PacletObject] := endpointsFromRecord[pacletMetadataRecord[paclet]];
+defaultFeedbackEndpoints[File[dir_String]] := If[ DirectoryQ[dir] && AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ[FileNameJoin[{dir, #}]] &],
+    With[{p = PacletObject[File[dir]]}, If[MatchQ[p, _PacletObject], defaultFeedbackEndpoints[p], None]],
+    None
+];
+defaultFeedbackEndpoints[spec_String] := Which[
+    DirectoryQ[spec], defaultFeedbackEndpoints[File[spec]],
+    True, Replace[PacletFind[spec], {
+        {p_PacletObject, ___} :> defaultFeedbackEndpoints[p],
+        _ :> endpointsFromRecord[<|"Name" -> spec|>]
+    }]
+];
+defaultFeedbackEndpoints[_] := None;
+
+splitFeedbackURI[uri_String] := With[
+    {clean = StringReplace[uri, "#" ~~ ___ ~~ EndOfString -> ""]},
+    Replace[
+        StringCases[clean, {
+            StartOfString ~~ "paclet:" ~~ p : (Except["/"] .. ~~ "/" ~~ Except["/"] ..) ~~ "/" ~~ kind : ("guide" | "ref" | "tutorial" | "resource") ~~ "/" ~~ pg : (Except["/"] ..) ~~ EndOfString :> {p, kind <> "/" <> pg},
+            StartOfString ~~ "paclet:" ~~ p : (Except["/"] .. ~~ "/" ~~ Except["/"] ..) ~~ EndOfString :> {p, ""},
+            StartOfString ~~ "paclet:" ~~ p : (Except["/"] ..) ~~ "/" ~~ kind : ("guide" | "ref" | "tutorial" | "resource") ~~ "/" ~~ pg : (Except["/"] ..) ~~ EndOfString /;
+                ! MemberQ[{"guide", "ref", "tutorial", "resource"}, p] :> {p, kind <> "/" <> pg}
+        }, 1],
+        {{pair_List} :> pair, _ -> None}
+    ]
+];
+
+(* Materialize attachments (up to 3, max 20 MB each) as {File[path], displayName} pairs; inline
+   ByteArray / Base64 / String content is written into tmpDir for curl upload. *)
+prepareFeedbackAttachment[File[path_String], _String, _Integer] := If[ FileExistsQ[path] && FileByteCount[path] <= $maxAttachmentBytes,
+    {File[path], FileNameTake[path]},
+    Nothing
+];
+prepareFeedbackAttachment[path_String, tmpDir_String, k_Integer] := prepareFeedbackAttachment[File[path], tmpDir, k];
+prepareFeedbackAttachment[spec_Association, tmpDir_String, k_Integer] := Module[{name, safe, target, bytes},
+    name = Replace[Lookup[spec, "Name", ""], Except[_String] -> ""];
+    If[name === "", name = "attachment-" <> IntegerString[k] <> ".bin"];
+    safe = StringTake[StringReplace[FileNameTake[name], Except[WordCharacter | "." | "-"] -> "_"], UpTo[80]];
+    If[safe === "", safe = "attachment-" <> IntegerString[k] <> ".bin"];
+    bytes = Which[
+        KeyExistsQ[spec, "Base64"] && StringQ[spec["Base64"]],
+            BaseDecode[StringReplace[spec["Base64"], {
+                StartOfString ~~ "data:" ~~ Shortest[___] ~~ ";base64," -> "",
+                WhitespaceCharacter -> ""
+            }]],
+        KeyExistsQ[spec, "Content"] && ByteArrayQ[spec["Content"]], spec["Content"],
+        KeyExistsQ[spec, "Content"] && StringQ[spec["Content"]], StringToByteArray[spec["Content"], "UTF-8"],
+        True, $Failed
+    ];
+    If[ ! ByteArrayQ[bytes] || Length[bytes] > $maxAttachmentBytes, Return[Nothing, Module]];
+    target = FileNameJoin[{tmpDir, IntegerString[k] <> "-" <> safe}];
+    With[{s = OpenWrite[target, BinaryFormat -> True]},
+        BinaryWrite[s, bytes];
+        Close[s]
+    ];
+    {File[target], name}
+];
+prepareFeedbackAttachment[_, _, _] := Nothing;
+
+Options[SubmitPacletPageFeedback] = {
+    "FeedbackURL" -> Automatic,
+    "Where" -> "",
+    "Expected" -> "",
+    "Email" -> Automatic,
+    "Title" -> Automatic,
+    "Link" -> Automatic,
+    "View" -> "built page",
+    "Notebook" -> "",
+    "Attachments" -> {}
+};
+
+SubmitPacletPageFeedback[uri_String /; StringStartsQ[uri, "paclet:"], feedback : (_String | _Association), opts : OptionsPattern[]] := With[
+    {parsed = splitFeedbackURI[uri]},
+    If[ ListQ[parsed],
+        SubmitPacletPageFeedback[First[parsed], Last[parsed], feedback, opts],
+        Failure["NoFeedbackURL", <|"MessageTemplate" -> "`1` is not a paclet documentation URI.", "MessageParameters" -> {uri}, "URI" -> uri|>]
+    ]
+];
+
+SubmitPacletPageFeedback[spec_, feedback : (_String | _Association), opts : OptionsPattern[]] := With[
+    {page = If[AssociationQ[feedback], Replace[Lookup[feedback, "Page", ""], Except[_String] -> ""], ""]},
+    SubmitPacletPageFeedback[spec, page, feedback, opts]
+];
+
+SubmitPacletPageFeedback[spec_, page_String, feedback : (_String | _Association), opts : OptionsPattern[]] := Module[
+    {fbAssoc, fbText, fbOptURL, endpoints, formURL, site, allURL, pacletName, pageID,
+        where, expected, emailOpt, email, titleOpt, title, linkOpt, link, view, notebook,
+        rawAttachments, tmpDir, prepared, fields, resp},
+    fbAssoc = If[AssociationQ[feedback], feedback, <|"Feedback" -> feedback|>];
+    fbText = StringTrim[Replace[Lookup[fbAssoc, "Feedback", ""], Except[_String] -> ""]];
+    If[ fbText === "",
+        Return[Failure["EmptyFeedback", <|"MessageTemplate" -> "Feedback text must be a non-empty string."|>], Module]
+    ];
+    fbOptURL = OptionValue["FeedbackURL"];
+    endpoints = Replace[fbOptURL, {
+        Automatic :> defaultFeedbackEndpoints[spec],
+        u_String /; StringStartsQ[u, "http://" | "https://"] :> With[{ded = defaultFeedbackEndpoints[spec]},
+            endpointsFromFormURL[u, If[AssociationQ[ded], Lookup[ded, "Paclet", ""], If[StringQ[spec], spec, ""]]]
+        ],
+        _ -> None
+    }];
+    If[ ! AssociationQ[endpoints],
+        Return[Failure["NoFeedbackURL", <|
+            "MessageTemplate" -> "Could not determine a feedback form URL for `1`; pass \"FeedbackURL\" -> url.",
+            "MessageParameters" -> {spec},
+            "Spec" -> spec
+        |>], Module]
+    ];
+    formURL = endpoints["Form"];
+    site = endpoints["Site"];
+    allURL = endpoints["All"];
+    pacletName = endpoints["Paclet"];
+    pageID = Which[
+        StringStartsQ[page, "paclet:"], With[{p = splitFeedbackURI[page]}, If[ListQ[p], Last[p], ""]],
+        page =!= "", page,
+        True, Replace[Lookup[fbAssoc, "Page", ""], Except[_String] -> ""]
+    ];
+    where = Replace[Lookup[fbAssoc, "Where", OptionValue["Where"]], Except[_String] -> ""];
+    expected = Replace[Lookup[fbAssoc, "Expected", OptionValue["Expected"]], Except[_String] -> ""];
+    emailOpt = Lookup[fbAssoc, "Email", OptionValue["Email"]];
+    email = Replace[emailOpt, {
+        Automatic :> If[StringQ[$WolframID] && emailAddressQ[$WolframID], $WolframID, ""],
+        None -> "",
+        s_String :> StringTrim[s],
+        other_ :> other
+    }];
+    If[ ! StringQ[email] || (email =!= "" && ! emailAddressQ[email]),
+        Return[Failure["InvalidEmail", <|
+            "MessageTemplate" -> "`1` is not a valid email address.",
+            "MessageParameters" -> {emailOpt},
+            "Email" -> emailOpt
+        |>], Module]
+    ];
+    titleOpt = Lookup[fbAssoc, "Title", OptionValue["Title"]];
+    title = Replace[titleOpt, {
+        Automatic :> Which[
+            pageID =!= "", Last[StringSplit[pageID, "/"]],
+            pacletName =!= "", Last[StringSplit[pacletName, "/"]],
+            True, ""
+        ],
+        Except[_String] -> ""
+    }];
+    linkOpt = Lookup[fbAssoc, "Link", OptionValue["Link"]];
+    link = Replace[linkOpt, {
+        Automatic :> Which[
+            site =!= "" && pageID =!= "", site <> "#" <> pageID,
+            pacletName =!= "" && pageID =!= "", "paclet:" <> pacletName <> "/" <> pageID,
+            True, site
+        ],
+        Except[_String] -> ""
+    }];
+    view = Replace[Lookup[fbAssoc, "View", OptionValue["View"]], Except[_String] -> "built page"];
+    notebook = Replace[Lookup[fbAssoc, "Notebook", OptionValue["Notebook"]], Except[_String] -> ""];
+    rawAttachments = Take[Flatten[{Lookup[fbAssoc, "Attachments", OptionValue["Attachments"]]}], UpTo[3]];
+    tmpDir = If[rawAttachments === {}, None, CreateDirectory[]];
+    WithCleanup[
+        prepared = If[ rawAttachments === {}, {},
+            DeleteCases[MapIndexed[prepareFeedbackAttachment[#1, tmpDir, First[#2]] &, rawAttachments], Nothing]
+        ];
+        fields = Join[
+            {
+                "Feedback" -> fbText,
+                "Where" -> where,
+                "Expected" -> expected,
+                "Email" -> email,
+                "Page" -> pageID,
+                "Title" -> title,
+                "Link" -> link,
+                "View" -> view,
+                "Notebook" -> notebook,
+                "AttachmentNames" -> StringRiffle[Last /@ prepared, "\n"],
+                "Website" -> ""
+            },
+            MapIndexed["Attachment" <> IntegerString[First[#2]] -> First[#1] &, prepared]
+        ];
+        resp = curlPost[formURL, If[site =!= "", site <> "Page", formURL], fields];
+        If[ AssociationQ[resp] && resp["StatusCode"] === 200 && StringContainsQ[resp["Body"], "pp-feedback-thanks"],
+            <|
+                "Submitted" -> True,
+                "Paclet" -> pacletName,
+                "Page" -> pageID,
+                "FeedbackURL" -> formURL,
+                "AllFeedbackURL" -> allURL
+            |>,
+            Failure["FeedbackSubmitFailed", <|
+                "MessageTemplate" -> "Submitting feedback to `1` failed (`2`).",
+                "MessageParameters" -> {formURL, Which[
+                    FailureQ[resp], resp["Message"],
+                    AssociationQ[resp], "HTTP " <> TextString[resp["StatusCode"]],
+                    True, "no response"
+                ]},
+                "FeedbackURL" -> formURL,
+                "StatusCode" -> If[AssociationQ[resp], resp["StatusCode"], None],
+                "Response" -> resp
+            |>]
+        ],
+        If[StringQ[tmpDir] && DirectoryQ[tmpDir], DeleteDirectory[tmpDir, DeleteContents -> True]]
+    ]
+];

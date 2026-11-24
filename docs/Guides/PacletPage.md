@@ -36,6 +36,7 @@ PacletPage takes a paclet from the markdown in its `docs/` folder to a published
 
 ### Feedback
 - `DeployPacletPageFeedback` publish the feedback form and the team's pages
+- `SubmitPacletPageFeedback` submit documentation feedback from Wolfram Language to a paclet's published feedback form and Databin
 - `PacletPageFeedback` the feedback a site has collected, with the status of each entry
 - `SetPacletPageFeedbackStatus` record where a feedback entry stands
 

@@ -5,7 +5,7 @@ Context: WolframInstitute`PacletPage`
 Paclet: WolframInstitute/PacletPage
 URI: WolframInstitute/PacletPage/ref/PacletPage
 Keywords: [page, documentation, guide tree, XMLElement, offline, notebook, layout]
-SeeAlso: [PacletPageCatalog, PacletPageFiles, BuildPacletPageSite, BuildPacletDocumentation]
+SeeAlso: [PacletPageCatalog, PacletPageFiles, BuildPacletPageSite, BuildPacletDocumentation, SubmitPacletPageFeedback]
 RelatedGuides: [PacletPage]
 ---
 
@@ -43,8 +43,8 @@ RelatedGuides: [PacletPage]
 | `"View"` | `"Built"` | `"Built"` for the built documentation notebook, or `"Source"` for the page's authoring source (authoring notebook, `docs/` markdown, or raw notebook source) |
 | `"Source"` | `Automatic` | optional directory of authoring `.nb` or `.md` files for `"View" -> "Source"` |
 | `"SourceURL"` | `""` | optional published URL for the page's source |
-| `"Feedback"` | `True` | whether the page tools bar includes the Feedback button |
-| `"FeedbackURL"` | `""` | URL of a deployed feedback form opened by the Feedback button |
+| `"Feedback"` | `Automatic` | whether the page tools bar includes the Feedback button; `Automatic` includes it when a feedback URL or email is available |
+| `"FeedbackURL"` | `Automatic` | URL of the deployed feedback form; `Automatic` deduces `https://www.wolframcloud.com/obj/<publisher>/<ShortName>Feedback/Form` from the paclet's `PublisherID` and name (or `"FeedbackURL"` / `"SiteURL"` metadata), and `""` or `None` disables the form URL |
 | `"FeedbackEmail"` | `None` | an email address, template with `To:` and `Subject:` lines, or `File` of one for the Feedback button's prefilled `mailto:` link |
 | `"FeedbackThanks"` | `Automatic` | confirmation text shown after feedback is submitted |
 | `"AllFeedbackLink"` | `True` | whether the feedback panel links to the team's list of collected feedback |

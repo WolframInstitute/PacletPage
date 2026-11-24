@@ -1817,30 +1817,35 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{dir = localFixture[], built, srcMd, fbMail, fbURL, noTools, withRes},
+    Module[{dir = localFixture[], built, srcMd, fbMail, fbURL, noFbAuto, noTools, withRes},
         CreateDirectory[FileNameJoin[{dir, "docs", "Symbols"}], CreateIntermediateDirectories -> True];
         Export[FileNameJoin[{dir, "docs", "Symbols", "F.md"}], "---\nName: F\n---\n\n`F[x]` docs source.\n", "Text"];
         built = PacletPage[dir, "F"];
         srcMd = PacletPage[dir, "F", "View" -> "Source"];
-        fbMail = PacletPage[dir, "F", "FeedbackEmail" -> "docs@example.org"];
+        fbMail = PacletPage[dir, "F", "FeedbackURL" -> "", "FeedbackEmail" -> "docs@example.org"];
         fbURL = PacletPage[dir, "F", "FeedbackURL" -> "https://c.example/obj/u/SiteFeedback/Form"];
+        noFbAuto = PacletPage[dir, "F", "FeedbackURL" -> ""];
         noTools = PacletPage[dir, "F", "Feedback" -> False, "ViewSource" -> False];
         withRes = PacletPage[dir, "F", "ResourceLink" -> "https://c.example/obj/u/Resource"];
         WithCleanup[
             {
-                (* Default built view includes Feedback and View source in .pp-pagetools *)
+                (* Default built view includes Feedback (with deduced URL) and View source in .pp-pagetools *)
                 Cases[built, XMLElement[_, {___, "data-pp-tool" -> t_, ___}, {lbl_String}] :> {t, lbl}, Infinity],
+                FirstCase[built, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
+                    With[{a = Association[attrs]}, {a["href"], a["data-pp-feedback-url"], a["data-pp-all-feedback"]}], None, Infinity],
                 (* Source view renders the docs/Symbols/F.md source and flips button to View built page *)
                 {
                     FirstCase[srcMd, XMLElement["button", {___, "data-pp-tool" -> "viewtoggle", ___, "data-view" -> v_, ___}, {lbl_String}] :> {v, lbl}, None, Infinity],
                     FirstCase[srcMd, XMLElement["main", _, {___, nb_Notebook, ___}] :> StringContainsQ[FirstCase[nb, Cell[s_String, "Program", ___] :> s, "", Infinity], "`F[x]` docs source."], False, Infinity]
                 },
-                (* FeedbackEmail produces RFC 6068 mailto: href and data-pp-feedback-to *)
+                (* FeedbackEmail without FeedbackURL produces RFC 6068 mailto: href and data-pp-feedback-to *)
                 FirstCase[fbMail, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
                     With[{a = Association[attrs]}, {StringStartsQ[a["href"], "mailto:docs@example.org?subject="], a["data-pp-feedback-to"]}], None, Infinity],
-                (* FeedbackURL produces form href and All feedback link *)
+                (* Explicit FeedbackURL overrides deduced URL and sets All feedback link *)
                 FirstCase[fbURL, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
                     With[{a = Association[attrs]}, {a["href"], a["data-pp-all-feedback"]}], None, Infinity],
+                (* Feedback -> Automatic with FeedbackURL -> "" and no email omits the Feedback button *)
+                Cases[noFbAuto, XMLElement[_, {___, "data-pp-tool" -> t_, ___}, _] :> t, Infinity],
                 (* Feedback -> False and ViewSource -> False omit .pp-pagetools *)
                 Cases[noTools, XMLElement["div", {___, "class" -> "pp-pagetools", ___}, _], Infinity] === {},
                 (* ResourceLink emits .pp-home link in header *)
@@ -1856,14 +1861,151 @@ VerificationTest[
     ],
     {
         {{"feedback", "Feedback"}, {"viewtoggle", "View source"}},
+        {
+            "https://www.wolframcloud.com/obj/pub/NameFeedback/Form",
+            "https://www.wolframcloud.com/obj/pub/NameFeedback/Form",
+            "https://www.wolframcloud.com/obj/pub/NameFeedback/All"
+        },
         {{"source", "View built page"}, True},
         {True, "docs@example.org"},
         {"https://c.example/obj/u/SiteFeedback/Form", "https://c.example/obj/u/SiteFeedback/All"},
+        {"viewtoggle"},
         True,
         "https://c.example/obj/u/Resource",
         {True, True}
     },
     TestID -> "Page: Feedback, View source/View built page, and ResourceLink match page.html and site.html"
+]
+
+VerificationTest[
+    Module[{attFile, calls = {}, res1, res2, resCustom, res500, resNoThanks, attTmpDir},
+        attFile = CreateFile[];
+        Export[attFile, "sample note", "Text"];
+        WithCleanup[
+            {
+                (* Default URL deduction from paclet name, URI, PublisherID, SiteURL, FeedbackURL, and missing publisher *)
+                {
+                    defaultFeedbackEndpoints["WolframInstitute/PacletPage"][["Form"]],
+                    defaultFeedbackEndpoints["WolframInstitute/PacletPage"][["All"]],
+                    defaultFeedbackEndpoints["paclet:WolframInstitute/TuringMachine/ref/Foo"][["Form"]],
+                    defaultFeedbackEndpoints[<|"Name" -> "Tool", "PublisherID" -> "MyOrg"|>][["Form"]],
+                    defaultFeedbackEndpoints[<|"Name" -> "Pub/Tool", "SiteURL" -> "https://c.example/obj/u/CustomSite"|>][["Form"]],
+                    defaultFeedbackEndpoints[<|"Name" -> "Pub/Tool", "FeedbackURL" -> "https://c.example/obj/u/CustomFeedback/Form"|>][["Form"]],
+                    defaultFeedbackEndpoints["BareNameWithoutPublisher"]
+                },
+                (* SubmitPacletPageFeedback posts expected multipart fields and cleans up inline attachment temp files *)
+                Block[{curlPost},
+                    curlPost[url_, referer_, fields_] := (
+                        AppendTo[calls, <|
+                            "URL" -> url,
+                            "Referer" -> referer,
+                            "Fields" -> Association[fields],
+                            "Att2Exists" -> With[{f = Lookup[Association[fields], "Attachment2", None]},
+                                If[MatchQ[f, File[_String]], attTmpDir = DirectoryName[First[f]]; FileExistsQ[First[f]], False]
+                            ]
+                        |>];
+                        <|"StatusCode" -> 200, "Body" -> "<div class=\"pp-feedback-thanks\">Thank you</div>"|>
+                    );
+                    res1 = SubmitPacletPageFeedback[
+                        "paclet:WolframInstitute/PacletPage/ref/PacletPage",
+                        "Missing example for LayoutControls.",
+                        "Where" -> "Basic Examples",
+                        "Expected" -> "Show LeftSidebar only.",
+                        "Email" -> "reader@example.org",
+                        "View" -> "source"
+                    ];
+                    res2 = SubmitPacletPageFeedback[
+                        "WolframInstitute/PacletPage",
+                        "ref/PacletPage",
+                        <|
+                            "Feedback" -> "Screenshot attached.",
+                            "Email" -> "",
+                            "Attachments" -> {
+                                File[attFile],
+                                <|"Name" -> "shot.png", "Base64" -> "data:image/png;base64,iVBORw0KGgo="|>
+                            }
+                        |>
+                    ];
+                    resCustom = SubmitPacletPageFeedback[
+                        "BareNameWithoutPublisher",
+                        "Custom endpoint test.",
+                        "Email" -> None,
+                        "FeedbackURL" -> "https://c.example/custom-hook"
+                    ];
+                    {
+                        res1,
+                        calls[[1, "URL"]],
+                        calls[[1, "Referer"]],
+                        KeyTake[calls[[1, "Fields"]], {"Feedback", "Where", "Expected", "Email", "Page", "Title", "Link", "View", "Website"}],
+                        res2["Submitted"],
+                        calls[[2, "Fields"]]["AttachmentNames"] === FileNameTake[attFile] <> "\nshot.png",
+                        MatchQ[calls[[2, "Fields"]]["Attachment1"], File[attFile]],
+                        calls[[2, "Att2Exists"]],
+                        StringQ[attTmpDir] && ! DirectoryQ[attTmpDir],
+                        resCustom["FeedbackURL"],
+                        calls[[3, "URL"]]
+                    }
+                ],
+                (* Validation and HTTP failure responses *)
+                {
+                    MatchQ[SubmitPacletPageFeedback["WolframInstitute/PacletPage", "   "], Failure["EmptyFeedback", _]],
+                    MatchQ[SubmitPacletPageFeedback["WolframInstitute/PacletPage", "Hi", "Email" -> "not-an-email"], Failure["InvalidEmail", _]],
+                    MatchQ[SubmitPacletPageFeedback["BareNameWithoutPublisher", "Hi", "Email" -> None], Failure["NoFeedbackURL", _]],
+                    Block[{curlPost = (<|"StatusCode" -> 500, "Body" -> "error"|> &)},
+                        res500 = SubmitPacletPageFeedback["WolframInstitute/PacletPage", "Hi", "Email" -> None];
+                        MatchQ[res500, Failure["FeedbackSubmitFailed", _]] && res500["StatusCode"] === 500
+                    ],
+                    Block[{curlPost = (<|"StatusCode" -> 200, "Body" -> "<html>unexpected</html>"|> &)},
+                        resNoThanks = SubmitPacletPageFeedback["WolframInstitute/PacletPage", "Hi", "Email" -> None];
+                        MatchQ[resNoThanks, Failure["FeedbackSubmitFailed", _]]
+                    ]
+                }
+            },
+            If[FileExistsQ[attFile], DeleteFile[attFile]]
+        ]
+    ],
+    {
+        {
+            "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/Form",
+            "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/All",
+            "https://www.wolframcloud.com/obj/wolframinstitute/TuringMachineFeedback/Form",
+            "https://www.wolframcloud.com/obj/myorg/ToolFeedback/Form",
+            "https://c.example/obj/u/CustomSiteFeedback/Form",
+            "https://c.example/obj/u/CustomFeedback/Form",
+            None
+        },
+        {
+            <|
+                "Submitted" -> True,
+                "Paclet" -> "WolframInstitute/PacletPage",
+                "Page" -> "ref/PacletPage",
+                "FeedbackURL" -> "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/Form",
+                "AllFeedbackURL" -> "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/All"
+            |>,
+            "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/Form",
+            "https://www.wolframcloud.com/obj/wolframinstitute/PacletPagePage",
+            <|
+                "Feedback" -> "Missing example for LayoutControls.",
+                "Where" -> "Basic Examples",
+                "Expected" -> "Show LeftSidebar only.",
+                "Email" -> "reader@example.org",
+                "Page" -> "ref/PacletPage",
+                "Title" -> "PacletPage",
+                "Link" -> "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage#ref/PacletPage",
+                "View" -> "source",
+                "Website" -> ""
+            |>,
+            True,
+            True,
+            True,
+            True,
+            True,
+            "https://c.example/custom-hook",
+            "https://c.example/custom-hook"
+        },
+        {True, True, True, True, True}
+    },
+    TestID -> "Feedback: defaultFeedbackEndpoints and SubmitPacletPageFeedback deduce URLs and post multipart payloads"
 ]
 
 VerificationTest[

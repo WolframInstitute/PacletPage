@@ -44,6 +44,10 @@ team pages that list what it collects.";
 PacletPageFeedback::usage = "PacletPageFeedback[name] gives the feedback the site name has collected, newest first, \
 with the status of each entry.";
 
+SubmitPacletPageFeedback::usage = "SubmitPacletPageFeedback[spec, feedback] submits documentation feedback for the paclet \
+spec to its published PacletPage feedback form (and Databin), deducing the default endpoint from PublisherID and paclet name. \
+SubmitPacletPageFeedback[spec, page, feedback] records feedback for the specific documentation page.";
+
 SetPacletPageFeedbackStatus::usage = "SetPacletPageFeedbackStatus[name, id, status, note] records that the feedback \
 entry id of the site name is \"open\", \"decided\", \"fixed\", \"follow-up\" or \"not a defect\", with note.
 SetPacletPageFeedbackStatus[name, {update1, update2, ...}] records several statuses at once, each id -> status, \

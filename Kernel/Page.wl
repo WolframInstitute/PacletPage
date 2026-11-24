@@ -25,8 +25,8 @@ Options[PacletPage] = {
     "View" -> "Built",
     "Source" -> Automatic,
     "SourceURL" -> "",
-    "Feedback" -> True,
-    "FeedbackURL" -> "",
+    "Feedback" -> Automatic,
+    "FeedbackURL" -> Automatic,
     "FeedbackEmail" -> None,
     "FeedbackThanks" -> Automatic,
     "AllFeedbackLink" -> True
@@ -42,7 +42,7 @@ PacletPage[spec_, opts : OptionsPattern[]] := Replace[spec, {
 PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Module[
     {controls, accentOpt, accent, viewOpt, view, dir, catalog, pages, rootOpt, showRootGuide, homeID, id,
         file, srcSpec, srcFile, srcType, nb, filterOpt, showFilter, filter, strip, title, subtitle,
-        version, versionTag, desc, activeTitle, mail, resourceURL, showSource},
+        version, versionTag, desc, activeTitle, mail, resourceURL, showSource, fbURL, showFeedback},
     controls = normalizeLayoutControls[OptionValue["LayoutControls"]];
     If[ controls === $Failed,
         Return[Failure["InvalidOption", <|
@@ -154,6 +154,15 @@ PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Modu
         _ :> SelectFirst[{Lookup[catalog, "Resource", ""], Lookup[catalog, "URL", ""]},
             StringQ[#] && StringStartsQ[#, "http://" | "https://"] &, ""]
     }];
+    fbURL = Replace[OptionValue["FeedbackURL"], {
+        Automatic :> With[{ep = defaultFeedbackEndpoints[catalog]}, If[AssociationQ[ep], ep["Form"], ""]],
+        u_String /; u =!= "" :> With[{ep = endpointsFromFormURL[u, catalog["Name"]]}, ep["Form"]],
+        _ -> ""
+    }];
+    showFeedback = Replace[OptionValue["Feedback"], {
+        Automatic :> (fbURL =!= "" || mail =!= ""),
+        other_ :> TrueQ[other]
+    }];
     shellXML[catalog, <|
         "Mode" -> "Expression",
         "Name" -> catalog["Name"],
@@ -184,8 +193,8 @@ PacletPage[spec_, page : (_String | Automatic), opts : OptionsPattern[]] := Modu
         "ViewSource" -> showSource,
         "SourceType" -> srcType,
         "SourceURL" -> Replace[OptionValue["SourceURL"], Except[_String] -> ""],
-        "Feedback" -> TrueQ[OptionValue["Feedback"]],
-        "FeedbackURL" -> Replace[OptionValue["FeedbackURL"], Except[_String] -> ""],
+        "Feedback" -> showFeedback,
+        "FeedbackURL" -> fbURL,
         "FeedbackEmailTemplate" -> mail,
         "FeedbackThanks" -> Replace[OptionValue["FeedbackThanks"], Except[_String] -> ""],
         "AllFeedbackLink" -> TrueQ[OptionValue["AllFeedbackLink"]],

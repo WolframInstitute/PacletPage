@@ -22,6 +22,7 @@ PacletObject[<|
                 "WolframInstitute`PacletPage`DeployPacletPage",
                 "WolframInstitute`PacletPage`DeployPacletPageFeedback",
                 "WolframInstitute`PacletPage`PacletPageFeedback",
+                "WolframInstitute`PacletPage`SubmitPacletPageFeedback",
                 "WolframInstitute`PacletPage`SetPacletPageFeedbackStatus",
                 "WolframInstitute`PacletPage`SetPacletPagePermissions",
                 "WolframInstitute`PacletPage`CheckPacletPage",

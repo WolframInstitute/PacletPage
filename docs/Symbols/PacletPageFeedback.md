@@ -5,7 +5,7 @@ Context: WolframInstitute`PacletPage`
 Paclet: WolframInstitute/PacletPage
 URI: WolframInstitute/PacletPage/ref/PacletPageFeedback
 Keywords: [feedback, Databin, triage]
-SeeAlso: [SetPacletPageFeedbackStatus, DeployPacletPageFeedback]
+SeeAlso: [SubmitPacletPageFeedback, SetPacletPageFeedbackStatus, DeployPacletPageFeedback]
 RelatedGuides: [PacletPage]
 RelatedTutorials: [PublishingADocumentationSite]
 ---
@@ -17,6 +17,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 ## Details & Options
 
 - `PacletPageFeedback` reads the site's Databin, which only the publishing account can read; the rest of the team reads the same entries on the site's `All` page.
+- Readers submit entries through the site's Feedback panel or programmatically with `SubmitPacletPageFeedback`.
 - Each entry has the fields the form collects, `"Feedback"`, `"Where"`, `"Expected"`, `"Email"` and `"Attachments"`, the page's `"Page"`, `"Title"`, `"Link"`, `"View"` and `"Notebook"`, its `"ID"` and `"Submitted"` time, and its `"Status"` and `"Note"`.
 - An entry no status names is `"open"`.
 

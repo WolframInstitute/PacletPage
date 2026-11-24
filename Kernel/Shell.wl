@@ -257,7 +257,7 @@ pageToolsXML[cfg_Association] := Module[
             },
             If[fbURL =!= "", {
                 "data-pp-feedback-url" -> fbURL,
-                If[allFeedback, "data-pp-all-feedback" -> StringReplace[fbURL, RegularExpression["/Form$"] -> "/All"], Nothing]
+                If[allFeedback && StringEndsQ[fbURL, "/Form"], "data-pp-all-feedback" -> StringReplace[fbURL, RegularExpression["/Form$"] -> "/All"], Nothing]
             }, {}],
             If[AssociationQ[mailInfo], {
                 "data-pp-feedback-to" -> mailInfo["To"],
