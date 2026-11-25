@@ -8,8 +8,7 @@ dir = DirectoryName[$InputFileName]
 PacletDirectoryLoad[dir]
 Needs["WolframInstitute`PacletPage`"]
 
-report = Block[{$AllowInternet = False, $AllowDataUpdates = False},
-    MemoryConstrained[TestReport @ FileNames["*.wlt", FileNameJoin[{dir, "Tests"}]], 4 * 10^9, $Aborted]]
+report = MemoryConstrained[TestReport @ FileNames["*.wlt", FileNameJoin[{dir, "Tests"}]], 4 * 10^9, $Aborted]
 If[ ! MatchQ[report, _TestReportObject], Print["the tests did not run: ", report]; Exit[1]]
 
 passed = Length @ report["TestsSucceededIndices"]

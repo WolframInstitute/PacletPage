@@ -235,7 +235,7 @@ dependencyGitRelease[entry_] := Module[{name = entry["Name"], commit = dependenc
    quit during a download, and every later operation would wait and then report one in progress.
    The file names its process, so a lock whose process no longer runs on this machine is removed. *)
 $dependencyLockWait = 10
-dependencyLockAbandonedQ[file_String] := FileExistsQ[file] && With[{held = dependencyHeldText[Quiet[ReadString[file]]]},
+dependencyLockAbandonedQ[file_String] := FileExistsQ[file] && With[{held = dependencyHeldText[Quiet[ReadString[file], {OpenRead::noopen, General::noopen}]]},
     FirstCase[held, HoldPattern["MachineName" -> machine_String] :> machine, None, {2}] === $MachineName &&
         With[{process = FirstCase[held, HoldPattern["ProcessID" -> id_Integer] :> id, None, {2}]},
             IntegerQ[process] && SystemProcesses["PID" -> process] === {}]]
@@ -260,13 +260,21 @@ dependencyInstalledGit[p_] := Module[{location = p["Location"], file, source},
     If[! StringQ[location], Return[Missing["Unknown"]]];
     file = FileNameJoin[{location, $dependencyGitReceipt}];
     If[! FileExistsQ[file], Return[Missing["Unknown"]]];
-    source = Quiet[Developer`ReadRawJSONFile[file]];
+    source = Quiet[Developer`ReadRawJSONFile[file], {
+        Developer`ReadRawJSONFile::noopen, Developer`ReadRawJSONFile::jsonnullinput,
+        Developer`ReadRawJSONFile::jsonkeynstr, Developer`ReadRawJSONFile::jsonhintposandchar,
+        Developer`ReadRawJSONFile::jsonunexpected, Developer`ReadRawJSONFile::jsonsyntax,
+        Developer`ReadRawJSONFile::jsonarrayelem, Developer`ReadRawJSONFile::jsoncolon,
+        Developer`ReadRawJSONFile::jsonobjsep, Developer`ReadRawJSONFile::jsoninvalidval,
+        Developer`ReadRawJSONFile::jsonnum, Developer`ReadRawJSONFile::jsonstr,
+        Developer`ReadRawJSONFile::jsonutf8, General::noopen
+    }];
     If[AssociationQ[source] && dependencyFullCommitQ[source["Commit"]], source, Missing["Unknown"]]
 ]
 dependencyGitMatchesQ[source_, entry_] := AssociationQ[source] &&
     source === dependencyGitSource[entry, source["Commit"]] && StringStartsQ[source["Commit"], dependencyGitCommit[entry]]
 dependencyGitUserCopyQ[p_] := With[{location = p["Location"]}, StringQ[location] &&
-    Most[FileNameSplit[location]] === FileNameSplit[FileNameJoin[{$UserBasePacletsDirectory, "Repository"}]]]
+    Most[FileNameSplit[ExpandFileName[location]]] === FileNameSplit[ExpandFileName[FileNameJoin[{$UserBasePacletsDirectory, "Repository"}]]]]
 dependencyGitConflict[p_, version_] := Which[
     PacletNewerQ[p["Version"], version], dependencyFailure["DependencyVersionConflict",
         "Installed `1` `2` is newer than the pinned version `3`.", p["Name"], p["Version"], version],
