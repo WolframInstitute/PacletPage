@@ -47,9 +47,38 @@ a { text-decoration: none; color: inherit; }
 }
 #hdr .home:hover { background: #2e3236; color: #fff; }
 #hdr .home svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+/* optional layout-toggle buttons, emitted only when "LayoutControls" is enabled */
+.pp-layout-controls {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+}
+.pp-layout-controls + #resourcelink { margin-left: 10px; }
+.no-filter .pp-layout-controls { margin-left: 0; }
+.pp-layout-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 28px; padding: 0; cursor: pointer;
+  background: transparent; color: #b9bdc1; border: 1px solid #3a3f44; border-radius: 4px;
+}
+.pp-layout-btn:hover { background: #2e3236; color: #fff; }
+.pp-layout-btn.on { background: #2e3236; color: #fff; border-color: #555b62; }
+.pp-layout-btn svg { width: 16px; height: 16px; display: block; }
+body.pp-hide-left #side, body.pp-hide-left #splitL { display: none !important; }
+body.pp-hide-right #side-right, body.pp-hide-right #splitR { display: none !important; }
+body.pp-fullscreen #hdr, body.pp-fullscreen #side, body.pp-fullscreen #splitL,
+body.pp-fullscreen #side-right, body.pp-fullscreen #splitR, body.pp-fullscreen #ftr { display: none !important; }
+body.pp-fullscreen #main { top: 0; bottom: 0; }
+.pp-full-exit {
+  display: none; position: fixed; top: 10px; right: 12px; z-index: 50;
+  width: 32px; height: 32px; padding: 0; align-items: center; justify-content: center;
+  border-radius: 6px; border: 1px solid #d0d4d8; background: rgba(255, 255, 255, .92);
+  color: #333; cursor: pointer; opacity: .7; box-shadow: 0 2px 8px rgba(0, 0, 0, .14);
+  transition: opacity .15s;
+}
+.pp-full-exit:hover, .pp-full-exit:focus-visible { opacity: 1; color: var(--pp-accent); border-color: var(--pp-accent); }
+.pp-full-exit svg { width: 16px; height: 16px; display: block; }
+body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 /* the parts a site's switches leave out: the filter, the symbols rail, the resource link; the
    symbols stay pages of the site, reached from the guides and by the filter's Enter */
-.no-filter #q, .no-symbols #symToggle, .no-symbols #splitR, .no-symbols #side-right, .no-resource-link #resourcelink { display: none !important; }
+.no-filter #q, .no-symbols #symToggle, .no-symbols #splitR, .no-symbols #side-right, .no-symbols #toggleSideR, .no-resource-link #resourcelink { display: none !important; }
 .no-filter #hdr .brand { margin-right: auto; }
 .no-filter #hdr .home { margin-left: 0; }
 /* a rail whose every entry is filtered out says so, instead of going blank */
@@ -241,6 +270,7 @@ a { text-decoration: none; color: inherit; }
 #main.resizing { cursor: col-resize; user-select: none; }
 
 @media (max-width: 900px) {
-  /* the rails are drawers here, so there is nothing to resize */
-  .splitter { display: none; }
+  /* the rails are drawers here, so there is nothing to resize or collapse on desktop */
+  .splitter, #toggleSideL, #toggleSideR { display: none; }
+  .pp-layout-controls { margin-left: 0; }
 }

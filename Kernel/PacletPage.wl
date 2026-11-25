@@ -6,7 +6,9 @@
    collects, the permissions each of them needs, and a check that everything is reachable.
 
    Catalog.wl    the published pages: titles, URLs, the notebook behind each page, the guide tree
-   Site.wl       the site's HTML, CSS and JavaScript, from the templates in Assets/Web
+   Shell.wl      the unified XMLElement shell and ASCII HTML serializer
+   Site.wl       the site's HTML, CSS and JavaScript, serialized from Shell.wl into Assets/Web
+   Page.wl       PacletPage[spec, page], returning Shell.wl's XMLElement shell with a live notebook
    Cloud.wl      publishing: the account, the pages, the source notebooks, cleanup, permissions
    Feedback.wl   the feedback form, its Databin and the team's pages
    Check.wl      reachability and version checks
@@ -19,11 +21,13 @@ BeginPackage["WolframInstitute`PacletPage`"]
 PacletPageCatalog::usage = "PacletPageCatalog[resource] gives the catalog of the documentation pages of a published paclet: \
 each page's title, its published page, the notebook behind it, and the guide tree. resource is \"Publisher/Name\" or a \
 Paclet Repository URL for a paclet on the repository, or the URL or CloudObject of a paclet resource deployed to a cloud account. \
-PacletPageCatalog[File[dir]] gives the catalog of the documentation notebooks of the paclet in dir, without the cloud.";
+PacletPageCatalog[File[dir]] or PacletPageCatalog[paclet] gives the catalog of a local or installed paclet's documentation notebooks, without the cloud.";
 
-PacletPageDOM::usage = "PacletPageDOM[dir, page] gives the documentation page of the paclet in dir as WebColumn, WebRow and \
-WebItem, its notebook beside the paclet's guides, tutorials and symbols, a page of Wolfram Studio. page is a paclet: URI, \
-an id such as \"ref/Name\" or a symbol's name. PacletPageDOM[dir] gives the main guide.";
+PacletPage::usage = "PacletPage[spec, page] gives the documentation page of a local or installed paclet as an XMLElement \
+shell holding the three-column PacletPage layout (header, guide tree and tutorials, live Notebook[...] in the center frame, \
+symbols rail, and footer). spec is a paclet directory, File[dir], PacletObject, installed paclet name, local catalog, or paclet: URI; \
+page is a paclet: URI, an id such as \"ref/Name\", a bare page name, or Automatic. PacletPage[spec] gives the paclet's main guide, \
+or the page addressed when spec is a paclet: URI.";
 
 BuildPacletPageSite::usage = "BuildPacletPageSite[dir] renders the documentation notebooks of the paclet in dir to HTML \
 on this computer and writes the site around them, under dir/build/site, without the cloud.";
@@ -39,6 +43,10 @@ team pages that list what it collects.";
 
 PacletPageFeedback::usage = "PacletPageFeedback[name] gives the feedback the site name has collected, newest first, \
 with the status of each entry.";
+
+SubmitPacletPageFeedback::usage = "SubmitPacletPageFeedback[spec, feedback] submits documentation feedback for the paclet \
+spec to its published PacletPage feedback form (and Databin), deducing the default endpoint from PublisherID and paclet name. \
+SubmitPacletPageFeedback[spec, page, feedback] records feedback for the specific documentation page.";
 
 SetPacletPageFeedbackStatus::usage = "SetPacletPageFeedbackStatus[name, id, status, note] records that the feedback \
 entry id of the site name is \"open\", \"decided\", \"fixed\", \"follow-up\" or \"not a defect\", with note.
@@ -69,7 +77,7 @@ PacletDependencyReport::usage = "PacletDependencyReport[owner, records] displays
 
 InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] installs the selected dependencies and checks their readiness. Give one name, a list of names, or All."
 
-UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks the declared sources and upgrades the selected installed dependencies when a newer compatible version is available."
+UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] updates the selected installed dependencies to compatible releases or to their declared Git commits."
 
 UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes selected optional dependencies from the current user's paclet repository. All selects the removable optional dependencies. PacletPage protects its own installation."
 
@@ -119,11 +127,7 @@ $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage"
 
 (* Reading definitions in a fresh kernel must use locally available paclets. *)
 Block[{$AllowInternet = False, $AllowDataUpdates = False},
-    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl", "DOM.wl"}]];
-
-(* the paclet sites refreshed when they are stale, outside the offline load above, so that it sees
-   whether this kernel may reach the internet *)
-refreshStaleSites[];
+    Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Shell.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl", "Page.wl"}]];
 
 End[]
 

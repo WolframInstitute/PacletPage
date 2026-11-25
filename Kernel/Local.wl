@@ -21,6 +21,7 @@ Options[BuildPacletPageSite] = {
     "ResourceLink" -> True,
     "VersionLabel" -> False,
     "Footer" -> False,
+    "LayoutControls" -> False,
     "Monitor" -> False
 };
 
@@ -69,7 +70,7 @@ BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Block[{$deployMonito
     siteLayout[stage];
     (* the paclet's version, which "VersionLabel" -> True shows *)
     files = PacletPageFiles[Append[catalog, "Version" -> paclet["Version"]], "PageURL" -> "",
-        Sequence @@ (# -> OptionValue[#] & /@ {"Title", "Subtitle", "Accent", "Filter", "SymbolsRail", "ResourceLink", "VersionLabel", "Footer"})];
+        Sequence @@ (# -> OptionValue[#] & /@ {"Title", "Subtitle", "Accent", "Filter", "SymbolsRail", "ResourceLink", "VersionLabel", "Footer", "LayoutControls"})];
     If[ ! AssociationQ[files], Return[$Failed, Module]];
     Export[FileNameJoin[{stage, "index.html"}], files["index.html"], "Text", CharacterEncoding -> "UTF-8"];
     (* the site is replaced whole, so a server showing it never shows half a site *)
@@ -86,7 +87,7 @@ BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Block[{$deployMonito
 
 (* The catalog of a paclet's own documentation notebooks: each page rendered at
    Documentation/<kind>/<name>.html beside the site *)
-localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit[name, "/"]], pages, root},
+localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit[name, "/"]], joined = StringDelete[name, "/"], pages, root},
     pages = Association @ KeyValueMap[
         Function[{id, file}, With[{nb = localNotebook[file]},
             id -> Join[
@@ -99,7 +100,11 @@ localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit
         ]],
         local
     ];
-    root = SelectFirst[{"guide/" <> short, First[Sort[Select[Keys[pages], StringStartsQ[#, "guide/"] &]], None]}, StringQ[#] && KeyExistsQ[pages, #] &, None];
+    root = SelectFirst[
+        Join[{"guide/" <> short, "guide/" <> joined}, SortBy[Select[Keys[pages], StringStartsQ[#, "guide/"] &], guideKey[pages[#]] &]],
+        StringQ[#] && KeyExistsQ[pages, #] &,
+        None
+    ];
     <|
         "Name" -> name,
         "Title" -> If[StringQ[root], pages[root]["Title"], short],

@@ -328,7 +328,11 @@ localDocumentation[None | Automatic] := <||>;
 localDocumentation[paclet_PacletObject] := localDocumentation[paclet["Location"]];
 
 localDocumentation[dir_String] := Module[{root},
-    root = SelectFirst[{FileNameJoin[{dir, "Documentation", "English"}], dir}, DirectoryQ[FileNameJoin[{#, "Guides"}]] || DirectoryQ[FileNameJoin[{#, "ReferencePages"}]] &, dir];
+    root = SelectFirst[
+        {FileNameJoin[{dir, "Documentation", "English"}], FileNameJoin[{dir, "Documentation"}], dir},
+        DirectoryQ[FileNameJoin[{#, "Guides"}]] || DirectoryQ[FileNameJoin[{#, "ReferencePages"}]] || DirectoryQ[FileNameJoin[{#, "Tutorials"}]] &,
+        dir
+    ];
     Association @ Join[
         Map[("guide/" <> FileBaseName[#]) -> # &, FileNames["*.nb", FileNameJoin[{root, "Guides"}]]],
         Map[("ref/" <> FileBaseName[#]) -> # &, FileNames["*.nb", FileNameJoin[{root, "ReferencePages", "Symbols"}]]],
@@ -426,20 +430,39 @@ Options[PacletPageCatalog] = {
 };
 
 PacletPageCatalog[File[dir_String], opts : OptionsPattern[]] := localPacletCatalog[dir, opts];
+PacletPageCatalog[paclet_PacletObject, opts : OptionsPattern[]] := With[{dir = paclet["Location"]},
+    If[StringQ[dir] && DirectoryQ[dir], localPacletCatalog[dir, opts],
+        Failure["PacletPageCatalog", <|"MessageTemplate" -> "`1` has no local directory.", "MessageParameters" -> {paclet}|>]]
+];
 PacletPageCatalog[source_, opts : OptionsPattern[]] := Block[{$readAsOwner = True}, catalogOf[source, opts]];
 
 (* The catalog of a paclet directory's own documentation, the notebooks BuildPacletDocumentation
    writes, read from the directory alone: no cloud, no front end. Each page has its notebook's file
-   as "File", and the catalog the paclet's version. *)
-localPacletCatalog[dir_String, opts : OptionsPattern[PacletPageCatalog]] := Module[{local, paclet, catalog},
+   as "File", and the catalog the paclet's version and description. *)
+localPacletCatalog[dir_String, opts : OptionsPattern[PacletPageCatalog]] := Module[{local, paclet, catalog, rootOpt, root},
     local = If[AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ[FileNameJoin[{dir, #}]] &], localDocumentation[dir], <||>];
     If[ local === <||>,
         Return[Failure["PacletPageCatalog", <|"MessageTemplate" -> "`1` is not a paclet directory with documentation notebooks.", "MessageParameters" -> {dir}|>], Module]];
     paclet = PacletObject[File[dir]];
     catalog = localCatalog[paclet["Name"], local];
+    rootOpt = OptionValue["RootGuide"];
+    root = Replace[rootOpt, {
+        id_String /; KeyExistsQ[catalog["Pages"], id] :> id,
+        id_String /; KeyExistsQ[catalog["Pages"], "guide/" <> id] :> "guide/" <> id,
+        _ -> None
+    }];
     Join[catalog,
-        <|"Version" -> paclet["Version"], "Pages" -> Association[KeyValueMap[#1 -> Append[#2, "File" -> local[#1]] &, catalog["Pages"]]]|>,
-        Replace[OptionValue["RootGuide"], {id_String /; KeyExistsQ[catalog["Pages"], id] :> <|"RootGuide" -> id|>, _ -> <||>}],
+        <|
+            "Version" -> Replace[paclet["Version"], Except[_String] -> ""],
+            "Description" -> Replace[paclet["Description"], Except[_String] -> ""],
+            "PublisherID" -> Replace[paclet["PublisherID"], Except[_String] -> ""],
+            "URL" -> Replace[paclet["URL"], Except[_String] -> ""],
+            "FeedbackURL" -> Replace[paclet["FeedbackURL"], Except[_String] -> ""],
+            "SiteURL" -> Replace[paclet["SiteURL"], Except[_String] -> ""],
+            "Directory" -> dir,
+            "Pages" -> Association[KeyValueMap[#1 -> Append[#2, "File" -> local[#1]] &, catalog["Pages"]]]
+        |>,
+        If[StringQ[root], <|"RootGuide" -> root|>, <||>],
         Replace[OptionValue["Title"], {title_String :> <|"Title" -> title|>, _ -> <||>}]]
 ];
 Options[catalogOf] = Options[PacletPageCatalog];

@@ -280,6 +280,35 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{names, pages, catalog, html, expr, forbidden},
+        names = Join[{"$Last", "Zebra"}, "Apple" <> IntegerString[#, 10, 2] & /@ Range[30]];
+        pages = AssociationMap[Function[id, With[{name = StringDrop[id, 4]},
+            fixturePage["ref", name, name, id <> ".nb"]]], "ref/" <> # & /@ names];
+        catalog = <|"Name" -> "Pub/Big", "Title" -> "Big", "Kind" -> "Local",
+            "Resource" -> "", "DocBase" -> "Documentation/", "RootGuide" -> None, "Pages" -> pages|>;
+        html = PacletPageFiles[catalog, "LayoutControls" -> True]["index.html"];
+        expr = shellXML[catalog, <|
+            "Mode" -> "Expression", "Name" -> "Pub/Big", "Prefix" -> "pp-", "Title" -> "Big",
+            "Subtitle" -> "", "Resource" -> "", "HomeID" -> None, "ShowRootGuide" -> True,
+            "StripTitleNumbers" -> True, "SymbolsRail" -> True, "Header" -> True, "Footer" -> True,
+            "ShowFilter" -> True, "Filter" -> "", "LayoutControls" -> {"LeftSidebar", "RightSidebar", "Fullscreen"},
+            "Current" -> "ref/Apple01", "ActiveTitle" -> "Apple01", "Notebook" -> Notebook[{}]
+        |>];
+        forbidden = Cases[expr, XMLElement["script" | "select" | "option" | "template" | "noscript", _, _], Infinity];
+        {
+            StringContainsQ[html, "id=\"side-right\" class=\"indexed\""],
+            StringContainsQ[html, "<template id=\"symbol-rest\">"],
+            StringContainsQ[html, "id=\"toggleSideR\""],
+            StringContainsQ[html, "id=\"splitR\""],
+            StringContainsQ[html, "id=\"ppFullExit\""],
+            forbidden === {}
+        }
+    ],
+    {True, True, True, True, True, True},
+    TestID -> "Shell: A-Z symbol index is HTML-only alongside LayoutControls and keeps Expression mode free of script/select/template tags"
+]
+
+VerificationTest[
     StringContainsQ[sidebarHTML[repositoryCatalog, <||>], ">Intro &lt;/script&gt; &lt;b&gt;</a>"],
     True,
     TestID -> "Site: titles are escaped in the rails"
@@ -410,6 +439,34 @@ VerificationTest[
     {{"v1.2.3"}, {"preview"}, {}, {},
         {True, {"Published with <a href=\"" <> $pacletPageSite <> "\" target=\"_blank\" rel=\"noopener\">PacletPage " <> $pacletPageVersion <> "</a>"}}, {}},
     TestID -> "Site: \"VersionLabel\" puts the paclet's version under the name, \"Footer\" names the PacletPage it was published with; both off by default"
+]
+
+VerificationTest[
+    With[{
+        def = PacletPageFiles[cloudCatalog]["index.html"],
+        all = PacletPageFiles[cloudCatalog, "LayoutControls" -> True]["index.html"],
+        noSym = PacletPageFiles[cloudCatalog, "LayoutControls" -> True, "SymbolsRail" -> False]["index.html"],
+        subset = PacletPageFiles[cloudCatalog, "LayoutControls" -> {"LeftSidebar", "Fullscreen"}]["index.html"],
+        leftOnly = PacletPageFiles[cloudCatalog, "LayoutControls" -> {"LeftSidebar"}]["index.html"]
+    },
+        {
+            StringFreeQ[def, {"<div class=\"pp-layout-controls\"", "id=\"toggleSideL\"", "id=\"toggleSideR\"", "id=\"toggleFull\"", "id=\"ppFullExit\""}],
+            AllTrue[{"<div class=\"pp-layout-controls\"", "id=\"toggleSideL\"", "id=\"toggleSideR\"", "id=\"toggleFull\"", "id=\"ppFullExit\"",
+                "M8 4v12", "M12 4v12", "M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"}, StringContainsQ[all, #] &],
+            {StringContainsQ[noSym, "id=\"toggleSideL\""], StringFreeQ[noSym, "id=\"toggleSideR\""], StringContainsQ[noSym, "id=\"toggleFull\""]},
+            {StringContainsQ[subset, "id=\"toggleSideL\""], StringFreeQ[subset, "id=\"toggleSideR\""], StringContainsQ[subset, "id=\"toggleFull\""], StringContainsQ[subset, "id=\"ppFullExit\""]},
+            {StringContainsQ[leftOnly, "id=\"toggleSideL\""], StringFreeQ[leftOnly, "id=\"toggleSideR\""], StringFreeQ[leftOnly, "id=\"toggleFull\""], StringFreeQ[leftOnly, "id=\"ppFullExit\""]}
+        }
+    ],
+    {True, True, {True, True, True}, {True, True, True, True}, {True, True, True, True}},
+    TestID -> "Site: \"LayoutControls\" adds optional left/right sidebar and fullscreen buttons, off by default"
+]
+
+VerificationTest[
+    PacletPageFiles[cloudCatalog, "LayoutControls" -> "NotAControl"],
+    $Failed,
+    {PacletPageFiles::layoutcontrols},
+    TestID -> "Site: an invalid \"LayoutControls\" value reports a message and fails"
 ]
 
 VerificationTest[
@@ -1694,29 +1751,307 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{dir = localFixture[], main, nav, entries, symbol},
-        main = PacletPageDOM[dir];
-        nav = main[[1, 1]];
-        entries = Cases[nav, WebItem[Hyperlink[title_, uri_], opts___] :> {title, uri, MemberQ[{opts}, "font-weight" -> "600"]}, Infinity];
-        symbol = PacletPageDOM[dir, "paclet:Pub/Name/ref/F"];
+    Module[{dir = localFixture[], main, symbol, filtered, noSym, controlsAll, controlsSub, controlsNoHdr,
+            xmlText, anchors, safeTags, allTags, loaded},
+        xmlText[nodes_List] := StringJoin[Cases[nodes, s_String, Infinity]];
+        anchors[expr_] := Cases[expr, XMLElement["a", attrs_List, kids_List] /; KeyExistsQ[Association[attrs], "data-id"] :>
+            With[{a = Association[attrs]}, {xmlText[kids], a["href"], StringContainsQ[Lookup[a, "class", ""], "active"]}], Infinity];
+        safeTags = {"div", "header", "nav", "main", "footer", "a", "span", "ul", "li", "details", "summary", "wbr",
+            "input", "button", "svg", "rect", "path"};
+        main = PacletPage[dir];
+        symbol = PacletPage[dir, "paclet:Pub/Name/ref/F"];
+        filtered = PacletPage[dir, "Filter" -> "tutorial"];
+        noSym = PacletPage[dir, "SymbolsRail" -> False];
+        controlsAll = PacletPage[dir, "LayoutControls" -> True];
+        controlsSub = PacletPage[dir, "LayoutControls" -> {"LeftSidebar", "Fullscreen"}];
+        controlsNoHdr = PacletPage[dir, "Header" -> False, "Footer" -> False, "LayoutControls" -> True];
+        allTags = DeleteDuplicates[Cases[{main, controlsAll, controlsNoHdr}, XMLElement[t_String, _, _] :> t, Infinity]];
+        PacletDirectoryLoad[dir];
+        loaded = WithCleanup[
+            {
+                PacletPage["Pub/Name", "F"] === symbol,
+                PacletPage["paclet:Pub/Name/ref/F#section"] === symbol,
+                PacletPage["paclet:Pub/Name"] === main,
+                PacletPage[First[PacletFind["Pub/Name"]], "F"] === symbol,
+                PacletPage[File[dir], "F"] === symbol,
+                PacletPage[PacletPageCatalog[File[dir]], "F"] === symbol
+            },
+            PacletDirectoryUnload[dir]
+        ];
         WithCleanup[
             {
-                MatchQ[main, WebRow[{_WebColumn, WebItem[_Notebook, ___]}, ___]],
-                entries,
-                Cases[nav, WebItem[label_String, ___] :> label, Infinity],
-                FirstCase[main[[1, 2, 1]], Cell[c_, "GuideTitle", ___] :> c, None, Infinity],
-                FirstCase[symbol[[1, 2, 1]], Cell[c_, "ObjectName", ___] :> c, None, Infinity],
-                symbol === PacletPageDOM[dir, "F"] === PacletPageDOM[dir, "ref/F"],
-                Cases[PacletPageDOM[dir, "Filter" -> "tutorial"], WebItem[Hyperlink[title_, _], ___] :> title, Infinity],
-                Head[PacletPageDOM[dir, "ref/Nope"]] === Failure && First[PacletPageDOM[dir, "ref/Nope"]] === "PacletPageNotFound"
+                MatchQ[main, XMLElement["div", {___, "class" -> "pp-shell", "data-paclet-page" -> "Pub/Name", "data-paclet-id" -> "guide/Name", "data-paclet-title" -> "Name Guide", ___}, _List]],
+                anchors[main],
+                Cases[main, XMLElement["div", {___, "class" -> "pp-nav-label", ___}, {label_String}] :> label, Infinity],
+                FirstCase[main, XMLElement["main", _, {___, nb_Notebook, ___}] :> FirstCase[nb, Cell[c_, "GuideTitle", ___] :> c, None, Infinity], None, Infinity],
+                FirstCase[symbol, XMLElement["main", _, {___, nb_Notebook, ___}] :> FirstCase[nb, Cell[c_, "ObjectName", ___] :> c, None, Infinity], None, Infinity],
+                symbol === PacletPage[dir, "F"] === PacletPage[dir, "ref/F"],
+                loaded,
+                First /@ anchors[filtered],
+                {
+                    StringContainsQ[FirstCase[noSym, XMLElement["div", attrs_List, _] :> Lookup[Association[attrs], "class", ""], "", {0}], "pp-no-symbols"],
+                    Cases[noSym, XMLElement["nav", {___, "class" -> "pp-side-right", ___}, _], Infinity] === {},
+                    MemberQ[First /@ anchors[FirstCase[noSym, XMLElement["nav", {___, "class" -> "pp-side", ___}, _], None, Infinity]], "F"]
+                },
+                {
+                    Cases[main, XMLElement["div", {___, "data-pp-layout-controls" -> _, ___}, _], Infinity] === {},
+                    FirstCase[controlsAll, XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
+                    FirstCase[controlsSub, XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
+                    FirstCase[PacletPage[dir, "SymbolsRail" -> False, "LayoutControls" -> True], XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
+                    Cases[controlsNoHdr, XMLElement["header" | "footer", _, _], Infinity] === {},
+                    FirstCase[controlsNoHdr, XMLElement["div", {___, "class" -> c_, ___, "data-pp-layout-controls" -> v_, ___}, _] :> {c, v}, None, Infinity]
+                },
+                SubsetQ[safeTags, allTags],
+                {
+                    MatchQ[PacletPage[dir, "ref/Nope"], Failure["PacletPageNotFound", _]],
+                    MatchQ[PacletPage["NoSuchPublisher/NoSuchPaclet"], Failure["PacletNotFound", _]],
+                    MatchQ[PacletPage[dir, "LayoutControls" -> "Bad"], Failure["InvalidOption", _]]
+                }
             },
             DeleteDirectory[dir, DeleteContents -> True]]
     ],
     {True,
         {{"Name Guide", "paclet:Pub/Name/guide/Name", True}, {"Sub Guide", "paclet:Pub/Name/guide/Sub", False},
             {"A Tutorial", "paclet:Pub/Name/tutorial/T", False}, {"F", "paclet:Pub/Name/ref/F", False}},
-        {"Guides", "Tutorials", "Symbols"}, "Name Guide", "F", True, {"A Tutorial"}, True},
-    TestID -> "DOM: a page of the paclet's documentation as WebRow, WebColumn and WebItem, its notebook beside the guide tree, tutorials and symbols, from a URI, an id or a name"
+        {"Guides", "Tutorials", "Symbols"}, "Name Guide", "F", True,
+        {True, True, True, True, True, True},
+        {"A Tutorial"},
+        {True, True, True},
+        {True, "left,right,fullscreen", "left,fullscreen", "left,fullscreen", True, {"pp-layout-controls pp-layout-controls-bar", "left,right,fullscreen"}},
+        True,
+        {True, True, True}},
+    TestID -> "Page: a page of a local or installed paclet as the three-column XMLElement shell with its live notebook and optional layout controls"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], catalog, html, expr, accentExpr, noFilter, customVer, noVer, noRoot},
+        catalog = PacletPageCatalog[File[dir]];
+        html = PacletPageFiles[catalog, "PageURL" -> "", "LayoutControls" -> True]["index.html"];
+        expr = PacletPage[dir, "LayoutControls" -> True];
+        accentExpr = PacletPage[dir, "Accent" -> "#1a66cc"];
+        noFilter = PacletPage[dir, "Filter" -> False];
+        customVer = PacletPage[dir, "VersionLabel" -> "preview"];
+        noVer = PacletPage[dir, "VersionLabel" -> False];
+        noRoot = PacletPage[dir, "RootGuide" -> False];
+        WithCleanup[
+            {
+                (* Unified shell parity: identical data-id order, native filter input, splitters, and layout buttons across HTML site and WL expression *)
+                StringCases[html, "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id] ===
+                    Cases[expr, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity],
+                Cases[expr, XMLElement["button", {___, "data-pp-layout" -> k_, ___}, _] :> k, Infinity] ===
+                    {"left", "right", "fullscreen", "fullscreen-exit"},
+                ! FreeQ[expr, XMLElement["input", {___, "class" -> "pp-filter", ___}, {}]] &&
+                    ! FreeQ[expr, XMLElement["div", {___, "class" -> "pp-split pp-split-left", ___}, {}]] &&
+                    ! FreeQ[expr, XMLElement["div", {___, "class" -> "pp-split pp-split-right", ___}, {}]],
+                (* Accent sets custom CSS variables on the shell *)
+                StringContainsQ[FirstCase[accentExpr, XMLElement["div", attrs_List, _] :> Lookup[Association[attrs], "style", ""], "", {0}], "--pp-accent: #1a66cc;"],
+                (* Filter -> False omits the filter slot *)
+                Cases[noFilter, XMLElement["div", {___, "class" -> "pp-filter-slot", ___}, _], Infinity] === {},
+                (* VersionLabel custom and False *)
+                FirstCase[customVer, XMLElement["span", {___, "class" -> "pp-ver", ___}, {v_String}] :> v, None, Infinity],
+                Cases[noVer, XMLElement["span", {___, "class" -> "pp-ver", ___}, _], Infinity] === {},
+                (* RootGuide -> False omits root link from left rail while keeping children *)
+                Cases[noRoot, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity],
+                (* Invalid Accent returns InvalidOption Failure *)
+                MatchQ[PacletPage[dir, "Accent" -> "not-a-color"], Failure["InvalidOption", _]]
+            },
+            DeleteDirectory[dir, DeleteContents -> True]
+        ]
+    ],
+    {True, True, True, True, True, "preview", True, {"guide/Sub", "tutorial/T", "ref/F"}, True},
+    TestID -> "Shell: static HTML site and PacletPage XMLElement share one shell builder and option parity"
+]
+
+VerificationTest[
+    Module[{dir = localFixture[], built, srcMd, fbMail, fbURL, noFbAuto, noTools, withRes},
+        CreateDirectory[FileNameJoin[{dir, "docs", "Symbols"}], CreateIntermediateDirectories -> True];
+        Export[FileNameJoin[{dir, "docs", "Symbols", "F.md"}], "---\nName: F\n---\n\n`F[x]` docs source.\n", "Text"];
+        built = PacletPage[dir, "F"];
+        srcMd = PacletPage[dir, "F", "View" -> "Source"];
+        fbMail = PacletPage[dir, "F", "FeedbackURL" -> "", "FeedbackEmail" -> "docs@example.org"];
+        fbURL = PacletPage[dir, "F", "FeedbackURL" -> "https://c.example/obj/u/SiteFeedback/Form"];
+        noFbAuto = PacletPage[dir, "F", "FeedbackURL" -> ""];
+        noTools = PacletPage[dir, "F", "Feedback" -> False, "ViewSource" -> False];
+        withRes = PacletPage[dir, "F", "ResourceLink" -> "https://c.example/obj/u/Resource"];
+        WithCleanup[
+            {
+                (* Default built view includes Feedback (with deduced URL) and View source in .pp-pagetools *)
+                Cases[built, XMLElement[_, {___, "data-pp-tool" -> t_, ___}, {lbl_String}] :> {t, lbl}, Infinity],
+                FirstCase[built, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
+                    With[{a = Association[attrs]}, {a["href"], a["data-pp-feedback-url"], a["data-pp-all-feedback"]}], None, Infinity],
+                (* Source view renders the docs/Symbols/F.md source and flips button to View built page *)
+                {
+                    FirstCase[srcMd, XMLElement["button", {___, "data-pp-tool" -> "viewtoggle", ___, "data-view" -> v_, ___}, {lbl_String}] :> {v, lbl}, None, Infinity],
+                    FirstCase[srcMd, XMLElement["main", _, {___, nb_Notebook, ___}] :> StringContainsQ[FirstCase[nb, Cell[s_String, "Program", ___] :> s, "", Infinity], "`F[x]` docs source."], False, Infinity]
+                },
+                (* FeedbackEmail without FeedbackURL produces RFC 6068 mailto: href and data-pp-feedback-to *)
+                FirstCase[fbMail, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
+                    With[{a = Association[attrs]}, {StringStartsQ[a["href"], "mailto:docs@example.org?subject="], a["data-pp-feedback-to"]}], None, Infinity],
+                (* Explicit FeedbackURL overrides deduced URL and sets All feedback link *)
+                FirstCase[fbURL, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
+                    With[{a = Association[attrs]}, {a["href"], a["data-pp-all-feedback"]}], None, Infinity],
+                (* Feedback -> Automatic with FeedbackURL -> "" and no email omits the Feedback button *)
+                Cases[noFbAuto, XMLElement[_, {___, "data-pp-tool" -> t_, ___}, _] :> t, Infinity],
+                (* Feedback -> False and ViewSource -> False omit .pp-pagetools *)
+                Cases[noTools, XMLElement["div", {___, "class" -> "pp-pagetools", ___}, _], Infinity] === {},
+                (* ResourceLink emits .pp-home link in header *)
+                FirstCase[withRes, XMLElement["a", {___, "class" -> "pp-home", ___, "href" -> u_, ___}, _] :> u, None, Infinity],
+                (* Invalid View / FeedbackEmail return InvalidOption Failure *)
+                {
+                    MatchQ[PacletPage[dir, "F", "View" -> "Bogus"], Failure["InvalidOption", _]],
+                    MatchQ[PacletPage[dir, "F", "FeedbackEmail" -> 123], Failure["InvalidOption", _]]
+                }
+            },
+            DeleteDirectory[dir, DeleteContents -> True]
+        ]
+    ],
+    {
+        {{"feedback", "Feedback"}, {"viewtoggle", "View source"}},
+        {
+            "https://www.wolframcloud.com/obj/pub/NameFeedback/Form",
+            "https://www.wolframcloud.com/obj/pub/NameFeedback/Form",
+            "https://www.wolframcloud.com/obj/pub/NameFeedback/All"
+        },
+        {{"source", "View built page"}, True},
+        {True, "docs@example.org"},
+        {"https://c.example/obj/u/SiteFeedback/Form", "https://c.example/obj/u/SiteFeedback/All"},
+        {"viewtoggle"},
+        True,
+        "https://c.example/obj/u/Resource",
+        {True, True}
+    },
+    TestID -> "Page: Feedback, View source/View built page, and ResourceLink match page.html and site.html"
+]
+
+VerificationTest[
+    Module[{attFile, calls = {}, res1, res2, resCustom, res500, resNoThanks, attTmpDir},
+        attFile = CreateFile[];
+        Export[attFile, "sample note", "Text"];
+        WithCleanup[
+            {
+                (* Default URL deduction from paclet name, URI, PublisherID, SiteURL, FeedbackURL, and missing publisher *)
+                {
+                    defaultFeedbackEndpoints["WolframInstitute/PacletPage"][["Form"]],
+                    defaultFeedbackEndpoints["WolframInstitute/PacletPage"][["All"]],
+                    defaultFeedbackEndpoints["paclet:WolframInstitute/TuringMachine/ref/Foo"][["Form"]],
+                    defaultFeedbackEndpoints[<|"Name" -> "Tool", "PublisherID" -> "MyOrg"|>][["Form"]],
+                    defaultFeedbackEndpoints[<|"Name" -> "Pub/Tool", "SiteURL" -> "https://c.example/obj/u/CustomSite"|>][["Form"]],
+                    defaultFeedbackEndpoints[<|"Name" -> "Pub/Tool", "FeedbackURL" -> "https://c.example/obj/u/CustomFeedback/Form"|>][["Form"]],
+                    defaultFeedbackEndpoints["BareNameWithoutPublisher"]
+                },
+                (* SubmitPacletPageFeedback posts expected multipart fields and cleans up inline attachment temp files *)
+                Block[{curlPost},
+                    curlPost[url_, referer_, fields_] := (
+                        AppendTo[calls, <|
+                            "URL" -> url,
+                            "Referer" -> referer,
+                            "Fields" -> Association[fields],
+                            "Att2Exists" -> With[{f = Lookup[Association[fields], "Attachment2", None]},
+                                If[MatchQ[f, File[_String]], attTmpDir = DirectoryName[First[f]]; FileExistsQ[First[f]], False]
+                            ]
+                        |>];
+                        <|"StatusCode" -> 200, "Body" -> "<div class=\"pp-feedback-thanks\">Thank you</div>"|>
+                    );
+                    res1 = SubmitPacletPageFeedback[
+                        "paclet:WolframInstitute/PacletPage/ref/PacletPage",
+                        "Missing example for LayoutControls.",
+                        "Where" -> "Basic Examples",
+                        "Expected" -> "Show LeftSidebar only.",
+                        "Email" -> "reader@example.org",
+                        "View" -> "source"
+                    ];
+                    res2 = SubmitPacletPageFeedback[
+                        "WolframInstitute/PacletPage",
+                        "ref/PacletPage",
+                        <|
+                            "Feedback" -> "Screenshot attached.",
+                            "Email" -> "",
+                            "Attachments" -> {
+                                File[attFile],
+                                <|"Name" -> "shot.png", "Base64" -> "data:image/png;base64,iVBORw0KGgo="|>
+                            }
+                        |>
+                    ];
+                    resCustom = SubmitPacletPageFeedback[
+                        "BareNameWithoutPublisher",
+                        "Custom endpoint test.",
+                        "Email" -> None,
+                        "FeedbackURL" -> "https://c.example/custom-hook"
+                    ];
+                    {
+                        res1,
+                        calls[[1, "URL"]],
+                        calls[[1, "Referer"]],
+                        KeyTake[calls[[1, "Fields"]], {"Feedback", "Where", "Expected", "Email", "Page", "Title", "Link", "View", "Website"}],
+                        res2["Submitted"],
+                        calls[[2, "Fields"]]["AttachmentNames"] === FileNameTake[attFile] <> "\nshot.png",
+                        MatchQ[calls[[2, "Fields"]]["Attachment1"], File[attFile]],
+                        calls[[2, "Att2Exists"]],
+                        StringQ[attTmpDir] && ! DirectoryQ[attTmpDir],
+                        resCustom["FeedbackURL"],
+                        calls[[3, "URL"]]
+                    }
+                ],
+                (* Validation and HTTP failure responses *)
+                {
+                    MatchQ[SubmitPacletPageFeedback["WolframInstitute/PacletPage", "   "], Failure["EmptyFeedback", _]],
+                    MatchQ[SubmitPacletPageFeedback["WolframInstitute/PacletPage", "Hi", "Email" -> "not-an-email"], Failure["InvalidEmail", _]],
+                    MatchQ[SubmitPacletPageFeedback["BareNameWithoutPublisher", "Hi", "Email" -> None], Failure["NoFeedbackURL", _]],
+                    Block[{curlPost = (<|"StatusCode" -> 500, "Body" -> "error"|> &)},
+                        res500 = SubmitPacletPageFeedback["WolframInstitute/PacletPage", "Hi", "Email" -> None];
+                        MatchQ[res500, Failure["FeedbackSubmitFailed", _]] && res500["StatusCode"] === 500
+                    ],
+                    Block[{curlPost = (<|"StatusCode" -> 200, "Body" -> "<html>unexpected</html>"|> &)},
+                        resNoThanks = SubmitPacletPageFeedback["WolframInstitute/PacletPage", "Hi", "Email" -> None];
+                        MatchQ[resNoThanks, Failure["FeedbackSubmitFailed", _]]
+                    ]
+                }
+            },
+            If[FileExistsQ[attFile], DeleteFile[attFile]]
+        ]
+    ],
+    {
+        {
+            "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/Form",
+            "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/All",
+            "https://www.wolframcloud.com/obj/wolframinstitute/TuringMachineFeedback/Form",
+            "https://www.wolframcloud.com/obj/myorg/ToolFeedback/Form",
+            "https://c.example/obj/u/CustomSiteFeedback/Form",
+            "https://c.example/obj/u/CustomFeedback/Form",
+            None
+        },
+        {
+            <|
+                "Submitted" -> True,
+                "Paclet" -> "WolframInstitute/PacletPage",
+                "Page" -> "ref/PacletPage",
+                "FeedbackURL" -> "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/Form",
+                "AllFeedbackURL" -> "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/All"
+            |>,
+            "https://www.wolframcloud.com/obj/wolframinstitute/PacletPageFeedback/Form",
+            "https://www.wolframcloud.com/obj/wolframinstitute/PacletPagePage",
+            <|
+                "Feedback" -> "Missing example for LayoutControls.",
+                "Where" -> "Basic Examples",
+                "Expected" -> "Show LeftSidebar only.",
+                "Email" -> "reader@example.org",
+                "Page" -> "ref/PacletPage",
+                "Title" -> "PacletPage",
+                "Link" -> "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage#ref/PacletPage",
+                "View" -> "source",
+                "Website" -> ""
+            |>,
+            True,
+            True,
+            True,
+            True,
+            True,
+            "https://c.example/custom-hook",
+            "https://c.example/custom-hook"
+        },
+        {True, True, True, True, True}
+    },
+    TestID -> "Feedback: defaultFeedbackEndpoints and SubmitPacletPageFeedback deduce URLs and post multipart payloads"
 ]
 
 VerificationTest[
@@ -2659,7 +2994,7 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{seen = {}},
+    Block[{seen = {}, $sitesRefreshed = False},
         Block[{readyToPublishQ = Function[Null, AppendTo[seen, {ResourceSystemClient`$AsyncronousResourceInformationUpdates, PacletManager`Services`Private`doWeeklyUpdate[]}]; False]},
             DeployPacletResource["/no/such/paclet/dir"]
         ];
@@ -2681,6 +3016,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{package = FileNameJoin[{$packageDirectory, "PacletPage.wl"}], calls = {}},
+        PacletSites[];
+        Block[{$AllowInternet = True, $AllowDataUpdates = True, PacletManager`Services`Private`getPacletSiteData,
+                PacletSiteUpdate = Function[Null, AppendTo[calls, {##}]; $Failed]},
+            DownValues[PacletManager`Services`Private`getPacletSiteData] = {HoldPattern[PacletManager`Services`Private`getPacletSiteData[]] :>
+                {{"https://never.example", "No cached index", None, {}, {}, None}}};
+            Get[package]; calls]],
+    {},
+    TestID -> "Build: loading PacletPage leaves a stale site untouched even when data updates are allowed"
+]
+
+VerificationTest[
     Block[{PacletManager`Services`Private`getPacletSiteData},
         PacletSites[];
         DownValues[PacletManager`Services`Private`getPacletSiteData] = {HoldPattern[PacletManager`Services`Private`getPacletSiteData[]] :> {
@@ -2689,16 +3036,26 @@ VerificationTest[
         staleSites[]
     ],
     {"https://old.example", "https://never.example"},
-    TestID -> "Build: the paclet sites last updated over three days ago, or never, are the stale ones PacletPage refreshes when it loads"
+    TestID -> "Build: the paclet sites last updated over three days ago, or never, are the stale ones considered for a build or deploy"
 ]
 
 VerificationTest[
-    {
-        Block[{$AllowInternet = False, staleSites = (Throw["asked", "stale"] &)}, Catch[refreshStaleSites[], "stale"]],
-        dependencyName /@ {"A/B", "C/D" -> "1.0", {"E/F", "2.0"}, <|"Name" -> "G/H", "Description" -> "x", "Resource" -> "https://example.org/r"|>, 7}
-    },
-    {Null, {"A/B", "C/D", "E/F", "G/H"}},
-    TestID -> "Build: a kernel with internet access disallowed refreshes no site when PacletPage loads, and a dependency declared as an association is named by its Name"
+    Module[{calls = {}, site = First[PacletSites[]]},
+        Block[{$sitesRefreshed = False, staleSites = ({"https://old.example"} &),
+                PacletSiteUpdate = Function[{url, option}, AppendTo[calls, {url, option}]; site]},
+            Block[{$AllowInternet = False, $AllowDataUpdates = True}, refreshPacletSites[]];
+            Block[{$AllowInternet = True, $AllowDataUpdates = False}, refreshPacletSites[]];
+            With[{before = calls},
+                Block[{$AllowInternet = True, $AllowDataUpdates = True}, refreshPacletSites[]; refreshPacletSites[]];
+                {before, calls}]]],
+    {{}, {{"https://old.example", Asynchronous -> False}}},
+    TestID -> "Build: stale sites are refreshed synchronously once, only when both internet and data updates are enabled"
+]
+
+VerificationTest[
+    dependencyName /@ {"A/B", "C/D" -> "1.0", {"E/F", "2.0"}, <|"Name" -> "G/H", "Description" -> "x", "Resource" -> "https://example.org/r"|>, 7},
+    {"A/B", "C/D", "E/F", "G/H"},
+    TestID -> "Build: a dependency declared as an association is named by its Name"
 ]
 
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)

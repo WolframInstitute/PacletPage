@@ -86,13 +86,38 @@ function sampleHTML() {
   const config = { title: 'Index test', resource: 'about:blank', page: 'viewer.html',
     home: { type: 'resource', url: 'about:blank' }, routes: [], filter: true };
   const initials = [...new Set(names.map(name => name[0]))];
-  const slots = { title: config.title, css: read('site.css') + '\n* { transition: none !important; }',
-    railClass: 'indexed', indexHidden: '', symbolTotal: names.length, batchSize: '45',
-    letterButtons: initials.map(ch => '<button type="button" value="' + ch + '" aria-label="Jump to ' + ch + '">' + ch + '</button>').join(''),
-    letterOptions: initials.map(ch => '<option value="' + ch + '">' + ch + '</option>').join(''),
-    js: read('site.js'), config: JSON.stringify(config), symbols: '<ul class="nav-symbols">' + rows.join('') + '</ul>' };
-  return read('site.html').replace(/<link rel="stylesheet"[^>]+>/, '')
-    .replace(/`(\w+)`/g, (_, slot) => slots[slot] || '');
+  const letterButtons = initials.map(ch => '<button type="button" value="' + ch + '" aria-label="Jump to ' + ch + '">' + ch + '</button>').join('');
+  const letterOptions = initials.map(ch => '<option value="' + ch + '">' + ch + '</option>').join('');
+  const body =
+    '<header id="hdr">' +
+      '<button id="navToggle" type="button" aria-label="Guides and tutorials" aria-controls="side" aria-expanded="false">&#9776;</button>' +
+      '<a class="brand" id="homelink" href="#">' + config.title + '</a>' +
+      '<input id="q" type="search" autocomplete="off" spellcheck="false" />' +
+      '<button id="symToggle" type="button" aria-label="Symbols" aria-controls="side-right" aria-expanded="false">&#8942;</button>' +
+      '<a class="home" id="resourcelink" href="about:blank" target="_blank" rel="noopener">Resource page</a>' +
+    '</header>' +
+    '<div id="main">' +
+      '<div id="scrim"></div>' +
+      '<nav id="side-right" class="indexed" data-batch-size="45" aria-label="Symbols">' +
+        '<div class="symbol-index">' +
+          '<div class="symbol-heading"><h2>Symbol index</h2><span class="symbol-total">' + names.length + '</span></div>' +
+          '<div class="symbol-browse">' +
+            '<div class="symbol-letters" role="group" aria-label="First letter">' + letterButtons + '</div>' +
+            '<div class="symbol-letter-picker"><label for="symbol-first-letter">First letter</label><div class="symbol-select"><select id="symbol-first-letter">' + letterOptions + '</select></div></div>' +
+            '<div class="symbol-prefix"><label for="symbol-prefix">Symbol group</label><div class="symbol-select"><select id="symbol-prefix"><option value=""></option></select><span class="symbol-selection" aria-hidden="true"></span></div></div>' +
+          '</div>' +
+          '<div class="symbol-count" role="status"></div>' +
+        '</div>' +
+        '<div class="symbol-scroll"><ul class="nav-symbols">' + rows.join('') + '</ul><button class="symbol-more" type="button"></button></div>' +
+      '</nav>' +
+      '<nav id="side" aria-label="Guides and tutorials"></nav>' +
+      '<div class="splitter" id="splitL" role="separator" aria-orientation="vertical" tabindex="0"></div>' +
+      '<div id="content"><div id="loading">Loading...</div><iframe id="frame" title="documentation"></iframe></div>' +
+      '<div class="splitter" id="splitR" role="separator" aria-orientation="vertical" tabindex="0"></div>' +
+    '</div>';
+  const slots = { title: config.title, bodyClass: '', css: read('site.css') + '\n* { transition: none !important; }',
+    body, js: read('site.js'), config: JSON.stringify(config) };
+  return read('site.html').replace(/`(\w+)`/g, (_, slot) => slots[slot] || '');
 }
 
 for (const width of [1200, 700]) {

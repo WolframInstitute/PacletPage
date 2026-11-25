@@ -151,6 +151,58 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], context = "Check" <> StringDelete[CreateUUID[], "-"] <> "`", owner, failure, messages},
+        WithCleanup[
+            Export[FileNameJoin[{dir, StringDrop[context, -1] <> ".m"}], StringJoin[
+                "BeginPackage[", ToString[context, InputForm], "]\n",
+                "Get[", ToString[FileNameJoin[{dir, "missing-driver"}], InputForm], "]\n",
+                "readyQ[] := (Get[", ToString[FileNameJoin[{dir, "missing-config"}], InputForm], "]; ",
+                "Failure[\"Toolchain\", <|\"MessageTemplate\" -> \"Setup failed.\", \"Code\" -> 7, \"Messages\" -> {\"Consumer detail.\"}|>])\n",
+                "EndPackage[]\n"], "Text"];
+            owner = <|"PrimaryContext" -> context|>;
+            failure = Block[{$Path = Prepend[$Path, dir], $Packages = $Packages},
+                dependencyReadiness[owner, <|"Check" -> context <> "readyQ"|>]];
+            messages = failure["Messages"];
+            {First[failure], failure["Code"], First[messages], Length[messages],
+                StringContainsQ[messages[[2]], "missing-driver"], StringContainsQ[messages[[3]], "missing-config"]},
+            Remove[Evaluate[context <> "*"]]; DeleteDirectory[dir, DeleteContents -> True]]],
+    {"Toolchain", 7, "Consumer detail.", 3, True, True}, {Get::noopen, Get::noopen},
+    TestID -> "Dependencies: preserve loading and hook messages alongside consumer failure data"
+]
+
+VerificationTest[
+    With[{owner = testDependencyOwner[{}, {}], entry = <|"Check" -> "Demo`Consumer`TestReadyQ"|>},
+        {Block[{Demo`Consumer`TestReadyQ = (Throw[13] &)}, Catch[dependencyReadiness[owner, entry]]],
+         Block[{Demo`Consumer`TestReadyQ = (Throw[17, "outside"] &)}, Catch[dependencyReadiness[owner, entry], "outside"]],
+         Block[{Demo`Consumer`TestReadyQ = (Abort[] &)}, CheckAbort[dependencyReadiness[owner, entry], "aborted"]]}],
+    {13, 17, "aborted"}, TestID -> "Dependencies: readiness callbacks can throw or abort through the public check"
+]
+
+VerificationTest[
+    With[{owner = testDependencyOwner[{}, {}], entry = <|"Check" -> "Demo`Consumer`TestReadyQ"|>},
+        Function[{outcome, noisy}, Block[{Demo`Consumer`TestReadyQ = Function[Null, If[noisy, Message[Power::infy, "1/0"]]; outcome]},
+            With[{failure = dependencyReadiness[owner, entry]},
+                {First[failure], Length[failure["Messages"]], StringQ[dependencyReadinessDetail[failure]]}]]] @@@
+            {{$Failed, False}, {$Failed, True}, {$Aborted, False}, {False, False}, {Failure["Bare"], True}}],
+    {{"DependencyCheckFailed", 0, True}, {"DependencyCheckFailed", 1, True}, {"DependencyCheckFailed", 0, True},
+        {"DependencyCheckFailed", 0, True}, {"DependencyCheckFailed", 1, True}},
+    {Power::infy, Power::infy},
+    TestID -> "Dependencies: a check that gives $Failed, or a Failure with no association, is a failed check that keeps its messages"
+]
+
+VerificationTest[
+    Module[{reason = Failure["Setup", <|"MessageTemplate" -> "Setup failed.", "Messages" -> {"Missing runtime."}|>],
+            row, report, boxes, text = "Setup failed.\nMissing runtime."},
+        row = <|"Name" -> "Demo/Library", "Status" -> "Needs setup", "InstalledVersion" -> "1.0", "ReadinessFailure" -> reason|>;
+        Table[report = PacletDependencyReport["Demo/Consumer", records]; boxes = ToBoxes[report, StandardForm];
+            {dependencyRowNotice[row]["NoticeDetail"] === text, ! FreeQ[First[boxes], ToBoxes[text, StandardForm]],
+                ToExpression[boxes, StandardForm] === report},
+            {records, {<|"Demo/Library" -> row|>, <|"Demo/Library" -> row, "Demo/Other" -> <|"Name" -> "Demo/Other", "Status" -> "Installed"|>|>}}]],
+    {{True, True, True}, {True, True, True}},
+    TestID -> "Dependencies: single and multiple library reports and row tooltips display the captured readiness diagnostic"
+]
+
+VerificationTest[
     With[{owner = testDependencyOwner[{}, {<|"Name" -> "PacletTools", "Check" -> "Demo`Consumer`TestReadyQ"|>}]},
         Block[{$dependencyRestarts = <|"PacletTools" -> True|>, $Context = Context[dependencyLocalStatus],
                 $ContextPath = {"WolframInstitute`PacletPage`", "System`"}},
@@ -211,6 +263,19 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {"Demo/Indexed", "Demo/Unknown"}], calls = {}, rows},
+        Block[{$AllowInternet = False, PacletFindRemote = Function[{name, refresh},
+                AppendTo[calls, Last[refresh]];
+                If[name === "Demo/Indexed", {PacletObject[<|"Name" -> name, "Version" -> "1.0"|>]}, {}]],
+                dependencyInstallFile = Function[Null, Throw["download"]]},
+            rows = PacletDependencyInformation[owner, "CheckUpdates" -> True];
+            {rows["Demo/Indexed"]["LatestVersion"], First[rows["Demo/Unknown"]["LatestVersion"]],
+                First[InstallPacletDependencies[owner, "Demo/Indexed"]["Demo/Indexed"]], calls}]],
+    {"1.0", "DependencyInternetDisabled", "DependencyInternetDisabled", {False, False, False}},
+    TestID -> "Dependencies: an offline site lookup reads cached releases without refreshing or downloading"
+]
+
+VerificationTest[
     Module[{owner = testDependencyOwner[{}, {"Demo/First", "Demo/Second"}]},
         Block[{dependencyRelease = Function[{p, entry}, If[entry["Name"] === "Demo/First", dependencyFailure["Network", "Offline."], <|"Version" -> "1.0"|>]]},
             With[{rows = PacletDependencyInformation[owner, "CheckUpdates" -> True]},
@@ -221,14 +286,14 @@ VerificationTest[
 VerificationTest[
     With[{owner = testDependencyOwner[{}, {"Demo/Optional"}],
             releases = PacletObject[<|"Name" -> "Demo/Optional", "Version" -> #|>] & /@ {"2.0.0-beta", "1.9.0", "1.8.0"}},
-        Block[{PacletFindRemote = (releases &)},
+        Block[{$AllowInternet = True, PacletFindRemote = (releases &)},
             PacletDependencyInformation[owner, "CheckUpdates" -> True]["Demo/Optional"]["LatestVersion"]]],
     "1.9.0", TestID -> "Dependencies: a newer prerelease on a site does not hide its latest compatible numeric release"
 ]
 
 VerificationTest[
     Module[{owner = testDependencyOwner[{}, {"Demo/Slow", "Demo/Fast"}], calls = {}, latest},
-        Block[{$dependencyVersionTimeout = 0.15, PacletFindRemote = Function[{name, refresh},
+        Block[{$AllowInternet = True, $dependencyVersionTimeout = 0.15, PacletFindRemote = Function[{name, refresh},
                 AppendTo[calls, {name, Last[refresh]}];
                 If[name === "Demo/Slow", Pause[5]];
                 {PacletObject[<|"Name" -> name, "Version" -> "2.0"|>]}]},
@@ -387,6 +452,18 @@ VerificationTest[
         Cases[boxes, ButtonBox[_, opts___] /; ! FreeQ[HoldComplete[opts], testStart | testCancelled] :>
             FirstCase[HoldComplete[opts], HoldPattern[Method -> m_] :> m, None, {1}], Infinity]],
     {"Queued", "Preemptive"}, TestID -> "Dependencies: a check uses the main evaluation queue and cancellation uses the preemptive link"
+]
+
+VerificationTest[
+    Module[{owner = testDependencyOwner[{}, {}], original = NotebookObject["Original"], copy = NotebookObject["Copy"], start, stop, held},
+        held[options_, key_] := FirstCase[options, HoldPattern[RuleDelayed[key, body_]] :> HoldComplete[body], None, {1}];
+        Replace[dependencyLibraryList[owner, owner, <||>, start, stop], HoldPattern[DynamicModule[locals_, _, opts___]] :>
+            Block[locals, With[{init = held[HoldComplete[opts], Initialization], dispose = held[HoldComplete[opts], Deinitialization]},
+                Block[{EvaluationNotebook = (original &)}, ReleaseHold[init]];
+                Block[{EvaluationNotebook = (copy &)}, ReleaseHold[init]; ReleaseHold[dispose]];
+                Block[{dependencyRunCheck = Function[Null, "checked", HoldAll]},
+                    {start[True, original], stop[original], FreeQ[DownValues[start], copy], FreeQ[DownValues[stop], copy]}]]]]],
+    {"checked", True, True, True}, TestID -> "Dependencies: a rendered notebook copy has its own check callback lifetime"
 ]
 
 VerificationTest[
@@ -823,7 +900,7 @@ VerificationTest[
 
 VerificationTest[
     UsingFrontEnd[Block[{$dependencyDialogs = <||>}, Module[
-        {owners = {testDependencyOwner[{}, {"Demo/Optional"}], testDependencyOwner[{}, {"Demo/Other"}]}, source, open, first, other, reloaded, recovered, feedback, kept},
+        {owners = {testDependencyOwner[{}, {"Demo/Optional"}], testDependencyOwner[{}, {"Demo/Other"}]}, source, open, first, other, reloaded, recovered, feedback, kept, events},
         source = CreateDocument[{}, Visible -> False];
         open[owner_] := Block[{dependencyDesktopQ = (True &), EvaluationNotebook = (source &), SetSelectedNotebook = (Null &)},
             PacletDependencyDialog[owner]];
@@ -835,13 +912,15 @@ VerificationTest[
             Block[{$Context = Context[dependencyDialogTags], $ContextPath = {"WolframInstitute`PacletPage`", "System`"}},
                 Get[FileNameJoin[{$packageDirectory, "DependencyDialog.wl"}]]];
             reloaded = open[Last[owners]]; kept = CurrentValue[reloaded, feedback];
+            events = Keys[Association[NotebookEventActions /. Options[reloaded, NotebookEventActions]]];
             $dependencyDialogs = <||>;
             recovered = open /@ owners;
             {first =!= other, reloaded === other, kept, recovered === {first, other},
-                CurrentValue[Last[recovered], feedback], Round[CurrentValue[Last[recovered], WindowSize]]},
+                CurrentValue[Last[recovered], feedback], Round[CurrentValue[Last[recovered], WindowSize]],
+                ContainsAll[events, {"ReturnKeyDown", {"MenuCommand", "HandleShiftReturn"}}]},
             Scan[NotebookClose, Intersection[Cases[Flatten[{source, first, other, reloaded, recovered}], _NotebookObject], Notebooks[]]]]
     ]]],
-    {True, True, "1 passed", True, "", {440, 300}},
+    {True, True, "1 passed", True, "", {440, 300}, True},
     TestID -> "Dependencies: a package reload preserves open dialogs and a fresh evaluator rebuilds each consumer's dialog in place"
 ]
 
@@ -886,7 +965,7 @@ VerificationTest[
     },
     {
         {{"sw1sh", "WolframParser"}, {"sw1sh", "WolframParser"}, {"a", "b"}, None, None, None},
-        {True, True, False, False, False},
+        {True, True, False, True, False},
         {True, True, True, False, False, False}
     },
     TestID -> "Dependencies: a git source is a GitHub repository, a commit of 7 to 40 hexadecimal digits and a relative path"
@@ -910,10 +989,76 @@ VerificationTest[
 VerificationTest[
     dependencyPacletInfoFields /@ {
         "PacletObject[<|\"Name\" -> \"A/B\", \"Version\" -> \"2.1\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> Print[\"evaluated\"]}}|>]",
-        "(* ::Package:: *)\n\nPacletObject[<|\n    \"Name\" -> \"A/B\",\n    \"Version\" -> \"2.1\"\n|>]\n"
+        "(* ::Package:: *)\n\nPacletObject[<|\n    \"Name\" -> \"A/B\",\n    \"Version\" -> \"2.1\"\n|>]\n",
+        "(* old manifest *)\nPaclet[Name -> \"A/B\", Version -> \"2.1\", MathematicaVersion -> \"12+\", SystemID -> {\"Linux-x86-64\"}]",
+        "PacletObject[<|\"Name\" -> \"A/B\", \"SystemID\" -> StringJoin[\"Win\", \"dows\"], \"Extensions\" -> {{\"Kernel\", \"SystemID\" -> All}}|>]"
     },
-    {<|"Name" -> "A/B", "Version" -> "2.1"|>, <|"Name" -> "A/B", "Version" -> "2.1"|>},
-    TestID -> "Dependencies: a commit's PacletInfo.wl is read for its name and version without being evaluated"
+    {<|"Name" -> "A/B", "Version" -> "2.1"|>, <|"Name" -> "A/B", "Version" -> "2.1"|>,
+        <|"Name" -> "A/B", "Version" -> "2.1", "MathematicaVersion" -> "12+", "SystemID" -> {"Linux-x86-64"}|>,
+        <|"Name" -> "A/B", "SystemID" -> Missing["Nonliteral"]|>},
+    TestID -> "Dependencies: current and legacy Git manifests supply literal top-level compatibility fields"
+]
+
+VerificationTest[
+    Module[{entry = <|"Name" -> "Demo/FromGit", "Git" -> "https://github.com/example/tools", "Commit" -> "ABCDEF0", "Path" -> "Math Tools"|>,
+            urls = {}, release, failed},
+        Block[{dependencyGitText = Function[url, AppendTo[urls, url];
+                If[StringEndsQ[url, ".wl"], Missing["NotFound"], "Paclet[Name -> \"Demo/FromGit\", Version -> \"1.0\"]"]]},
+            release = dependencyGitRelease[entry]];
+        Block[{dependencyGitText = Function[url, AppendTo[urls, url]; $Failed]}, failed = dependencyGitRelease[entry]];
+        {release["Version"], release["GitManifest"], First[failed], urls}
+    ],
+    {"1.0", "PacletInfo.m", "DependencyRelease", {
+        "https://raw.githubusercontent.com/example/tools/abcdef0/Math%20Tools/PacletInfo.wl",
+        "https://raw.githubusercontent.com/example/tools/abcdef0/Math%20Tools/PacletInfo.m",
+        "https://raw.githubusercontent.com/example/tools/abcdef0/Math%20Tools/PacletInfo.wl"}},
+    TestID -> "Dependencies: Git uses PacletInfo.m after a missing PacletInfo.wl and preserves transport errors"
+]
+
+VerificationTest[
+    Block[{$ProgressReporting = True, URLRead = Function[Null, <|"StatusCode" -> 200, "Body" -> ToString[$ProgressReporting]|>]},
+        dependencyGitText["https://raw.githubusercontent.com/example/tools/abcdef0/PacletInfo.wl"]],
+    "False", TestID -> "Dependencies: a Git manifest request reports no progress, which a script's kernel would print from then on"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], commit = StringRepeat["c", 40], name = "Demo/Extracted", info, top, zip, owner, seen},
+        info = "PacletObject[<|\"Name\" -> \"" <> name <> "\", \"Version\" -> \"1.0\"|>]";
+        top = FileNameJoin[{root, "repo-" <> commit}];
+        Scan[Function[file, With[{path = FileNameJoin[Prepend[file, top]]},
+                CreateDirectory[DirectoryName[path], CreateIntermediateDirectories -> True];
+                Export[path, If[Last[file] === "PacletInfo.wl", info, "1"], "Text"]]],
+            {{"PacletInfo.wl"}, {"Kernel", "Root.wl"}, {"Sub", "PacletInfo.wl"}, {"Sub", "Kernel", "Library.wl"}, {"Docs", "Page.md"}}];
+        zip = CreateArchive[top, FileNameJoin[{root, "tree.zip"}]];
+        owner[path_] := testDependencyOwner[{}, {Join[<|"Name" -> name, "Git" -> "https://github.com/demo/repo", "Commit" -> commit|>, path]}];
+        WithCleanup[
+            Block[{$AllowInternet = True, dependencyGitText = (info &),
+                    dependencyDownloaded = Function[{url, file}, CopyFile[zip, file]; File[file]],
+                    dependencyInstallFile = Function[{archive, library, version, git},
+                        seen = Sort[FileNameTake /@ Select[FileNames["*", FileNameJoin[{DirectoryName[First[archive]], "tree"}], Infinity], ! DirectoryQ[#] &]];
+                        {git["Path"], seen}]},
+                {InstallPacletDependencies[owner[<|"Path" -> "Sub"|>], name][name], InstallPacletDependencies[owner[<||>], name][name],
+                    First[InstallPacletDependencies[owner[<|"Path" -> "Missing"|>], name][name]]}],
+            DeleteDirectory[root, DeleteContents -> True]]],
+    {{"Sub", Sort[{$dependencyGitReceipt, "Library.wl", "PacletInfo.wl"}]},
+        {"", Sort[{$dependencyGitReceipt, "Library.wl", "PacletInfo.wl", "PacletInfo.wl", "Page.md", "Root.wl"}]}, "DependencyArchive"},
+    TestID -> "Dependencies: only the paclet's directory is extracted from a commit's archive, and all of it for a paclet at the root"
+]
+
+VerificationTest[
+    Module[{name = "Demo/GitRuntime", owner, manifest, downloads = 0, outcomes},
+        owner = testDependencyOwner[{}, {<|"Name" -> name, "Git" -> "https://github.com/example/tools", "Commit" -> "abcdef0"|>}];
+        Block[{$AllowInternet = True, dependencyGitText = Function[url, manifest], dependencyDownloaded = Function[Null, downloads++; $Failed]},
+            outcomes = Table[
+                manifest = ToString[PacletObject[Join[<|"Name" -> name, "Version" -> "2.0"|>, restriction]], InputForm];
+                {First[PacletDependencyInformation[owner, "CheckUpdates" -> True][name]["LatestVersion"]],
+                    First[InstallPacletDependencies[owner, name][name]]},
+                {restriction, {<|"SystemID" -> If[$SystemID === "Windows-x86-64", "MacOSX-ARM64", "Windows-x86-64"]|>,
+                    <|"WolframVersion" -> IntegerString[Ceiling[$VersionNumber] + 1] <> "+"|>}}]];
+        {outcomes, downloads}
+    ],
+    {{{"DependencyArchive", "DependencyArchive"}, {"DependencyArchive", "DependencyArchive"}}, 0},
+    TestID -> "Dependencies: Git release discovery and installation reject an incompatible target before fetching the archive"
 ]
 
 VerificationTest[
@@ -926,7 +1071,7 @@ VerificationTest[
         zip = CreateArchive[FileNameJoin[{root, "repo-" <> commit}], FileNameJoin[{root, "tree.zip"}]];
         owner = testDependencyOwner[{}, {<|"Name" -> name, "Git" -> "https://github.com/demo/repo.git", "Commit" -> commit, "Path" -> "Sub"|>}];
         WithCleanup[
-            Block[{dependencyGitText = Function[url, AppendTo[urls, url]; info],
+            Block[{$AllowInternet = True, $AllowDataUpdates = False, dependencyGitText = Function[url, AppendTo[urls, url]; info],
                     dependencyDownloaded = Function[{url, file}, AppendTo[urls, url]; CopyFile[zip, file]; File[file]]},
                 release = dependencyRelease[owner, dependencyManifest[owner][name]];
                 installed = InstallPacletDependencies[owner, name]];

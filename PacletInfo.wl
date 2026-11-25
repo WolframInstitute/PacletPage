@@ -6,7 +6,7 @@ PacletObject[<|
     "Creator" -> "Nikolay Murzin",
     "PublisherID" -> "WolframInstitute",
     "License" -> "MIT",
-    "Version" -> "0.3.87",
+    "Version" -> "0.3.91",
     "WolframVersion" -> "14.3+",
     "PrimaryContext" -> "WolframInstitute`PacletPage`",
     "Extensions" -> {
@@ -16,10 +16,13 @@ PacletObject[<|
             "Context" -> "WolframInstitute`PacletPage`",
             "Symbols" -> {
                 "WolframInstitute`PacletPage`PacletPageCatalog",
+                "WolframInstitute`PacletPage`PacletPage",
                 "WolframInstitute`PacletPage`PacletPageFiles",
+                "WolframInstitute`PacletPage`BuildPacletPageSite",
                 "WolframInstitute`PacletPage`DeployPacletPage",
                 "WolframInstitute`PacletPage`DeployPacletPageFeedback",
                 "WolframInstitute`PacletPage`PacletPageFeedback",
+                "WolframInstitute`PacletPage`SubmitPacletPageFeedback",
                 "WolframInstitute`PacletPage`SetPacletPageFeedbackStatus",
                 "WolframInstitute`PacletPage`SetPacletPagePermissions",
                 "WolframInstitute`PacletPage`CheckPacletPage",
