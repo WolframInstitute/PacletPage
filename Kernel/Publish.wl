@@ -1061,7 +1061,7 @@ Options[BuildPacletDocumentation] = {
     "Monitor" -> False
 };
 
-BuildPacletDocumentation::dir ="`1` is not a paclet directory: it has no PacletInfo.wl.";
+BuildPacletDocumentation::dir = "`1` is not a paclet directory: it has no PacletInfo.wl.";
 BuildPacletDocumentation::lost = "`1` pages the build planned have no notebook and are not among its failures: `2`.";
 BuildPacletDocumentation::source = "`1` has no markdown documentation.";
 BuildPacletDocumentation::page = "`1` did not become a notebook: `2`.";
