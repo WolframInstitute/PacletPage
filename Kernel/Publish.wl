@@ -437,7 +437,7 @@ PacletPageDependencies[dir_String, file_String, opts : OptionsPattern[]] := Modu
     result = readerScan[PacletPageDependencies, dir, {opts}];
     If[ result === $Failed, Return[$Failed, Module]];
     scan = First[result];
-    keys = definitionKeys[scan, sharedCode[dir, scan, result[[2]], result[[3]], OptionValue["CacheVersion"], converterSpec[OptionValue["Converter"]]["ID"]]];
+    keys = definitionKeys[scan, sharedCode[dir, scan, result[[2]], result[[3]], OptionValue["CacheVersion"], converterKey[converterSpec[OptionValue["Converter"]]]]];
     named = Sort[namedSymbols[keys, pageTextNames[file]]];
     graph = scanGraph[scan];
     <|
@@ -608,6 +608,11 @@ cachedExamples[internals_Association, examples_List] := Intersection[Lookup[exam
 (* the TeX parser the converter loads, which a parallel kernel loads from where this kernel found
    it: a parallel kernel's paclet catalog predates an install this kernel made *)
 parserDirectories[] := Replace[PacletFind["Wolfram/Parser"], {{paclet_PacletObject, ___} :> {paclet["Location"]}, _ -> {}}];
+
+(* The converter as page keys know it: its own ID and the code of the parser it loads, so that a
+   change of parser converts the pages again. An example's key leaves the converter out, so no
+   example is evaluated again for it. *)
+converterKey[spec_Association] := digest[{spec["ID"], codeHash[parserDirectories[]]}];
 
 (* The parallel kernels a build converts on: Automatic, the kernels launched already; True, as
    many as the processors and the memory allow (a kernel converting pages takes about a
@@ -1077,10 +1082,17 @@ buildDependencyDirectory[_, File[target_String]] := target;
 buildDependencyDirectory[_, target_String] := target;
 buildDependencyDirectory[_, _] := $Failed;
 
-(* Install declared dependencies before loading the paclet or building its documentation, each
-   from the consumer's own list: a dependency's own dependencies are not followed. Required
-   dependency failures abort the build; optional dependencies unavailable on $SystemID are skipped. *)
-installBuildDependencies[head_Symbol, dir_String, spec_, directory_ : Automatic] := Module[{owner, manifest, target, installed, failed},
+(* the paclet this build runs from, whose own "Dependencies" are the build tool's: the parser its
+   converter loads among them *)
+pacletPageOwner[] := With[{root = ParentDirectory[$packageDirectory]},
+    If[AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ[FileNameJoin[{root, #}]] &], PacletObject[File[root]], None]];
+
+(* Install declared dependencies before loading the paclet or building its documentation, pinned,
+   each from its own list: a dependency's own dependencies are not followed. The build tool's come
+   first, into the same directory, and the consumer's entry for the build tool is skipped, as the
+   build runs it. Required dependency failures abort the build; the consumer's optional
+   dependencies unavailable on $SystemID are skipped, and the build tool's optional ones may fail. *)
+installBuildDependencies[head_Symbol, dir_String, spec_, directory_ : Automatic] := Module[{owner, manifest, target, tool, toolManifest, names, installed, failed},
     If[spec === False || spec === None, Return[True]];
     If[! MatchQ[spec, All | _String | {___String}],
         Message[head::installdeps, dir, "Invalid InstallDependencies specification: " <> ToString[spec, InputForm]];
@@ -1092,8 +1104,18 @@ installBuildDependencies[head_Symbol, dir_String, spec_, directory_ : Automatic]
     owner = PacletObject[File[dir]];
     manifest = dependencyManifest[owner];
     If[FailureQ[manifest], Message[head::installdeps, dir, manifest]; Return[$Failed]];
-    If[manifest === <||>, Return[True]];
-    installed = InstallPacletDependencies[owner, spec, "CheckReadiness" -> False, "TargetDirectory" -> target];
+    tool = pacletPageOwner[];
+    If[MatchQ[tool, _PacletObject] && tool["Name"] =!= owner["Name"],
+        toolManifest = dependencyManifest[tool];
+        If[FailureQ[toolManifest], Message[head::installdeps, dir, toolManifest]; Return[$Failed]];
+        If[toolManifest =!= <||>,
+            installed = InstallPacletDependencies[tool, Keys[toolManifest], "CheckReadiness" -> False, "TargetDirectory" -> target, "Pinned" -> True];
+            If[FailureQ[installed], Message[head::installdeps, dir, installed]; Return[$Failed]];
+            failed = Select[Normal[installed], FailureQ[Last[#]] && TrueQ[toolManifest[First[#]]["Required"]] &];
+            If[failed =!= {}, Message[head::installdeps, dir, failed]; Return[$Failed]]]];
+    names = DeleteCases[dependencySelectionNames[manifest, spec], "WolframInstitute/PacletPage"];
+    If[names === {}, Return[True]];
+    installed = InstallPacletDependencies[owner, names, "CheckReadiness" -> False, "TargetDirectory" -> target, "Pinned" -> True];
     If[FailureQ[installed], Message[head::installdeps, dir, installed]; Return[$Failed]];
     failed = Select[Normal[installed], Function[pair,
         FailureQ[Last[pair]] && (TrueQ[manifest[First[pair]]["Required"]] || ! MatchQ[Last[pair], Failure["UnsupportedSystem", _]])]];
@@ -1109,7 +1131,7 @@ BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Block[{$program
     ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, buildPacletDocumentation[dir, opts]];
 buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentation]] := Module[
     {
-        paclet, source, target, spec, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, store, cacheSymbol, useCache, separator,
+        paclet, source, target, spec, converterID, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, store, cacheSymbol, useCache, separator,
         all, files, metas, guides, definitionSource, tasks, misses, kernelsBefore, kernels, setup, results, outcomes,
         ok, failed, pruned, pageFiles, skipped, unevaluated, flagged, kernelPIDs
     },
@@ -1134,6 +1156,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     (* a paclet whose examples run on another kernel loads there, and need not load here *)
     If[ StringQ[paclet["PrimaryContext"]] && OptionValue["EvaluationKernel"] === None, Needs[paclet["PrimaryContext"]]];
     spec = converterSpec[OptionValue["Converter"]];
+    converterID = converterKey[spec];
     (* the cache: each page's notebook under a key of everything it depends on, and the code each
        page's examples were last evaluated with, since the converter caches an example's result by
        its code alone *)
@@ -1197,7 +1220,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
        of it, its dependencies' and the converter's *)
     keyed = pageCodes[OptionValue["CacheKey"], dir, paclet, tasks, <|
         "Dependencies" -> OptionValue["Dependencies"], "Excluded" -> Flatten[{OptionValue["CacheExcludedFiles"]}],
-        "Versioned" -> OptionValue["CacheVersion"], "Converter" -> spec["ID"], "EvaluationKernel" -> OptionValue["EvaluationKernel"],
+        "Versioned" -> OptionValue["CacheVersion"], "Converter" -> converterID, "EvaluationKernel" -> OptionValue["EvaluationKernel"],
         "Cache" -> cache, "Work" -> workDir, "Monitor" -> TrueQ[OptionValue["Monitor"]]
     |>];
     codes = keyed["Codes"];
@@ -1215,7 +1238,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     examples = Replace[If[FileExistsQ[examplesFile], Import[examplesFile, "WXF"], <||>], Except[_Association] -> <||>];
     examples = If[ KeyExistsQ[examples, "Codes"], examples, <|"Codes" -> examples, "Pages" -> <||>|>];
     tasks = Map[
-        Function[task, With[{code = codes[task["Page"]]}, With[{key = pageKey[task, spec["ID"], code, guides]},
+        Function[task, With[{code = codes[task["Page"]]}, With[{key = pageKey[task, converterID, code, guides]},
             Join[task, <|
                 "Code" -> code,
                 "Entry" -> FileNameJoin[{pagesDir, key <> ".nb"}],
@@ -3279,7 +3302,7 @@ stageBundledDependencies[head_Symbol, dir_String, stage_String, spec_] := Catch[
                         Message[head::bundledeps, dir, "Could not pack installed dependency " <> depName];
                         Throw[$Failed, "bundle"]];
                     AppendTo[bundled, FileNameTake[packed]],
-                KeyExistsQ[entry, "Archive"],
+                KeyExistsQ[entry, "Archive"] && ! dependencyHTTPQ[entry["Archive"]],
                     relArchive = dependencyArchivePath[owner, entry["Archive"]];
                     If[FailureQ[relArchive] || ! FileExistsQ[First[relArchive]],
                         Message[head::bundledeps, dir, "Missing archive for " <> depName];

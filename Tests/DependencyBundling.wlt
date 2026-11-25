@@ -136,7 +136,8 @@ VerificationTest[
                 }
             |>], FileNameJoin[{consumerDir, "PacletInfo.wl"}]];
             target = FileNameJoin[{consumerDir, "build", "dependencies"}];
-            okAll = installBuildDependencies[BuildPacletDocumentation, consumerDir, All];
+            (* the consumer's own list alone: the build tool's dependencies have a test of their own *)
+            okAll = Block[{pacletPageOwner = (None &)}, installBuildDependencies[BuildPacletDocumentation, consumerDir, All]];
             copies = PacletFind[reqName];
 
             (* Required unsupported dependency must abort with message *)
@@ -144,7 +145,8 @@ VerificationTest[
                 "Name" -> "Example/BuildDepsFail", "Version" -> "1.0.0",
                 "Dependencies" -> {<|"Name" -> optName, "Platforms" -> {"NonExistent-OS-99"}|>}
             |>], FileNameJoin[{consumerDir, "PacletInfo.wl"}]];
-            failReq = Quiet[installBuildDependencies[BuildPacletDocumentation, consumerDir, "Required"], {BuildPacletDocumentation::installdeps}];
+            failReq = Block[{pacletPageOwner = (None &)},
+                Quiet[installBuildDependencies[BuildPacletDocumentation, consumerDir, "Required"], {BuildPacletDocumentation::installdeps}]];
             {okAll === True, Length[copies] === 1 && StringStartsQ[ExpandFileName[First[copies]["Location"]], ExpandFileName[target]],
                 MemberQ[ExpandFileName /@ PacletDirectoryLoad[], ExpandFileName[target]], failReq === $Failed},
             PacletDirectoryUnload[target];
@@ -201,12 +203,11 @@ VerificationTest[
 
 VerificationTest[
     With[{info = PacletDependencyInformation[File[DirectoryName[$TestFileName, 2]], "Output" -> "Association"]},
-        AssociationQ[info] && KeyExistsQ[info, "WolframInstitute/GitLink"] &&
-            TrueQ[info["WolframInstitute/GitLink"]["Required"]] &&
-            info["WolframInstitute/GitLink"]["Version"] === "2.0+"
+        {Keys[info], info["WolframInstitute/GitLink"]["Required"], info["WolframInstitute/GitLink"]["Version"],
+            info["Wolfram/Parser"]["Required"], info["Wolfram/Parser"]["Version"], KeyTake[info["Wolfram/Parser"]["Pin"], {"Git", "Path"}]}
     ],
-    True,
-    TestID -> "PacletPage declares WolframInstitute/GitLink as a required dependency"
+    {{"WolframInstitute/GitLink", "Wolfram/Parser"}, False, "2.0+", True, "1.9.13+", <|"Git" -> "https://github.com/sw1sh/WolframParser", "Path" -> "Parser"|>},
+    TestID -> "PacletPage declares GitLink as optional and the converter's parser as required, pinned for builds"
 ]
 
 End[]

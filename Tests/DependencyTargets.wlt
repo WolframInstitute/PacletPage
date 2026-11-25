@@ -213,4 +213,115 @@ VerificationTest[
     TestID -> "PacletInstall ignores a consumer's Dependencies: required, optional and Git entries install nothing and leave no message"
 ]
 
+VerificationTest[
+    Module[{owner = PacletObject[<|"Name" -> "Example/PinConsumer", "Version" -> "1.0"|>], url = "https://www.wolframcloud.com/obj/demo/DeployedResources/Paclet/Example/Lib",
+            sha = StringRepeat["f", 40], entry, gitPinned, paclet200},
+        entry = <|"Name" -> "Example/Lib", "Version" -> "1.0.0+", "Resource" -> url, "Pin" -> <|"Version" -> "1.5.0"|>|>;
+        paclet200 = PacletObject[<|"Name" -> "Example/Lib", "Version" -> "2.0.0"|>];
+        gitPinned = dependencyPinned[<|"Name" -> "Example/Lib", "Resource" -> url, "Pin" -> <|"Git" -> "https://github.com/example/lib", "Commit" -> sha|>|>];
+        Block[{dependencyResourceRelease = (<|"Version" -> "2.0.0", "DescriptionURL" -> "https://www.wolframcloud.com/obj/demo/description"|> &)},
+            {
+                dependencyEntryQ[entry, owner],
+                ! dependencyEntryQ[Append[entry, "Pin" -> <|"Version" -> "1.5+"|>], owner],
+                ! dependencyEntryQ[Append[entry, "Pin" -> <||>], owner],
+                ! dependencyEntryQ[Append[entry, "Pin" -> <|"Resource" -> url|>], owner],
+                dependencyRelease[owner, entry, True]["Version"],
+                MatchQ[dependencyRelease[owner, dependencyPinned[entry], True], Failure["DependencyVersion", _]],
+                KeyExistsQ[gitPinned, "Resource"], gitPinned["Commit"] === sha && ! KeyExistsQ[gitPinned, "Pin"],
+                dependencyLocalStatus[entry, {paclet200}],
+                dependencyPinned[KeyDrop[entry, "Pin"]] === KeyDrop[entry, "Pin"]
+            }]],
+    {True, True, True, True, "2.0.0", True, False, True, "Installed", True},
+    TestID -> "Pin: ignored outside pinned mode; pinned, its exact version refuses another release and a pinned source replaces the entry's"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], name = testUniqueName["TestPinLib"], arc, owner, target, unpinned, pinned, conflict},
+        target = FileNameJoin[{root, "deps"}];
+        WithCleanup[
+            arc = CreatePacletArchive[testPaclet[root, "lib", <|"Name" -> name, "Version" -> "1.0.0"|>], root];
+            testPaclet[root, "elsewhere/" <> name, <|"Name" -> name, "Version" -> "1.0.0"|>];
+            PacletDirectoryLoad[FileNameJoin[{root, "elsewhere"}]];
+            owner = PacletObject[<|"Name" -> "Example/PinTarget", "Version" -> "1.0", "Location" -> root,
+                "Dependencies" -> {<|"Name" -> name, "Version" -> "1.0+", "Archive" -> FileNameTake[arc], "Pin" -> <|"Version" -> "1.0.0"|>|>}|>];
+            unpinned = InstallPacletDependencies[owner, name, "CheckReadiness" -> False, "TargetDirectory" -> target][name];
+            pinned = InstallPacletDependencies[owner, name, "CheckReadiness" -> False, "TargetDirectory" -> target, "Pinned" -> True][name];
+            testPaclet[root, "newer/" <> name, <|"Name" -> name, "Version" -> "1.1.0"|>];
+            PacletDirectoryLoad[FileNameJoin[{root, "newer"}]];
+            conflict = InstallPacletDependencies[owner, name, "CheckReadiness" -> False, "TargetDirectory" -> target, "Pinned" -> True][name];
+            {
+                MatchQ[unpinned, _PacletObject] && StringStartsQ[ExpandFileName[unpinned["Location"]], ExpandFileName[FileNameJoin[{root, "elsewhere"}]]],
+                MatchQ[pinned, _PacletObject] && StringStartsQ[ExpandFileName[pinned["Location"]], ExpandFileName[target]],
+                MatchQ[conflict, Failure["DependencyVersionConflict", _]]
+            },
+            Scan[PacletDirectoryUnload, FileNameJoin[{root, #}] & /@ {"elsewhere", "newer", "deps"}];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, True, True},
+    TestID -> "Pin: a pinned installation into a directory counts only the copies there, and a newer copy elsewhere is a conflict"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], name = testUniqueName["TestURLLib"], url = "https://example.org/Example__Lib-1.5.0.paclet",
+            demo = "https://www.wolframcloud.com/obj/demo/DeployedResources/Paclet/Example/Lib", arc150, arc151, owner, install, good, bad},
+        WithCleanup[
+            arc150 = CreatePacletArchive[testPaclet[root, "v150", <|"Name" -> name, "Version" -> "1.5.0"|>], root];
+            arc151 = CreatePacletArchive[testPaclet[root, "v151", <|"Name" -> name, "Version" -> "1.5.1"|>], root];
+            owner = PacletObject[<|"Name" -> "Example/URLConsumer", "Version" -> "1.0",
+                "Dependencies" -> {<|"Name" -> name, "Pin" -> <|"Version" -> "1.5.0", "Archive" -> url|>|>}|>];
+            install = Function[{archive, target}, Block[{dependencyDownloaded = Function[{u, file}, CopyFile[archive, file]; File[file]]},
+                InstallPacletDependencies[owner, name, "CheckReadiness" -> False, "TargetDirectory" -> target, "Pinned" -> True][name]]];
+            good = install[arc150, FileNameJoin[{root, "good"}]];
+            bad = install[arc151, FileNameJoin[{root, "bad"}]];
+            {
+                MatchQ[good, _PacletObject] && good["Version"] === "1.5.0" && StringStartsQ[ExpandFileName[good["Location"]], ExpandFileName[FileNameJoin[{root, "good"}]]],
+                MatchQ[bad, Failure["DependencyArchive", _]],
+                dependencyEntryQ[<|"Name" -> name, "Version" -> "1.5.0", "Archive" -> url|>, owner],
+                ! dependencyEntryQ[<|"Name" -> name, "Version" -> "1.5+", "Archive" -> url|>, owner],
+                ! dependencyEntryQ[<|"Name" -> name, "Version" -> "1.5.0", "Archive" -> "https://example.org/Lib.zip"|>, owner],
+                ! dependencyEntryQ[<|"Name" -> name, "Version" -> "1.5.0", "Resource" -> demo, "Archive" -> url|>, owner],
+                dependencyEntryQ[<|"Name" -> name, "Version" -> "1.5.0", "Resource" -> demo,
+                    "Archive" -> "https://www.wolframcloud.com/obj/demo/Paclets/Example__Lib-1.5.0.paclet"|>, owner]
+            },
+            Scan[PacletDirectoryUnload, FileNameJoin[{root, #}] & /@ {"good", "bad"}];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, True, True, True, True, True, True},
+    TestID -> "Archive at an https address: an exact pinned release downloads into the directory, and an archive of another version is refused"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], consumer, target, calls = {}, result},
+        WithCleanup[
+            consumer = testPaclet[root, "consumer", <|"Name" -> "Demo/BuildToolConsumer", "Version" -> "1.0",
+                "Dependencies" -> {<|"Name" -> "WolframInstitute/PacletPage"|>, <|"Name" -> "Demo/Other", "Optional" -> True|>}|>];
+            target = FileNameJoin[{root, "deps"}];
+            result = Block[{InstallPacletDependencies = Function[Null, AppendTo[calls, {##}];
+                    AssociationMap[PacletObject[<|"Name" -> #, "Version" -> "1.0"|>] &, Flatten[{#2}]]]},
+                installBuildDependencies[BuildPacletDocumentation, consumer, All, target]];
+            {result, Length[calls], calls[[1, 1]]["Name"], calls[[1, 2]], calls[[2, 2]],
+                AllTrue[calls, MemberQ[#, "Pinned" -> True] && MemberQ[#, "TargetDirectory" -> target] &]},
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, 2, "WolframInstitute/PacletPage", {"WolframInstitute/GitLink", "Wolfram/Parser"}, {"Demo/Other"}, True},
+    TestID -> "BuildPacletDocumentation: the build tool's own dependencies install first, pinned, into the same directory, and the consumer's entry for the build tool is skipped"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], a, b, key},
+        WithCleanup[
+            a = testPaclet[root, "a", <|"Name" -> "Wolfram/Parser", "Version" -> "1.0"|>];
+            b = testPaclet[root, "b", <|"Name" -> "Wolfram/Parser", "Version" -> "1.1"|>];
+            key = Function[dirs, Block[{parserDirectories = (dirs &)}, converterKey[<|"ID" -> "converter"|>]]];
+            {key[{a}] === key[{a}], Length[DeleteDuplicates[{key[{}], key[{a}], key[{b}]}]]},
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, 3},
+    TestID -> "BuildPacletDocumentation: a page's converter key has the code of the parser the converter loads"
+]
+
 End[]

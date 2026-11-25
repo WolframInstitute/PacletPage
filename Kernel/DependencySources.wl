@@ -138,6 +138,9 @@ dependencyRelease[owner_, entry_, checkUpstream_ : False] := Module[{name = entr
         If[AssociationQ[bundled], Return[bundled]]
     ];
     release = Which[
+        (* an archive at an https address is the exact release its entry names, read without a request *)
+        KeyExistsQ[entry, "Archive"] && dependencyHTTPQ[entry["Archive"]],
+            <|"Version" -> entry["Version"], "ArchiveURL" -> entry["Archive"]|>,
         KeyExistsQ[entry, "Archive"],
             archive = dependencyArchivePath[owner, entry["Archive"]];
             If[FailureQ[archive], Return[archive]];
@@ -220,6 +223,8 @@ dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]},
                 True, dependencyInstallFile[release["SitePaclet"], name, release["Version"]]],
         KeyExistsQ[release, "GitURL"] || KeyExistsQ[release, "GitArchive"],
             dependencyGitInstall[release, entry],
+        KeyExistsQ[release, "ArchiveURL"],
+            If[$AllowInternet === False, dependencyOffline[], dependencyDownloadInstall[release["ArchiveURL"], name, release["Version"]]],
         KeyExistsQ[release, "Archive"],
             dependencyInstallFile[release["Archive"], name, release["Version"], Lookup[release, "BundledGit", None]],
         True,

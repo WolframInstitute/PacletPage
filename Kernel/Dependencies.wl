@@ -36,7 +36,8 @@ dependencyEntryQ[entry_, owner_] := With[{
     links = Lookup[entry, "SetupLinks", <||>], size = Lookup[entry, "DownloadSize", ""]
 },
     ContainsAll[{"Name", "Required", "Optional", "Version", "Platforms", "Description", "Check", "Resource", "Archive", "Git", "Commit", "Path",
-        "DownloadSize", "License", "URL", "SetupLinks"}, Keys[entry]] &&
+        "DownloadSize", "License", "URL", "SetupLinks", "Pin"}, Keys[entry]] &&
+    dependencyPinQ[entry, owner] &&
     BooleanQ[Lookup[entry, "Optional", False]] &&
     dependencyNameQ[name] && name =!= owner["Name"] && dependencyVersionSpecQ[version] &&
     (platforms === All || MatchQ[platforms, {___String}]) &&
@@ -44,7 +45,7 @@ dependencyEntryQ[entry_, owner_] := With[{
     AllTrue[Values[KeyTake[entry, {"URL", "Resource"}]], dependencyHTTPQ] &&
     dependencyTextMapQ[links] && AllTrue[Values[links], dependencyHTTPQ] &&
     (StringQ[size] || dependencyTextMapQ[size]) &&
-    (! KeyExistsQ[entry, "Archive"] || (StringQ[entry["Archive"]] && entry["Archive"] =!= "" && ! KeyExistsQ[entry, "Resource"])) &&
+    (! KeyExistsQ[entry, "Archive"] || dependencyArchiveEntryQ[entry]) &&
     (* a repository at a commit is a source of its own, or the fallback of a published "Resource",
        and a commit or a path names nothing without one *)
     If[KeyExistsQ[entry, "Git"],
@@ -54,6 +55,34 @@ dependencyEntryQ[entry_, owner_] := With[{
     (check === None || (StringQ[check] && StringMatchQ[check, RegularExpression["([a-zA-Z$][a-zA-Z0-9$]*`)+[a-zA-Z$][a-zA-Z0-9$]*"]] &&
         AnyTrue[Cases[Flatten[{owner["PrimaryContext"], owner["Context"]}], _String], StringStartsQ[check, #] &]))
 ]
+
+(* An archive relative to the consumer is a source of its own. An archive at an https address is
+   one exact release, so it comes with an exact version, and beside a published "Resource" it must
+   be that publisher's file. *)
+dependencyArchiveEntryQ[entry_] := With[{archive = entry["Archive"]}, StringQ[archive] && archive =!= "" &&
+    If[dependencyHTTPQ[archive],
+        StringEndsQ[ToLowerCase[Last[Replace[URLParse[archive, "Path"], Except[{__String}] -> {""}]]], ".paclet"] &&
+            dependencyVersionQ[Lookup[entry, "Version", None]] &&
+            (! KeyExistsQ[entry, "Resource"] || dependencyPublisherURLQ[entry["Resource"], archive]),
+        ! KeyExistsQ[entry, "Resource"]]
+]
+
+(* What a build installs instead: "Pin" -> <|...|> with keys among "Version", "Archive", "Git",
+   "Commit" and "Path", laid over the entry in pinned mode and ignored otherwise. A pin that names a
+   source, "Git" or "Archive", replaces the entry's own; a pin's version is exact. *)
+$dependencyPinKeys = {"Version", "Archive", "Git", "Commit", "Path"};
+dependencyPinned[entry_Association] := With[{pin = Lookup[entry, "Pin", None]},
+    If[! AssociationQ[pin], entry,
+        Join[If[KeyExistsQ[pin, "Git"] || KeyExistsQ[pin, "Archive"],
+            KeyDrop[entry, {"Pin", "Resource", "Archive", "Git", "Commit", "Path"}], KeyDrop[entry, "Pin"]], pin]]
+]
+dependencyPinQ[entry_, owner_] := ! KeyExistsQ[entry, "Pin"] || With[{pin = entry["Pin"]},
+    AssociationQ[pin] && pin =!= <||> && ContainsAll[$dependencyPinKeys, Keys[pin]] &&
+        (! KeyExistsQ[pin, "Version"] || dependencyVersionQ[pin["Version"]]) &&
+        dependencyEntryQ[dependencyPinned[entry], owner]]
+
+(* set by an installation in pinned mode, as a build's *)
+$dependencyPinned = False
 
 (* The paclet's own "Dependencies" list: a dependency is required unless its declaration says
    "Optional" -> True *)
@@ -85,7 +114,8 @@ withDependencySelection[ownerSpec_, selection_, action_] := Module[{owner = depe
     names = dependencySelectionNames[entries, selection];
     unknown = Complement[names, Keys[entries]];
     If[unknown =!= {}, Return[dependencyFailure["UnknownDependency", "`1` does not declare `2`.", owner["Name"], unknown]]];
-    Block[{$refreshDependencySites = True}, action[owner, AssociationThread[names, Lookup[entries, names]]]]
+    Block[{$refreshDependencySites = True}, action[owner, AssociationThread[names,
+        If[TrueQ[$dependencyPinned], dependencyPinned /@ Lookup[entries, names], Lookup[entries, names]]]]]
 ]
 
 dependencyMap[action_, ownerSpec_, selection_, filter_: Identity] := withDependencySelection[ownerSpec, selection,
@@ -193,26 +223,28 @@ withDependencyTarget[dir_String, body_] := With[{target = ExpandFileName[dir]},
 ]
 withDependencyTarget[spec_, _] := dependencyFailure["DependencyTarget", "Give Automatic or a directory as the target directory, not `1`.", spec]
 
-Options[InstallPacletDependencies] = {"CheckReadiness" -> True, "TargetDirectory" -> Automatic}
+Options[InstallPacletDependencies] = {"CheckReadiness" -> True, "TargetDirectory" -> Automatic, "Pinned" -> False}
 InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject)] :=
     InstallPacletDependencies[owner, All]
 InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject),
         first : (_Rule | _RuleDelayed | {(_Rule | _RuleDelayed) ..}), rest : OptionsPattern[]] :=
     InstallPacletDependencies[owner, All, first, rest]
 InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
-    With[{check = TrueQ[OptionValue["CheckReadiness"]]},
-        withDependencyTarget[OptionValue["TargetDirectory"], dependencyMap[dependencyInstall[#1, #2, False, check] &, owner, names]]
+    With[{check = TrueQ[OptionValue["CheckReadiness"]], pinned = TrueQ[OptionValue["Pinned"]]},
+        withDependencyTarget[OptionValue["TargetDirectory"], Block[{$dependencyPinned = pinned},
+            dependencyMap[dependencyInstall[#1, #2, False, check] &, owner, names]]]
     ]
 
-Options[UpdatePacletDependencies] = {"CheckReadiness" -> True, "TargetDirectory" -> Automatic}
+Options[UpdatePacletDependencies] = {"CheckReadiness" -> True, "TargetDirectory" -> Automatic, "Pinned" -> False}
 UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject)] :=
     UpdatePacletDependencies[owner, All]
 UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject),
         first : (_Rule | _RuleDelayed | {(_Rule | _RuleDelayed) ..}), rest : OptionsPattern[]] :=
     UpdatePacletDependencies[owner, All, first, rest]
 UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
-    With[{check = TrueQ[OptionValue["CheckReadiness"]]},
-        withDependencyTarget[OptionValue["TargetDirectory"], dependencyMap[dependencyInstall[#1, #2, True, check] &, owner, names]]
+    With[{check = TrueQ[OptionValue["CheckReadiness"]], pinned = TrueQ[OptionValue["Pinned"]]},
+        withDependencyTarget[OptionValue["TargetDirectory"], Block[{$dependencyPinned = pinned},
+            dependencyMap[dependencyInstall[#1, #2, True, check] &, owner, names]]]
     ]
 
 dependencyRemovableQ[entry_] := ! TrueQ[entry["Required"]] && entry["Name"] =!= "WolframInstitute/PacletPage"
@@ -227,10 +259,15 @@ dependencyChecked[owner_, entry_, paclet_, checkReadiness_ : True] := Module[{re
         "InstalledVersion" -> paclet["Version"], "Cause" -> readiness|>]]
 ]
 
-dependencyInstall[owner_, entry_, update_, checkReadiness_ : True] := Module[{name = entry["Name"], installed, current, receipt, release, pinned, result, loaded},
+dependencyInstall[owner_, entry_, update_, checkReadiness_ : True] := Module[{name = entry["Name"], installed, active, current, own, receipt, release, pinned, result, loaded},
     If[! dependencySupportedQ[entry], Return[dependencyFailure["UnsupportedSystem", "`1` is unavailable on `2`.", name, $SystemID]]];
     installed = PacletFind[name];
-    current = First[installed, None];
+    active = First[installed, None];
+    (* a pinned installation into a directory of its own counts only the copies there *)
+    own = TrueQ[$dependencyPinned] && dependencyTargetQ[];
+    current = If[own, SelectFirst[installed, dependencyInTargetQ, None], active];
+    If[own && current =!= None && active =!= None && ! dependencyInTargetQ[active] && PacletNewerQ[active["Version"], current["Version"]],
+        Return[dependencyFailure["DependencyVersionConflict", "Installed `1` `2` is newer than the pinned version `3`.", name, active["Version"], current["Version"]]]];
     If[update && current === None, Return[dependencyFailure["DependencyNotInstalled", "Install `1` before updating it.", name]]];
     (* a copy with a receipt answers to the pin alone; any other copy, to the versions on offer *)
     receipt = If[current =!= None && KeyExistsQ[entry, "Git"], dependencyInstalledGit[current], None];
@@ -242,6 +279,9 @@ dependencyInstall[owner_, entry_, update_, checkReadiness_ : True] := Module[{na
     release = dependencyRelease[owner, entry, update];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     If[FailureQ[release], Return[release]];
+    (* a newer copy outside the directory would load instead of the pinned one *)
+    If[own && active =!= None && ! dependencyInTargetQ[active] && PacletNewerQ[active["Version"], release["Version"]],
+        Return[dependencyFailure["DependencyVersionConflict", "Installed `1` `2` is newer than the pinned version `3`.", name, active["Version"], release["Version"]]]];
     (* every release of a Git source alone is its pin; beside a published "Resource", only one checked out *)
     pinned = KeyExistsQ[entry, "Git"] && (! KeyExistsQ[entry, "Resource"] || dependencyGitReleaseQ[release]);
     If[pinned && current =!= None,

@@ -54,6 +54,8 @@ Only the consumer's own list is read: a dependency's own dependencies are not fo
 | `"DownloadSize"` | Display text or an association of system IDs to display text |
 | `"URL"`, `"SetupLinks"` | Setup instructions and an optional association of additional link labels to HTTPS URLs |
 | `"Check"` | Fully qualified name of a zero-argument readiness function in the consumer's kernel context |
+| `"Pin"` | What a documentation build installs instead: an association of `"Version"` (exact), `"Archive"`, `"Git"`, `"Commit"` and `"Path"` |
+| `"Archive"` | A `.paclet` file relative to the consumer directory, or the https address of one, with an exact `"Version"` |
 | `"Git"`, `"Commit"`, `"Path"` | HTTPS Git repository URL, commit ID (7 to 40 hexadecimal digits, either case), and optional paclet subdirectory |
 
 This declaration installs Wolfram/Parser from the `Parser` directory at the specified commit.
@@ -173,11 +175,27 @@ For headless documentation builds that need every declared library (both require
 BuildPacletDocumentation[dir, "InstallDependencies" -> All]
 ```
 
+A build installs exact versions, while users keep minimums. Each declaration can say what a build installs with a `"Pin"`. Outside a build the pin is ignored, so the dialog, the information report and the loader go by the declaration's own fields. A pin's `"Version"` is exact, and a pin that names a source, `"Git"` or `"Archive"`, replaces the declaration's own.
+
+```wl
+#| eval: false
+<|
+    "Name" -> "Demo/Algebra",
+    "Version" -> "1.2+",
+    "Resource" -> "https://www.wolframcloud.com/obj/demo/DeployedResources/Paclet/Demo/Algebra",
+    "Pin" -> <|"Version" -> "1.4.0", "Archive" -> "https://www.wolframcloud.com/obj/demo/Paclets/Demo__Algebra-1.4.0.paclet"|>
+|>
+```
+
+Users install the newest published release from 1.2 on, and a build installs 1.4.0 from its archive. A version pin without an `"Archive"` takes the published release only while it is that version, and fails otherwise rather than install another one. A build into its own directory counts only the copies there.
+
+The build also installs PacletPage's own dependencies, the parser its converter loads among them, pinned and into the same directory, before the consumer's. It skips the consumer's `WolframInstitute/PacletPage` entry, since the build runs it, so a consumer declares no build-only library.
+
 The same installation is available to a script with the `"TargetDirectory"` option.
 
 ```wl
 #| eval: false
-InstallPacletDependencies[File[dir], All, "CheckReadiness" -> False, "TargetDirectory" -> FileNameJoin[{dir, "build", "dependencies"}]]
+InstallPacletDependencies[File[dir], All, "CheckReadiness" -> False, "Pinned" -> True, "TargetDirectory" -> FileNameJoin[{dir, "build", "dependencies"}]]
 ```
 
 ## Make setup work on a fresh installation

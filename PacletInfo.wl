@@ -12,10 +12,18 @@ PacletObject[<|
     "Dependencies" -> {
         <|
             "Name" -> "WolframInstitute/GitLink",
+            "Optional" -> True,
             "Version" -> "2.0+",
             "Resource" -> "https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/GitLink",
             "Platforms" -> {"MacOSX-ARM64", "Linux-x86-64"},
             "Description" -> "Native libgit2 1.9 bindings for shallow Git fetches and sparse path checkouts"
+        |>,
+        <|
+            "Name" -> "Wolfram/Parser",
+            "Version" -> "1.9.13+",
+            "Resource" -> "https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/Wolfram/Parser",
+            "Description" -> "LaTeX math parsing for the documentation converter",
+            "Pin" -> <|"Git" -> "https://github.com/sw1sh/WolframParser", "Commit" -> "5e05149ead1c292ebd39d02eee85f1c0b8059f55", "Path" -> "Parser"|>
         |>
     },
     "Extensions" -> {

@@ -63,6 +63,8 @@ RelatedTutorials: [PublishingADocumentationSite, CachingADocumentationBuild]
 | `"Monitor"` | `False` | whether to print how many pages there are, cached and to convert, then each page as it is converted |
 
 - `"UseCache" -> False` converts every page and evaluates every example afresh, whatever has changed.
+- With `"InstallDependencies"`, the installation is pinned: each declaration's `"Pin"` is installed. PacletPage's own dependencies, the parser its converter loads among them, are installed first into the same directory, and the consumer's entry for `WolframInstitute/PacletPage` is skipped, since the build runs it.
+- A page's key includes the code of the parser the converter loads, so a change of parser converts the pages again without evaluating their examples again.
 
 ## Basic Examples
 
