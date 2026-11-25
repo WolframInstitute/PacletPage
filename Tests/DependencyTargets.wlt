@@ -105,10 +105,13 @@ VerificationTest[
             Block[{dependencyResourceInstall = (failure &), dependencyGitRelease = (gitRelease &), dependencyGitInstall = ({"checkout", #1["Version"]} &)},
                 dependencyPublishedInstall[both, <|"Version" -> "1.2.0"|>]],
             MatchQ[Block[{dependencyResourceInstall = (failure &), dependencyGitRelease = (Failure["DependencyRelease", <|"MessageTemplate" -> "No manifest"|>] &)},
-                dependencyPublishedInstall[both, <|"Version" -> "1.2.0"|>]], Failure["DependencyRelease", KeyValuePattern["PublishedFailure" -> failure]]]
+                dependencyPublishedInstall[both, <|"Version" -> "1.2.0"|>]], Failure["DependencyRelease", KeyValuePattern["PublishedFailure" -> failure]]],
+            (* the dialog offers no upgrade to a copy from the release at the latest version *)
+            With[{row = dependencyInfo[owner, both, installed, False, False]},
+                {row["Status"], KeyExistsQ[row, "GitRevisionMatch"], MemberQ[dependencyRowActions[Append[row, "LatestVersion" -> "1.2.0"]], "Update"]}]
         }
     ],
-    {True, True, True, True, {"Installed", "Revision mismatch"}, True, True, {"checkout", "1.1.0"}, True},
+    {True, True, True, True, {"Installed", "Revision mismatch"}, True, True, {"checkout", "1.1.0"}, True, {"Installed", False, False}},
     TestID -> "Resource beside Git: the published release first, the pinned checkout as its fallback, and a copy from either meets the declaration"
 ]
 

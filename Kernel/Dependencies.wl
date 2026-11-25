@@ -159,7 +159,8 @@ dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{resu
     git = If[installed =!= {} && KeyExistsQ[entry, "Git"], dependencyInstalledGit[First[installed]], None];
     result = Join[entry, <|"Status" -> dependencyLocalStatus[entry, installed, git],
         "InstalledVersion" -> If[installed === {}, Missing["NotInstalled"], First[installed]["Version"]]|>];
-    If[git =!= None,
+    (* a copy from the published release beside a pin has no revision to compare *)
+    If[git =!= None && ! (KeyExistsQ[entry, "Resource"] && MissingQ[git]),
         AssociateTo[result, {"InstalledGitSource" -> git, "GitRevisionMatch" -> dependencyGitMatchesQ[git, entry],
             "GitUserInstallation" -> dependencyGitUserCopyQ[First[installed]]}]];
     If[probe && result["Status"] === "Installed" && StringQ[entry["Check"]],
