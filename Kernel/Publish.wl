@@ -197,7 +197,19 @@ withoutLanguageData[expr_] := (
 );
 
 (* the paclet directories this kernel has loaded *)
-pacletDirectories[] := Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &];
+pacletDirectories[] := DeleteDuplicates @ Join[
+    Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &],
+    runningPacletPageDirectories[]
+];
+
+(* The running PacletPage, where this kernel's paclet catalog does not find it, as when it was read
+   from a file: the kernels a build starts load a consumer whose loader looks for PacletPage, and
+   would otherwise install it. *)
+runningPacletPageDirectories[] := With[{root = ParentDirectory[$packageDirectory]},
+    If[ AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ[FileNameJoin[{root, #}]] &] &&
+            ! MemberQ[ExpandFileName /@ Cases[#["Location"] & /@ PacletFind["WolframInstitute/PacletPage"], _String], ExpandFileName[root]],
+        {root}, {}]
+];
 
 (* the code a paclet's examples run: the paclet's own and its dependencies', given as directories
    or paclet names, by default the ones its PacletInfo declares, wherever they are found *)

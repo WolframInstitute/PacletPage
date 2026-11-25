@@ -217,7 +217,7 @@ For offline setup, put the publisher's PacletPage release archive beside the loa
 CopyFile[archive, FileNameJoin[{resources, "PacletPage.paclet"}]]
 ```
 
-The loader prefers a compatible installed copy. On first use of a bundled archive, it extracts it into the user's cache and checks its compatibility with the running Wolfram system before loading it. Other consumers can reuse the same cached release. The loader checks the interface the paclet supplies, so two builds with the same version can be distinguished. If neither copy supplies the manager, the returned failure gives the publisher's install command. A kernel that already loaded an older package receives a restart instruction.
+The loader prefers a compatible installed copy, one that meets the minimum the consumer declares for `WolframInstitute/PacletPage`, if it declares one. On first use of a bundled archive, it extracts it into the user's cache and checks its compatibility with the running Wolfram system before loading it. Other consumers can reuse the same cached release. The loader checks the interface the paclet supplies, so two builds with the same version can be distinguished. If neither copy supplies the manager, the returned failure gives the install command, at the address the consumer declares for PacletPage. A kernel that already loaded an older package, or one older than the consumer's minimum, receives a restart instruction.
 
 ## Install required libraries when the consumer loads
 
@@ -235,7 +235,7 @@ Then read it from the consumer's kernel code, before the code that needs those l
 Get[FileNameJoin[{PacletObject["Demo/Consumer"]["Location"], "Resources", "LoadRequiredDependencies.wl"}]]
 ```
 
-It installs only the required dependencies that have no compatible installed version, skips those whose `"Platforms"` exclude the running system, and gives `Null` when nothing is missing. Then it does not load PacletPage at all, so loading the consumer costs one read of its `PacletInfo.wl`. Otherwise it loads the manager with `LoadDependencyManager.wl` and installs the missing libraries without readiness checks. It never installs an optional dependency: those install only from [PacletDependencyDialog]() or an explicit call. A failure names the libraries that could not be installed.
+It installs only the required dependencies that have no compatible installed version, skips those whose `"Platforms"` exclude the running system, and gives `Null` when nothing is missing. Then it does not load PacletPage at all, so loading the consumer costs one read of its `PacletInfo.wl`. Otherwise it loads the manager with `LoadDependencyManager.wl` and installs the missing libraries without readiness checks. When PacletPage itself is missing, and the consumer declares it as a required dependency with a `"Resource"`, it installs PacletPage from there first, one kernel at a time on a user base, and only with internet access allowed. The kernels a documentation build starts are given the running PacletPage, so they never install it. It never installs an optional dependency: those install only from [PacletDependencyDialog]() or an explicit call. A failure names the libraries that could not be installed.
 
 The Wolfram System's own `PacletInstall` ignores a consumer's `"Dependencies"` list, required and optional entries alike, so installing the consumer archive installs none of them.
 

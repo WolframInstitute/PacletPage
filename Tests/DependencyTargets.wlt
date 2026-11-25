@@ -34,7 +34,7 @@ VerificationTest[
                 Length[copies] === 1,
                 PacletFind[optName] === {},
                 Select[FileNames[All, FileNameJoin[{$UserBasePacletsDirectory, "Repository"}]], StringContainsQ[#, reqName] &] === {},
-                FileNames[All, FileNameJoin[{target, ".staging"}]] === {}
+                Select[FileNames[All, target], StringStartsQ[FileNameTake[#], "."] &] === {}
             },
             PacletDirectoryUnload[target];
             DeleteDirectory[root, DeleteContents -> True]
@@ -322,6 +322,97 @@ VerificationTest[
     ],
     {True, 3},
     TestID -> "BuildPacletDocumentation: a page's converter key has the code of the parser the converter loads"
+]
+
+(* a consumer with the two loaders in its Resources directory, the manager's loader given as text or
+   copied from this checkout *)
+testLoaderConsumer[root_String, sub_String, declared_List, manager_ : Automatic] := With[{dir = testPaclet[root, sub,
+        <|"Name" -> "Demo/" <> StringDelete[sub, Except[LetterCharacter]] <> "Consumer", "Version" -> "1.0", "Dependencies" -> declared|>],
+        checkout = DirectoryName[$TestFileName, 2]},
+    CreateDirectory[FileNameJoin[{dir, "Resources"}]];
+    If[StringQ[manager], Export[FileNameJoin[{dir, "Resources", "LoadDependencyManager.wl"}], manager, "Text"],
+        CopyFile[FileNameJoin[{checkout, "Assets", "LoadDependencyManager.wl"}], FileNameJoin[{dir, "Resources", "LoadDependencyManager.wl"}]]];
+    CopyFile[FileNameJoin[{checkout, "Assets", "LoadRequiredDependencies.wl"}], FileNameJoin[{dir, "Resources", "LoadRequiredDependencies.wl"}]];
+    FileNameJoin[{dir, "Resources"}]
+]
+$testManagerResource = "https://www.wolframcloud.com/obj/demo/DeployedResources/Paclet/WolframInstitute/PacletPage";
+
+VerificationTest[
+    Module[{root = CreateDirectory[], functions, older, newer, behind, required},
+        functions = Append["WolframInstitute`PacletPage`" <> # & /@ {"PacletDependencyDialog", "PacletDependencyInformation",
+            "InstallPacletDependencies", "UpdatePacletDependencies", "UninstallPacletDependencies"}, "WolframInstitute`PacletPage`PacletDependencyReport"];
+        older = PacletObject[<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.92", "Extensions" -> {{"Kernel", "Symbols" -> functions}}|>];
+        WithCleanup[
+            newer = Get[FileNameJoin[{testLoaderConsumer[root, "atleast", {<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.0+"|>}], "LoadDependencyManager.wl"}]];
+            behind = Get[FileNameJoin[{testLoaderConsumer[root, "ahead", {<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "99.0+"|>}], "LoadDependencyManager.wl"}]];
+            required = With[{loader = FileNameJoin[{testLoaderConsumer[root, "older",
+                    {<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.94+", "Resource" -> $testManagerResource|>}], "LoadDependencyManager.wl"}]},
+                Internal`InheritedBlock[{PacletFind}, Unprotect[PacletFind];
+                    PacletFind["WolframInstitute/PacletPage"] = {older};
+                    Block[{$Packages = DeleteCases[$Packages, "WolframInstitute`PacletPage`"], Needs = (Throw["Unexpected manager load"] &)}, Get[loader]]]];
+            {newer, MatchQ[behind, Failure["DependencyManagerRestart", KeyValuePattern["MessageParameters" -> {_String, "99.0+"}]]],
+                MatchQ[required, Failure["DependencyManagerRequired", _]] && StringContainsQ[required["InstallCommand"], $testManagerResource]},
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {Null, True, True},
+    TestID -> "Manager loader: only a release that meets the consumer's PacletPage minimum is loaded, and its install command names the consumer's address"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], other = testUniqueName["TestBootstrapReq"], declared, stub, run, online, offline, onlineCalls, offlineCalls},
+        declared = {<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.94+", "Resource" -> $testManagerResource|>, other};
+        (* a manager's loader that finds a manager once one is installed *)
+        stub = "If[TrueQ[WolframInstitute`PacletPage`Private`$testManagerInstalled], Null, Failure[\"DependencyManagerRequired\", <|\"MessageTemplate\" -> \"needed\"|>]]";
+        run = Function[{sub, offlineQ}, Module[{calls = {}, loader = FileNameJoin[{testLoaderConsumer[root, sub, declared, stub], "LoadRequiredDependencies.wl"}], result},
+            WolframInstitute`PacletPage`Private`$testManagerInstalled = False;
+            result = Internal`InheritedBlock[{PacletFind}, Unprotect[PacletFind];
+                PacletFind["WolframInstitute/PacletPage"] := If[TrueQ[WolframInstitute`PacletPage`Private`$testManagerInstalled],
+                    {PacletObject[<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.94"|>]}, {}];
+                Block[{PacletInstall = Function[Null, AppendTo[calls, {"PacletInstall", ##}]; WolframInstitute`PacletPage`Private`$testManagerInstalled = True;
+                            PacletObject[<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.94"|>]],
+                        ResourceObject = (testResource[#] &),
+                        InstallPacletDependencies = Function[Null, AppendTo[calls, {"Install", #2}]; AssociationMap[PacletObject[<|"Name" -> #, "Version" -> "1.0"|>] &, #2]]},
+                    If[offlineQ, Block[{$AllowInternet = False, PacletManager`Package`writeManagerData = (Null &)}, Get[loader]], Get[loader]]]];
+            {result, calls}]];
+        WithCleanup[
+            {online, onlineCalls} = run["online", False];
+            {offline, offlineCalls} = run["offline", True];
+            {online, onlineCalls, MatchQ[offline, Failure["DependencyManagerRequired", _]], offlineCalls},
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {Null, {{"PacletInstall", testResource[$testManagerResource], ForceVersionInstall -> True}, {"Install", {"TestBootstrapReq"}}}, True, {}},
+    SameTest -> (MatchQ[#1, {Null, {{"PacletInstall", testResource[$testManagerResource], ForceVersionInstall -> True}, {"Install", {_String}}}, True, {}}] &),
+    TestID -> "Required dependency loader: a missing PacletPage installs from the consumer's address, the other missing ones through it, and nothing installs offline"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], other = testUniqueName["TestAnswerReq"], result},
+        WithCleanup[
+            result = Block[{InstallPacletDependencies = ($Failed &)},
+                Get[FileNameJoin[{testLoaderConsumer[root, "answer", {<|"Name" -> "WolframInstitute/PacletPage", "Version" -> "0.3.0+"|>, other}, "Null"],
+                    "LoadRequiredDependencies.wl"}]]];
+            MatchQ[result, Failure["RequiredDependencies", KeyValuePattern["Result" -> HoldForm[$Failed]]]],
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    True,
+    TestID -> "Required dependency loader: a manager that does not answer with an association gives a Failure"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], copy},
+        WithCleanup[
+            copy = testPaclet[root, "copy", <|"Name" -> "WolframInstitute/PacletPage", "Version" -> "9.9.9"|>];
+            CreateDirectory[FileNameJoin[{copy, "Kernel"}]];
+            {runningPacletPageDirectories[],
+                Block[{$packageDirectory = FileNameJoin[{copy, "Kernel"}]}, {runningPacletPageDirectories[] === {copy}, MemberQ[pacletDirectories[], copy]}]},
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {{}, {True, True}},
+    TestID -> "Build kernels: the running PacletPage's directory is passed on when the paclet catalog does not find it"
 ]
 
 End[]

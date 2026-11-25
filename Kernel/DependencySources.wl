@@ -25,11 +25,12 @@ dependencyTargetCopies[name_] := Select[FileNames[All, $dependencyTarget], Direc
     AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, Function[file, FileExistsQ[FileNameJoin[{#, file}]]]] &&
     PacletObject[File[#]]["Name"] === name &]
 
-(* Unpack beside the target, two levels down where PacletDirectoryLoad does not look, then replace
-   the earlier copies of the paclet and load the directory again. *)
+(* Unpack into a hidden directory of its own beside the copies, where the paclet is two levels down
+   and PacletDirectoryLoad does not look, then replace the earlier copies of the paclet, load the
+   directory again, and remove the unpacking directory whole. *)
 dependencyUnpackFile[source_, name_, version_, git_] := Module[{target = $dependencyTarget, file, staging, unpacked, destination, installed},
     file = Replace[source, File[path_String] :> path];
-    staging = FileNameJoin[{target, ".staging", CreateUUID["unpack-"]}];
+    staging = FileNameJoin[{target, CreateUUID[".unpack-"]}];
     If[! StringQ[CreateDirectory[staging, CreateIntermediateDirectories -> True]],
         Return[dependencyFailure["DependencyInstallFailed", "Could not write to `1`.", target]]];
     WithCleanup[
