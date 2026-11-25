@@ -2679,17 +2679,16 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{script = FileNameJoin[{$TemporaryDirectory, CreateUUID["tree-"] <> ".wl"}], process, pid, children, start},
-        (* a child that starts at once, where a subkernel's start waits on a license and on a busy machine *)
-        Export[script, "StartProcess[{\"sleep\", \"120\"}]; Pause[120];", "Text"];
-        process = StartProcess[{kernelExecutable[], "-noprompt", "-script", script}];
+    Module[{process, pid, children, start},
+        (* a parent and a child that both start at once: a kernel's start, as a subkernel's, waits on
+           a license, and on a busy machine ran past the minute the tree is waited for *)
+        process = StartProcess[{"sh", "-c", "sleep 120 & wait"}];
         pid = process["PID"];
         start = AbsoluteTime[];
         While[ descendantProcesses[processTable[], {pid}] === {} && AbsoluteTime[] - start < 60, Pause[0.5]];
         children = descendantProcesses[processTable[], {pid}];
         killProcessTree[process];
         waitForExit[children, 10];
-        DeleteFile[script];
         {children =!= {}, livingProcesses[children]}
     ],
     {True, {}},
