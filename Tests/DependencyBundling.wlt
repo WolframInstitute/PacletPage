@@ -87,7 +87,7 @@ VerificationTest[
 
             (* Uninstall both dependencies and verify 100% offline install from bundled Assets/Dependencies *)
             Scan[PacletUninstall, Join[PacletFind[depName], PacletFind[gitName]]];
-            offlineRes = Block[{$AllowInternet = False},
+            offlineRes = Block[{$AllowInternet = False, PacletManager`Package`writeManagerData = (Null &)},
                 InstallPacletDependencies[stagedOwner, "Required", "CheckReadiness" -> False]
             ];
             installedGit = If[MatchQ[offlineRes[gitName], _PacletObject], dependencyInstalledGit[offlineRes[gitName]], Missing["None"]];
