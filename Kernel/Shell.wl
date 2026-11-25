@@ -13,12 +13,15 @@
 $htmlVoidTags = {"wbr", "input", "br", "hr", "img", "meta", "link"};
 $svgSelfClosingTags = {"rect", "path", "circle", "line", "polyline", "polygon"};
 
+xmlAttrHTML[k_String -> True] := " " <> k;
 xmlAttrHTML[k_String -> v_String] := " " <> k <> "=\"" <> esc[v] <> "\"";
 xmlAttrHTML[_] := "";
 
 xmlToHTML[s_String] := esc[s];
 xmlToHTML[Nothing] := "";
 xmlToHTML[list_List] := StringJoin[xmlToHTML /@ list];
+xmlToHTML[XMLElement["script", attrs_List, {code_String}]] :=
+    "<script" <> StringJoin[xmlAttrHTML /@ attrs] <> ">" <> code <> "</script>";
 xmlToHTML[XMLElement[tag_String, attrs_List, children_List]] := With[
     {a = StringJoin[xmlAttrHTML /@ attrs]},
     Which[
@@ -455,6 +458,127 @@ symbolsRailXML[catalog_Association, cfg_Association] := Module[
     }, Nothing]
 ];
 
+(* HTML-only right rail with A-Z symbol index for paclets with > 24 symbols. Streams the first
+   letter and up to 45 links before the guide tree and places the remaining links in an inert
+   <template id="symbol-rest">; Expression mode (PacletPage[...]) uses symbolsRailXML directly so
+   no <script>/<select>/<option>/<template>/<noscript> tags enter Studio's $trustedPacletTags. *)
+$symbolRailPreScript = StringJoin[
+    "(function (rail) {",
+    "if (!rail.classList.contains('indexed')) return;",
+    "function choose(value) { rail.dataset.pendingLetter = value; delete rail.dataset.extraBatches; }",
+    "rail.onclick = function (event) {",
+    "if (event.target.matches('.symbol-letters button')) choose(event.target.value);",
+    "if (event.target.matches('.symbol-more')) rail.dataset.extraBatches = Number(rail.dataset.extraBatches || 0) + 1;",
+    "};",
+    "rail.onchange = function (event) { if (event.target.id === 'symbol-first-letter') choose(event.target.value); };",
+    "})(document.currentScript.parentNode);"
+];
+
+htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
+    {pages = catalog["Pages"], enabled = TrueQ[Lookup[cfg, "SymbolsRail", True]],
+        resource = Replace[Lookup[cfg, "Resource", ""], Except[_String] -> ""],
+        ids, indexed, letters, buckets, initial, group, batch, batchSize = 45,
+        positions, label, remaining, count, initialOf, rowXML, rowsXML, buttonXML, optionXML,
+        symbolCountText, moreText, ulEl, remainingEl, letterButtons, letterOptions, railEl},
+    ids = SortBy[Select[Keys[pages], StringStartsQ[#, "ref/"] &], symbolKey[pages[#]] &];
+    indexed = enabled && Length[ids] > 24;
+    initialOf[id_String] := Replace[ToUpperCase[StringTake[StringDrop[id, 4], UpTo[1]]], "" -> "#"];
+    buckets = If[indexed, GroupBy[ids, initialOf], <||>];
+    letters = Join[
+        CharacterRange["A", "Z"],
+        Select[Keys[buckets], ! StringMatchQ[#, RegularExpression["[A-Z]"] | "$"] &],
+        If[KeyExistsQ[buckets, "$"], {"$"}, {}]
+    ];
+    initial = SelectFirst[letters, KeyExistsQ[buckets, #] &, ""];
+    group = Lookup[buckets, initial, {}];
+    batch = Which[indexed, Take[group, UpTo[batchSize]], enabled, ids, True, {}];
+    positions = If[indexed, KeyTake[AssociationThread[ids -> Range[0, Length[ids] - 1]], batch], <||>];
+    remaining = Which[indexed, Select[ids, ! KeyExistsQ[positions, #] &], enabled, {}, True, ids];
+    label = If[indexed, "All " <> initial <> " names", ""];
+    count[number_Integer] := StringReplace[IntegerString[number], RegularExpression["(?<=\\d)(?=(?:\\d{3})+$)"] -> ","];
+    rowXML[id_String] := XMLElement["li", DeleteCases[{
+        If[KeyExistsQ[positions, id], "data-position" -> IntegerString[positions[id]], Nothing],
+        If[indexed && ! StringStartsQ[id, "ref/" ~~ RegularExpression["[a-zA-Z$]"]], "data-letter" -> initialOf[id], Nothing]
+    }, Nothing], {navLinkXML[id, pages[id], "sym", cfg]}];
+    rowsXML[names_List] := rowXML /@ names;
+    buttonXML[letter_String] := XMLElement["button", DeleteCases[{
+        "type" -> "button",
+        "value" -> letter,
+        "aria-label" -> "Jump to " <> letter,
+        "aria-pressed" -> If[letter === initial, "true", "false"],
+        If[KeyExistsQ[buckets, letter], Nothing, "disabled" -> True]
+    }, Nothing], {letter}];
+    optionXML[letter_String] := XMLElement["option", {"value" -> letter}, {letter}];
+    symbolCountText = If[indexed, initial <> " \:00b7 " <> count[Length[group]] <> If[Length[group] === 1, " symbol", " symbols"], ""];
+    moreText = If[Length[group] > batchSize, "Show " <> IntegerString[Min[batchSize, Length[group] - batchSize]] <> " more", ""];
+    ulEl = XMLElement["ul", {"class" -> "nav-symbols"}, rowsXML[batch]];
+    remainingEl = If[remaining === {}, Nothing, XMLElement["template", {"id" -> "symbol-rest"}, rowsXML[remaining]]];
+    letterButtons = If[indexed, buttonXML /@ letters, {}];
+    letterOptions = optionXML /@ Select[letters, KeyExistsQ[buckets, #] &];
+    railEl = XMLElement["nav", DeleteCases[{
+        "id" -> "side-right",
+        If[indexed, "class" -> "indexed", Nothing],
+        "data-batch-size" -> IntegerString[batchSize],
+        "aria-label" -> "Symbols"
+    }, Nothing], {
+        XMLElement["script", {}, {$symbolRailPreScript}],
+        XMLElement["div", DeleteCases[{"class" -> "symbol-index", If[indexed, Nothing, "hidden" -> True]}, Nothing], {
+            XMLElement["div", {"class" -> "symbol-heading"}, {
+                XMLElement["h2", {}, {"Symbol index"}],
+                XMLElement["span", {"class" -> "symbol-total"}, {count[Length[ids]]}]
+            }],
+            XMLElement["div", {"class" -> "symbol-browse"}, {
+                XMLElement["div", {"class" -> "symbol-letters", "role" -> "group", "aria-label" -> "First letter"}, letterButtons],
+                XMLElement["div", {"class" -> "symbol-letter-picker"}, {
+                    XMLElement["label", {"for" -> "symbol-first-letter"}, {"First letter"}],
+                    XMLElement["div", {"class" -> "symbol-select"}, {
+                        XMLElement["select", {"id" -> "symbol-first-letter"}, letterOptions]
+                    }]
+                }],
+                XMLElement["div", DeleteCases[{"class" -> "symbol-prefix", If[Length[group] > batchSize, Nothing, "hidden" -> True]}, Nothing], {
+                    XMLElement["label", {"for" -> "symbol-prefix"}, {"Symbol group"}],
+                    XMLElement["div", {"class" -> "symbol-select"}, {
+                        XMLElement["select", {"id" -> "symbol-prefix"}, {
+                            XMLElement["option", {"value" -> ""}, {label}]
+                        }],
+                        XMLElement["span", {"class" -> "symbol-selection", "aria-hidden" -> "true"}, {label}]
+                    }]
+                }]
+            }],
+            XMLElement["div", {"class" -> "symbol-count", "role" -> "status"}, If[symbolCountText === "", {}, {symbolCountText}]],
+            XMLElement["noscript", {}, {XMLElement["a", {"href" -> resource}, {"Open the documentation"}]}]
+        }],
+        XMLElement["div", {"class" -> "symbol-scroll"}, {
+            ulEl,
+            XMLElement["button", DeleteCases[{
+                "class" -> "symbol-more",
+                "type" -> "button",
+                If[Length[group] > batchSize, Nothing, "hidden" -> True]
+            }, Nothing], If[moreText === "", {}, {moreText}]]
+        }]
+    }];
+    <|
+        "Rail" -> railEl,
+        "Remaining" -> remainingEl,
+        "Slots" -> <|
+            "railClass" -> If[indexed, "indexed", ""],
+            "batchSize" -> IntegerString[batchSize],
+            "indexHidden" -> If[indexed, "", "hidden"],
+            "symbolTotal" -> count[Length[ids]],
+            "letterButtons" -> xmlToHTML[letterButtons],
+            "letterOptions" -> xmlToHTML[letterOptions],
+            "prefixHidden" -> If[Length[group] > batchSize, "", "hidden"],
+            "initialOption" -> "<option value=\"\">" <> esc[label] <> "</option>",
+            "initialGroup" -> esc[label],
+            "symbolCount" -> esc[symbolCountText],
+            "symbols" -> xmlToHTML[ulEl],
+            "moreHidden" -> If[Length[group] > batchSize, "", "hidden"],
+            "moreText" -> moreText,
+            "remainingSymbols" -> xmlToHTML[remainingEl]
+        |>
+    |>
+];
+
 (* ==================== unified header, footer & shell ==================== *)
 
 formatVersionTag[label_String] := If[StringMatchQ[label, DigitCharacter ~~ ___], "v" <> label, label];
@@ -480,10 +604,10 @@ headerXML[catalog_Association, cfg_Association, layoutEl_] := Module[
     }, Nothing];
     If[ mode === "HTML",
         XMLElement["header", {"id" -> "hdr"}, DeleteCases[{
-            XMLElement["button", {"id" -> "navToggle", "type" -> "button", "aria-label" -> "Guides and tutorials"}, {"\:2630"}],
+            XMLElement["button", {"id" -> "navToggle", "type" -> "button", "aria-label" -> "Guides and tutorials", "aria-controls" -> "side", "aria-expanded" -> "false"}, {"\:2630"}],
             XMLElement["a", {"class" -> "brand", "id" -> "homelink", "href" -> "#"}, brandKids],
             filterInputXML["", "HTML"],
-            XMLElement["button", {"id" -> "symToggle", "type" -> "button", "aria-label" -> "Symbols"}, {"\:22ee"}],
+            XMLElement["button", {"id" -> "symToggle", "type" -> "button", "aria-label" -> "Symbols", "aria-controls" -> "side-right", "aria-expanded" -> "false"}, {"\:22ee"}],
             layoutEl,
             resourceLinkXML[Lookup[cfg, "Resource", ""], Lookup[cfg, "ResourceLabel", "Resource page"], "HTML"]
         }, Nothing]],
@@ -540,28 +664,31 @@ shellXML[catalog_Association, cfg_Association] := Module[
         showFooter = TrueQ[Lookup[cfg, "Footer", False]],
         leftItems, rightItems, hasLeft, hasSymbols, layoutEl, exitEl, parts, shellClass, accent, styleAttr},
     leftItems = leftRailXML[catalog, Append[cfg, "IncludeSymbols" -> (mode === "Expression" && ! showSymbols)]];
-    rightItems = If[mode === "HTML" || showSymbols, symbolsRailXML[catalog, cfg], {}];
+    rightItems = If[mode === "Expression" && showSymbols, symbolsRailXML[catalog, cfg], {}];
     hasLeft = If[mode === "HTML", True, leftItems =!= {}];
     hasSymbols = If[mode === "HTML", showSymbols, rightItems =!= {}];
     layoutEl = layoutControlsXML[controls, hasLeft, hasSymbols, mode, mode === "Expression" && ! showHeader];
     exitEl = fullExitXML[controls, mode];
     If[ mode === "HTML",
-        DeleteCases[{
-            headerXML[catalog, cfg, layoutEl],
-            XMLElement["div", {"id" -> "scrim"}, {}],
-            XMLElement["div", {"id" -> "main"}, {
-                XMLElement["nav", {"id" -> "side", "aria-label" -> "Guides and tutorials"}, leftItems],
-                splitterXML["Left", "HTML"],
-                XMLElement["div", {"id" -> "content"}, {
-                    XMLElement["div", {"id" -> "loading"}, {"Loading..."}],
-                    XMLElement["iframe", {"id" -> "frame", "title" -> "documentation"}, {}]
+        With[{symParts = htmlSymbolsRailParts[catalog, cfg]},
+            DeleteCases[{
+                headerXML[catalog, cfg, layoutEl],
+                XMLElement["div", {"id" -> "main"}, {
+                    XMLElement["div", {"id" -> "scrim"}, {}],
+                    symParts["Rail"],
+                    XMLElement["nav", {"id" -> "side", "aria-label" -> "Guides and tutorials"}, leftItems],
+                    splitterXML["Left", "HTML"],
+                    XMLElement["div", {"id" -> "content"}, {
+                        XMLElement["div", {"id" -> "loading"}, {"Loading..."}],
+                        XMLElement["iframe", {"id" -> "frame", "title" -> "documentation"}, {}]
+                    }],
+                    splitterXML["Right", "HTML"]
                 }],
-                splitterXML["Right", "HTML"],
-                XMLElement["nav", {"id" -> "side-right", "aria-label" -> "Symbols"}, rightItems]
-            }],
-            exitEl,
-            If[showFooter, footerXML[cfg], Nothing]
-        }, Nothing],
+                exitEl,
+                If[showFooter, footerXML[cfg], Nothing],
+                symParts["Remaining"]
+            }, Nothing]
+        ],
         (* Expression mode *)
         shellClass = StringRiffle[DeleteCases[{
             "pp-shell",

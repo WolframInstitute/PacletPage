@@ -13,13 +13,26 @@
       cur = null,
       current = '';
 
-  // every page the navigation lists, by id: guide/X, ref/X or tutorial/X, with X as it is
-  // published, "$" and all
-  var KNOWN = {}, links = document.querySelectorAll('#side a[data-id], #side-right a[data-id]');
+  // Merge the painted batch into the catalog's alphabetical order. Keep the other links in
+  // their inert template until a letter, filter or deep link needs them in the rail.
+  var painted = sideRight ? Array.from(sideRight.querySelectorAll('a[data-id]')) : [];
+  var rest = document.getElementById('symbol-rest');
+  var symbolLinks = rest ? Array.from(rest.content.querySelectorAll('a[data-id]')) : painted;
+  if (rest) {
+    painted.forEach(function (link) { symbolLinks.splice(Number(link.parentNode.dataset.position), 0, link); });
+    if (!sideRight.classList.contains('indexed')) sideRight.querySelector('.nav-symbols').appendChild(rest.content);
+    rest.remove();
+  }
+  // Match keyboard and reading order to the finished three-column layout.
+  if (sideRight) sideRight.parentNode.appendChild(sideRight);
+
+  // Every page by its published id, including symbols outside the current batch.
+  var KNOWN = {}, links = Array.from(side.querySelectorAll('a[data-id]')).concat(symbolLinks);
   for (var i = 0; i < links.length; i++) {
     var lid = links[i].getAttribute('data-id');
     (KNOWN[lid] = KNOWN[lid] || []).push(links[i]);
   }
+  var symbolIndex = document.body.classList.contains('no-symbols') ? null : makeSymbolIndex(sideRight);
 
   // routes given relative to the site, a local site's, resolve against it
   C.routes = C.routes.map(function (r) {
@@ -145,9 +158,17 @@
     while (n && n !== side) { if (n.tagName === 'DETAILS') n.open = true; n = n.parentNode; }
   }
   function setActive(a) {
-    if (cur) cur.classList.remove('active');
+    if (cur) { cur.classList.remove('active'); cur.removeAttribute('aria-current'); }
     cur = a;
-    if (a) { a.classList.add('active'); openAnc(a); a.scrollIntoView({ block: 'nearest' }); }
+    if (!a) return;
+    if (symbolIndex && a.classList.contains('sym')) {
+      if (qBox && qBox.value.trim() && !matches(a, qBox.value.trim().toLowerCase())) {
+        qBox.value = ''; runFilter();
+      }
+      symbolIndex.reveal(a);
+    }
+    a.classList.add('active'); a.setAttribute('aria-current', 'page');
+    openAnc(a); a.scrollIntoView({ block: 'nearest' });
   }
   // A guide appears under every guide that links it, so an id can match several links: take the
   // one nearest what is open (most <details> ancestors shared with the current link), then the
@@ -248,6 +269,168 @@
     if (!hostPageQ()) { injectHide(); hookFrame(); watchFrame(); }
   });
 
+  // ---- alphabetical symbol index ------------------------------------------------------------
+  // Index the links the shell already knows. Only the current batch occupies the scroll pane;
+  // the same links retain their keywords, notebook paths and identities while off screen.
+  function makeSymbolIndex(rail) {
+    if (!rail || !rail.classList.contains('indexed')) return null;
+    var list = rail.querySelector('.nav-symbols'), batchSize = Number(rail.dataset.batchSize);
+    var tools = rail.querySelector('.symbol-index'), browse = tools.querySelector('.symbol-browse'),
+        buttons = tools.querySelector('.symbol-letters'), letterPicker = tools.querySelector('.symbol-letter-picker select'),
+        prefixLabel = tools.querySelector('.symbol-prefix'), prefixPicker = prefixLabel.querySelector('select'),
+        selection = prefixLabel.querySelector('.symbol-selection'),
+        count = tools.querySelector('.symbol-count'), more = rail.querySelector('.symbol-more'),
+        scroll = rail.querySelector('.symbol-scroll'), byLetter = new Map(), byLink = new Map(), prefixCache = new Map();
+    var entries = symbolLinks.map(function (link) {
+      var row = link.parentNode, name = link.getAttribute('data-id').slice(4),
+          initial = row.dataset.letter || (Array.from(name)[0] || '#').toUpperCase(),
+          entry = { row: row, link: link, name: name, folded: name.toLowerCase(), letter: initial };
+      if (!byLetter.has(initial)) byLetter.set(initial, []);
+      byLetter.get(initial).push(entry);
+      byLink.set(link, entry);
+      return entry;
+    });
+    function endsWord(name, head) {
+      var tail = name.slice(head.length);
+      return !tail || /^\p{Lu}\p{Ll}/u.test(tail) || (/\p{Ll}$/u.test(head) && /^\p{Lu}/u.test(tail)) ||
+        (/\p{N}$/u.test(head) !== /^\p{N}/u.test(tail));
+    }
+
+    // Split Ad into families such as Adele and Adjoint. Group on a whole word of four
+    // characters, such as Abel, or on at least six shared characters of a longer word.
+    function prefixesFor(group) {
+      var choices = new Map();
+      function split(items, depth) {
+        var branches = new Map();
+        items.forEach(function (entry) {
+          var next = entry.folded.charAt(depth);
+          if (!branches.has(next)) branches.set(next, []);
+          branches.get(next).push(entry);
+        });
+        branches.forEach(function (branch) {
+          var first = branch[0], prefix = first.folded;
+          branch.forEach(function (entry) {
+            while (!entry.folded.startsWith(prefix)) prefix = prefix.slice(0, -1);
+          });
+          var length = Array.from(prefix).length;
+          var readable = length >= 6 || (length >= 4 && branch.some(function (entry) {
+            var head = entry.name.slice(0, prefix.length);
+            return head.toLowerCase() === prefix && endsWord(entry.name, head);
+          }));
+          if (branch.length > 1 && prefix.length > depth && (!readable || branch.length > 60)) {
+            split(branch, prefix.length);
+          } else {
+            // The first link names the group. An ellipsis means more symbols follow it.
+            choices.set(prefix, { entries: branch, label: first.name + (branch.length > 1 ? '\u2026' : '') });
+          }
+        });
+      }
+      if (group.length > batchSize) split(group, (Array.from(group[0].folded)[0] || '').length);
+      if (choices.size > batchSize) {
+        var singles = new Set();
+        choices.forEach(function (choice) { if (choice.entries.length === 1) singles.add(choice.entries[0]); });
+        if (singles.size > 1 && singles.size < choices.size) {
+          choices.forEach(function (choice, key) { if (choice.entries.length === 1) choices.delete(key); });
+          choices.set(':other', { label: 'Other ' + group[0].letter + ' names',
+            entries: group.filter(function (entry) { return singles.has(entry); }) });
+        }
+      }
+      return choices;
+    }
+
+    var letter, prefixes, visible, shown, term = '', savedTop, savedCount, searchSelection;
+    function chooseLetter(value) {
+      letter = value; letterPicker.value = value;
+      Array.from(buttons.children).forEach(function (button) {
+        button.setAttribute('aria-pressed', String(button.value === value));
+      });
+      if (!prefixCache.has(value)) prefixCache.set(value, prefixesFor(byLetter.get(value)));
+      prefixes = prefixCache.get(value);
+      prefixPicker.replaceChildren(new Option('All ' + value + ' names', ''));
+      prefixes.forEach(function (group, key) {
+        prefixPicker.add(new Option(group.label + ' (' + group.entries.length + ')', key));
+      });
+      prefixLabel.hidden = prefixes.size < 2;
+    }
+    function browseEntries() {
+      var prefix = prefixes.get(prefixPicker.value);
+      return prefix ? prefix.entries : byLetter.get(letter);
+    }
+    function appendUntil(end) {
+      var fragment = document.createDocumentFragment();
+      end = Math.min(end, visible.length);
+      while (shown < end) fragment.appendChild(visible[shown++].row);
+      list.appendChild(fragment);
+      more.hidden = shown === visible.length;
+      if (!more.hidden) more.textContent = 'Show ' + Math.min(batchSize, visible.length - shown) + ' more';
+    }
+    function showEntries(items, label) {
+      visible = items; shown = 0;
+      list.replaceChildren();
+      appendUntil(batchSize);
+      scroll.scrollTop = 0;
+      count.textContent = label;
+    }
+    function showBrowse() {
+      var items = browseEntries(), prefix = prefixes.get(prefixPicker.value);
+      selection.textContent = prefixPicker.selectedOptions[0].textContent;
+      var total = byLetter.get(letter).length.toLocaleString('en');
+      showEntries(items, prefix ? items.length.toLocaleString('en') + ' of ' + total + ' ' + letter + ' symbols' :
+        letter + ' \u00b7 ' + total + (items.length === 1 ? ' symbol' : ' symbols'));
+    }
+    function jump(value) { chooseLetter(value); showBrowse(); }
+    buttons.addEventListener('click', function (event) {
+      if (event.target.tagName === 'BUTTON') jump(event.target.value);
+    });
+    letterPicker.addEventListener('change', function () { jump(letterPicker.value); });
+    prefixPicker.addEventListener('change', showBrowse);
+    more.addEventListener('click', function () {
+      var first = visible[shown];
+      appendUntil(shown + batchSize);
+      if (first) first.link.focus();
+    });
+    scroll.addEventListener('scroll', function () {
+      if (!more.hidden && scroll.clientHeight && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48) {
+        appendUntil(shown + batchSize);
+      }
+    });
+    function reveal(link) {
+      var entry = byLink.get(link), index = visible.indexOf(entry);
+      if (!entry) return;
+      if (term) {
+        searchSelection = link;
+        if (!browseEntries().includes(entry)) chooseLetter(entry.letter);
+      } else if (index < 0) {
+        jump(entry.letter);
+        index = visible.indexOf(entry);
+      }
+      if (index >= shown) appendUntil(index + 1);
+    }
+    function filter(value) {
+      if (value === term) return;
+      if (!term) { savedTop = scroll.scrollTop; savedCount = shown; searchSelection = null; }
+      term = value; browse.hidden = !!term;
+      if (term) {
+        var hits = entries.filter(function (entry) { return matches(entry.link, term); });
+        showEntries(hits, hits.length ? hits.length.toLocaleString('en') +
+          (hits.length === 1 ? ' matching symbol' : ' matching symbols') : 'No matching symbols');
+      } else {
+        showBrowse();
+        if (searchSelection) {
+          reveal(searchSelection); searchSelection.scrollIntoView({ block: 'nearest' });
+        } else {
+          appendUntil(savedCount); scroll.scrollTop = savedTop;
+        }
+      }
+    }
+    rail.onclick = rail.onchange = null;
+    jump(rail.dataset.pendingLetter || letterPicker.value);
+    if (rail.dataset.extraBatches) appendUntil(shown + Number(rail.dataset.extraBatches) * batchSize);
+    delete rail.dataset.pendingLetter;
+    delete rail.dataset.extraBatches;
+    return { filter: filter, reveal: reveal };
+  }
+
   // ---- filter --------------------------------------------------------------------------------
   // Hide what does not match in place: a guide stays visible when it or anything below it
   // matches, and clearing the box restores the tree as it was.
@@ -322,7 +505,8 @@
       for (var i = 0; i < ds.length; i++) openState.set(ds[i], ds[i].open);
     }
     filterRail(side, term);
-    filterRail(sideRight, term);
+    if (symbolIndex) symbolIndex.filter(term);
+    else filterRail(sideRight, term);
     if (!term) openState = null;
   }
 
@@ -351,9 +535,9 @@
   }
   var KIND = { resource: 0, guide: 0, tutorial: 0, ref: 1 };
   function bestMatch(term) {
-    var as = document.querySelectorAll('#side a[data-id], #side-right a[data-id]'), best = null, bk = null;
-    for (var i = 0; i < as.length; i++) {
-      var a = as[i], r = titleRank(a, term);
+    var best = null, bk = null;
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i], r = titleRank(a, term);
       if (r < 0) continue;
       var k = [r, KIND[a.getAttribute('data-id').split('/')[0]] || 0, a.classList.contains('stub') ? 1 : 0, (a.textContent || '').trim().length];
       for (var j = 0; j < k.length && bk; j++) { if (k[j] !== bk[j]) break; }
@@ -385,15 +569,24 @@
       navToggle = document.getElementById('navToggle'),
       symToggle = document.getElementById('symToggle');
   function closeDrawers() {
-    side.classList.remove('open');
+    if (navToggle && side && side.contains(document.activeElement) && side.classList.contains('open')) navToggle.focus();
+    if (symToggle && sideRight && sideRight.contains(document.activeElement) && sideRight.classList.contains('open')) symToggle.focus();
+    if (side) side.classList.remove('open');
     if (sideRight) sideRight.classList.remove('open');
+    if (navToggle) navToggle.setAttribute('aria-expanded', 'false');
+    if (symToggle) symToggle.setAttribute('aria-expanded', 'false');
     if (scrim) scrim.classList.remove('on');
   }
   function toggleDrawer(el) {
     if (!el) return;
     var open = el.classList.contains('open');
     closeDrawers();
-    if (!open) { el.classList.add('open'); if (scrim) scrim.classList.add('on'); }
+    if (!open) {
+      el.classList.add('open');
+      var toggleBtn = el === side ? navToggle : symToggle;
+      if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
+      if (scrim) scrim.classList.add('on');
+    }
   }
   if (navToggle) navToggle.addEventListener('click', function () { toggleDrawer(side); });
   if (symToggle) symToggle.addEventListener('click', function () { toggleDrawer(sideRight); });

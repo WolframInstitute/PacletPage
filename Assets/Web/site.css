@@ -1,4 +1,17 @@
 :root { --pp-accent: #dd1100; --pp-active-bg: #fdeee9; --pp-active-fg: #c4280b; }
+/* A slow font host must still leave the shell readable on its first paint. */
+@font-face {
+  font-family: 'Source Sans Pro'; font-weight: 400; font-display: swap;
+  src: url('https://www.wolframcdn.com/fonts/source-sans-pro/1.0/SourceSansPro-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Source Sans Pro'; font-weight: 600; font-display: swap;
+  src: url('https://www.wolframcdn.com/fonts/source-sans-pro/1.0/SourceSansPro-SemiBold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Source Sans Pro'; font-weight: 400; font-style: italic; font-display: swap;
+  src: url('https://www.wolframcdn.com/fonts/source-sans-pro/1.0/SourceSansPro-Italic.woff2') format('woff2');
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body {
@@ -72,7 +85,7 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 .nav-empty { padding: 10px 14px; color: #9aa3ab; font-size: 12px; font-style: italic; }
 
 /* layout: guides and tutorials (left) | content | symbols (right) */
-#main { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; display: flex; }
+#main { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; display: flex; reading-flow: flex-visual; }
 /* the footer a site publishes with "Footer" -> True: the PacletPage it was published with */
 #ftr {
   position: fixed; left: 0; right: 0; bottom: 0; height: 22px; z-index: 20;
@@ -87,7 +100,7 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
   background: #fafafa; padding: 14px 0 40px;
 }
 #side { width: 340px; min-width: 200px; max-width: 45%; border-right: 1px solid #e3e3e3; }
-#side-right { width: 240px; min-width: 160px; max-width: 45%; border-left: 1px solid #e3e3e3; }
+#side-right { order: 1; margin-left: auto; width: 240px; min-width: 160px; max-width: 45%; border-left: 1px solid #e3e3e3; }
 #content { flex: 1; min-width: 0; height: 100%; position: relative; background: #fff; }
 #frame { width: 100%; height: 100%; border: 0; display: block; }
 #loading {
@@ -134,6 +147,53 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 
 /* right: symbols */
 #side-right a.sym { color: #1a6ba5; }
+#side-right.indexed { display: flex; flex-direction: column; padding: 0; overflow: hidden; container-type: inline-size; }
+#side-right [hidden] { display: none; }
+.symbol-index { flex: none; padding: 12px; border-bottom: 1px solid #dedfe0; }
+.symbol-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.symbol-heading h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.symbol-total, .symbol-count { color: #575e63; font-size: 13px; font-variant-numeric: tabular-nums; }
+.symbol-count { margin-top: 6px; overflow-wrap: anywhere; }
+.symbol-letters { display: grid; grid-template-columns: repeat(auto-fit, minmax(26px, 1fr)); gap: 2px; margin-top: 8px; }
+.symbol-letters button, .symbol-more, .symbol-index select {
+  font: inherit; color: #1a6ba5; border: 1px solid #cbd0d3; border-radius: 3px; background: #fff;
+}
+.symbol-letters button { min-width: 0; padding: 3px 0; font-size: 13px; cursor: pointer; }
+.symbol-letters button:disabled { border-color: transparent; background: transparent; color: #92989c; cursor: default; }
+.symbol-letters button[aria-pressed="true"] { background: var(--pp-active-bg); color: var(--pp-active-fg); border-color: currentColor; font-weight: 600; }
+.symbol-letters button:enabled:hover, .symbol-more:hover { background: #edf2f5; }
+.symbol-index label { display: block; margin-top: 7px; font-size: 13px; font-weight: 600; }
+.symbol-select { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; margin-top: 2px; font-size: 13px; }
+.symbol-index select {
+  grid-area: 1 / 1 / 2 / -1; align-self: stretch; width: 100%; min-width: 0; margin: 0;
+  padding: 5px 8px; padding-inline-end: 30px; font-weight: 400; color: inherit; -webkit-appearance: none; appearance: none;
+}
+/* Keep the native picker and its focus ring. A long symbol name can wrap before the arrow. */
+.symbol-selection {
+  grid-area: 1 / 1 / 2 / -1; align-self: stretch; display: flex; align-items: center; min-width: 0;
+  margin: 1px; padding: 4px 7px; padding-inline-end: 29px; background: #fff; border-radius: 2px;
+  overflow-wrap: anywhere; pointer-events: none;
+}
+.symbol-select::after {
+  content: ''; grid-area: 1 / 2; justify-self: center; width: 10px; height: 6px; background: currentColor;
+  clip-path: polygon(0 18%,12% 0,50% 65%,88% 0,100% 18%,50% 100%); pointer-events: none;
+}
+@media (forced-colors: active) {
+  .symbol-select::after { background: ButtonText; forced-color-adjust: none; }
+}
+.symbol-index .symbol-letter-picker { display: none; }
+.symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letters { display: none; }
+.symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letter-picker { display: block; }
+.indexed .symbol-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 3px 0 12px; }
+.symbol-more { display: block; margin: 6px auto; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+@container (max-width: 196px) {
+  .symbol-letters { display: none; }
+  .symbol-index .symbol-letter-picker { display: block; }
+}
+@media (max-width: 900px), (max-height: 540px), (pointer: coarse) {
+  .symbol-letters { display: none; }
+  .symbol-index .symbol-letter-picker { display: block; }
+}
 
 /* collapsible guides */
 #side details { margin: 0; }
@@ -168,12 +228,12 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
   /* drawers slide over the content instead of taking width from it */
   #side, #side-right {
     position: fixed; top: 56px; bottom: 0; z-index: 40; width: 82vw; max-width: 340px;
-    transform: translateX(-102%); transition: transform .18s ease-out;
+    visibility: hidden; transform: translateX(-102%); transition: transform .18s ease-out;
     box-shadow: 0 0 24px rgba(0, 0, 0, .28);
   }
   #side { left: 0; }
-  #side-right { right: 0; left: auto; transform: translateX(102%); }
-  #side.open, #side-right.open { transform: translateX(0); }
+  #side-right { right: 0; left: auto; height: auto; transform: translateX(102%); }
+  #side.open, #side-right.open { visibility: visible; transform: translateX(0); }
 
   #scrim.on { display: block; position: fixed; inset: 56px 0 0; background: rgba(0, 0, 0, .38); z-index: 35; }
   .with-footer #side, .with-footer #side-right { bottom: 22px; }
@@ -189,6 +249,8 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 @media (pointer: coarse) {
   #side a, #side-right a { padding-top: 7px; padding-bottom: 7px; }
   #side summary { padding-top: 7px; padding-bottom: 7px; }
+  .symbol-select { font-size: 16px; }
+  .symbol-index select, .symbol-more { min-height: 44px; font-size: 16px; }
 }
 
 /* ---- rail splitters ---------------------------------------------------------------------

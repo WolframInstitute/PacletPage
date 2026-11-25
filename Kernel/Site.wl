@@ -110,6 +110,13 @@ sidebarHTML[catalog_Association, notebooks_Association, rootGuide_ : True, strip
         "IncludeSymbols" -> False, "GuidesHeading" -> False
     |>]];
 
+symbolRailSlots[catalog_Association, notebooks_Association, enabled_ : True] :=
+    htmlSymbolsRailParts[catalog, <|
+        "Mode" -> "HTML", "Name" -> Lookup[catalog, "Name", ""], "Prefix" -> "", "Notebooks" -> notebooks,
+        "SymbolsRail" -> TrueQ[enabled], "Resource" -> Lookup[catalog, "Resource", ""],
+        "Filter" -> "", "Current" -> None
+    |>]["Slots"];
+
 symbolsHTML[catalog_Association, notebooks_Association] :=
     xmlToHTML[symbolsRailXML[catalog, <|
         "Mode" -> "HTML", "Name" -> catalog["Name"], "Prefix" -> "", "Notebooks" -> notebooks,

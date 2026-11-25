@@ -251,15 +251,61 @@ VerificationTest[
 ]
 
 VerificationTest[
-    StringCases[symbolsHTML[repositoryCatalog, <||>], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id],
+    StringCases[symbolRailSlots[repositoryCatalog, <||>, True]["symbols"], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id],
     {"ref/apple", "ref/Foo", "ref/LongCamelCaseName", "ref/$Bar"},
     TestID -> "Site: symbols alphabetically, ignoring case, $ names last"
 ]
 
 VerificationTest[
-    StringContainsQ[symbolsHTML[repositoryCatalog, <||>], ">Long<wbr>Camel<wbr>Case<wbr>Name</a>"],
+    StringContainsQ[symbolRailSlots[repositoryCatalog, <||>, True]["symbols"], ">Long<wbr>Camel<wbr>Case<wbr>Name</a>"],
     True,
     TestID -> "Site: a long name may break at its CamelCase steps"
+]
+
+VerificationTest[
+    Module[{names, catalog, slots, ids},
+        names = Join[{"0Before", "$Last", "\[Beta]Symbol"}, "Apple" <> IntegerString[#, 10, 2] & /@ Range[47]];
+        catalog = <|"Pages" -> AssociationMap[Function[id, With[{name = StringDrop[id, 4]},
+            fixturePage["ref", name, name, id <> ".nb"]]], "ref/" <> # & /@ names]|>;
+        slots = symbolRailSlots[catalog, <||>, True];
+        ids = StringCases[slots["symbols"] <> slots["remainingSymbols"], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id];
+        {
+            slots["symbolCount"], slots["moreText"], slots["prefixHidden"], slots["initialGroup"],
+            StringCount[slots["symbols"], "data-id="], DuplicateFreeQ[ids], Sort[ids] === Sort[esc /@ Keys[catalog["Pages"]]],
+            StringContainsQ[slots["letterOptions"], "<option value=\"$\">$</option>"]
+        }
+    ],
+    {"A &#183; 47 symbols", "Show 2 more", "", "All A names", 45, True, True, True},
+    TestID -> "Site: the first batch, count and letter picker precede the remaining symbol links; every id appears once"
+]
+
+VerificationTest[
+    Module[{names, pages, catalog, html, expr, forbidden},
+        names = Join[{"$Last", "Zebra"}, "Apple" <> IntegerString[#, 10, 2] & /@ Range[30]];
+        pages = AssociationMap[Function[id, With[{name = StringDrop[id, 4]},
+            fixturePage["ref", name, name, id <> ".nb"]]], "ref/" <> # & /@ names];
+        catalog = <|"Name" -> "Pub/Big", "Title" -> "Big", "Kind" -> "Local",
+            "Resource" -> "", "DocBase" -> "Documentation/", "RootGuide" -> None, "Pages" -> pages|>;
+        html = PacletPageFiles[catalog, "LayoutControls" -> True]["index.html"];
+        expr = shellXML[catalog, <|
+            "Mode" -> "Expression", "Name" -> "Pub/Big", "Prefix" -> "pp-", "Title" -> "Big",
+            "Subtitle" -> "", "Resource" -> "", "HomeID" -> None, "ShowRootGuide" -> True,
+            "StripTitleNumbers" -> True, "SymbolsRail" -> True, "Header" -> True, "Footer" -> True,
+            "ShowFilter" -> True, "Filter" -> "", "LayoutControls" -> {"LeftSidebar", "RightSidebar", "Fullscreen"},
+            "Current" -> "ref/Apple01", "ActiveTitle" -> "Apple01", "Notebook" -> Notebook[{}]
+        |>];
+        forbidden = Cases[expr, XMLElement["script" | "select" | "option" | "template" | "noscript", _, _], Infinity];
+        {
+            StringContainsQ[html, "id=\"side-right\" class=\"indexed\""],
+            StringContainsQ[html, "<template id=\"symbol-rest\">"],
+            StringContainsQ[html, "id=\"toggleSideR\""],
+            StringContainsQ[html, "id=\"splitR\""],
+            StringContainsQ[html, "id=\"ppFullExit\""],
+            forbidden === {}
+        }
+    ],
+    {True, True, True, True, True, True},
+    TestID -> "Shell: A-Z symbol index is HTML-only alongside LayoutControls and keeps Expression mode free of script/select/template tags"
 ]
 
 VerificationTest[
@@ -322,7 +368,7 @@ VerificationTest[
         <|"kind" -> "cloud", "definition" -> "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Name-ResourceDefinition.nb",
           "resource" -> "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/"|>,
         0,
-        {"resource/Name", "guide/Name", "ref/$Var"}
+        {"ref/$Var", "resource/Name", "guide/Name"}
     },
     TestID -> "Site: a deployed resource's site opens on its definition notebook, first in the rail; ids name the notebooks"
 ]
@@ -350,7 +396,7 @@ VerificationTest[
             StringCases[files["index.html"], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id]
         }
     ],
-    {"guide/Name", "", {"guide/Name", "ref/$Var"}},
+    {"guide/Name", "", {"ref/$Var", "guide/Name"}},
     TestID -> "Site: \"DefinitionPage\" -> False leaves the definition notebook out of the site"
 ]
 
@@ -1789,9 +1835,9 @@ VerificationTest[
         noRoot = PacletPage[dir, "RootGuide" -> False];
         WithCleanup[
             {
-                (* Unified shell parity: identical data-id order, native filter input, splitters, and layout buttons across HTML site and WL expression *)
-                StringCases[html, "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id] ===
-                    Cases[expr, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity],
+                (* Unified shell parity: identical page data-ids (HTML streams #side-right first), native filter input, splitters, and layout buttons across HTML site and WL expression *)
+                Sort[StringCases[html, "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id]] ===
+                    Sort[Cases[expr, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity]],
                 Cases[expr, XMLElement["button", {___, "data-pp-layout" -> k_, ___}, _] :> k, Infinity] ===
                     {"left", "right", "fullscreen", "fullscreen-exit"},
                 ! FreeQ[expr, XMLElement["input", {___, "class" -> "pp-filter", ___}, {}]] &&
