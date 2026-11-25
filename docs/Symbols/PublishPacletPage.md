@@ -39,6 +39,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Submit"` | `False` | whether to submit the paclet to the Paclet Repository |
 | `"DryRun"` | `False` | build and scrape, deploy nothing |
 | `"InstallDependencies"` | `False` | install declared dependencies (`"Required"`, `All`, or a list of names) before building documentation |
+| `"DependencyDirectory"` | `Automatic` | where `"InstallDependencies"` installs: by default the paclet's `build/dependencies`, loaded for the build, the deploy's load check and the bundling; a directory, or `None` for the user paclet repository |
 | `"BundleDependencies"` | `False` | package selected declared dependencies (`"Required"`, `All`, or a list of names) as an `"Asset"` extension inside the published `.paclet` archive |
 | `"BuildOptions"` | `{}` | options for `BuildPacletDocumentation` |
 | `"ResourceOptions"` | `{}` | options for `DeployPacletResource`, such as `"Archive"` or `"Exclude"`; the submission builds its archive with them too |

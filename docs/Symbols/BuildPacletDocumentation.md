@@ -59,6 +59,7 @@ RelatedTutorials: [PublishingADocumentationSite, CachingADocumentationBuild]
 | `"CacheKey"` | `Automatic` | what a page's key has of the paclet's code: `"Definitions"`, the definitions the page reaches, `"Code"`, all of it; `Automatic` is `"Definitions"` for a paclet with a primary context whose examples run here |
 | `"EvaluationKernel"` | `None` | the kernel the examples are evaluated on: a command, an association, or an association of templates to them; `None` evaluates them here |
 | `"InstallDependencies"` | `False` | install declared dependencies (`"Required"`, `All`, or a list of names) with `"CheckReadiness" -> False` before loading the paclet and building pages; optional dependencies unsupported on `$SystemID` are skipped |
+| `"DependencyDirectory"` | `Automatic` | where `"InstallDependencies"` installs: by default `build/dependencies`, loaded for the build and its kernels, so a build writes nothing under the user paclet base; a directory, or `None` for the user paclet repository |
 | `"Monitor"` | `False` | whether to print how many pages there are, cached and to convert, then each page as it is converted |
 
 - `"UseCache" -> False` converts every page and evaluates every example afresh, whatever has changed.

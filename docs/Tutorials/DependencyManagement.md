@@ -40,7 +40,9 @@ Keys[PacletDependencyInformation[consumer]]
 
 <!-- => {"WolframInstitute/PacletPage", "WolframInstitute/TypeTheory"} -->
 
-A bare dependency name uses the configured paclet sites. The other sources are a public Wolfram Cloud paclet `"Resource"`, a local `"Archive"`, such as `"Resources/Algebra.paclet"`, relative to the consumer directory, or a GitHub repository at a commit, `"Git"` with `"Commit"`, and `"Path"` where the paclet is not at the repository's root. Choose one source per library. Cloud resources may select their archive by system. Each dependency appears once in the list.
+A bare dependency name uses the configured paclet sites. The other sources are a public Wolfram Cloud paclet `"Resource"`, a local `"Archive"`, such as `"Resources/Algebra.paclet"`, relative to the consumer directory, or a Git repository at a commit, `"Git"` with `"Commit"`, and `"Path"` where the paclet is not at the repository's root. Choose one source per library, or a `"Resource"` with a `"Git"` source as its fallback. Cloud resources may select their archive by system. Each dependency appears once in the list.
+
+Only the consumer's own list is read: a dependency's own dependencies are not followed. List every library the consumer's code or documentation loads, including the ones another dependency needs.
 
 | Declaration | Meaning |
 |---|---|
@@ -52,7 +54,7 @@ A bare dependency name uses the configured paclet sites. The other sources are a
 | `"DownloadSize"` | Display text or an association of system IDs to display text |
 | `"URL"`, `"SetupLinks"` | Setup instructions and an optional association of additional link labels to HTTPS URLs |
 | `"Check"` | Fully qualified name of a zero-argument readiness function in the consumer's kernel context |
-| `"Git"`, `"Commit"`, `"Path"` | GitHub repository URL, commit ID (7 to 40 hexadecimal digits, either case), and optional paclet subdirectory |
+| `"Git"`, `"Commit"`, `"Path"` | HTTPS Git repository URL, commit ID (7 to 40 hexadecimal digits, either case), and optional paclet subdirectory |
 
 This declaration installs Wolfram/Parser from the `Parser` directory at the specified commit.
 
@@ -70,6 +72,24 @@ This declaration installs Wolfram/Parser from the `Parser` directory at the spec
 ```
 
 The version and runtime requirements come from `PacletInfo.wl`, or from `PacletInfo.m` when the repository uses the legacy filename. The source manifest must give these as literal values. **Check for updates** verifies the requirements before offering a Git release.
+
+A library that lives in a subdirectory of a large repository can name its published release first. Installation takes the release when it has a compatible version and an archive for the running system, and checks out only the paclet's directory at the commit when it does not, as during a cloud outage or before the first release.
+
+```wl
+#| eval: false
+"Dependencies" -> {
+    <|
+        "Name" -> "Demo/Algebra",
+        "Optional" -> True,
+        "Resource" -> "https://www.wolframcloud.com/obj/demo/DeployedResources/Paclet/Demo/Algebra",
+        "Git" -> "https://github.com/demo/monorepo",
+        "Commit" -> "0123456789abcdef0123456789abcdef01234567",
+        "Path" -> "Algebra"
+    |>
+}
+```
+
+A copy installed from the release has no Git receipt and meets the declaration. A copy checked out from the repository must match the commit.
 
 ## Check that a computation works
 
@@ -146,7 +166,19 @@ Version-based updates retain an equal or newer compatible version. With a Git so
 
 To ship required (or all) dependencies inside a published `.paclet` archive for offline installation, pass `"BundleDependencies" -> "Required"` (or `All`, or a list of names) to [DeployPacletResource](), [SubmitPacletResource](), or [PublishPacletPage](). PacletPage packs compatible installed copies into `Assets/Dependencies/` in the staged build and registers `{"Dependencies", "Dependencies"}` in the paclet's `"Asset"` extension. When a user runs [InstallPacletDependencies](), matching bundled archives in `owner["AssetLocation", "Dependencies"]` (including `.pacletpage-git.json` receipts for Git-pinned dependencies) are installed offline first without network access.
 
-For headless documentation builds that need every declared library (both required and optional) available so all examples evaluate, pass `"InstallDependencies" -> All` to [BuildPacletDocumentation]() or [PublishPacletPage](). At runtime load, a consumer installs only `"Required"` dependencies automatically and leaves `"Optional"` dependencies to [PacletDependencyDialog]().
+For headless documentation builds that need every declared library (both required and optional) available so all examples evaluate, pass `"InstallDependencies" -> All` to [BuildPacletDocumentation]() or [PublishPacletPage](). The build installs into its own `build/dependencies` directory and loads it for the build's kernels, so it writes nothing under the user paclet base and leaves other kernels on the machine as they were. Give `"DependencyDirectory"` to use another directory, such as one several builds share.
+
+```wl
+#| eval: false
+BuildPacletDocumentation[dir, "InstallDependencies" -> All]
+```
+
+The same installation is available to a script with the `"TargetDirectory"` option.
+
+```wl
+#| eval: false
+InstallPacletDependencies[File[dir], All, "CheckReadiness" -> False, "TargetDirectory" -> FileNameJoin[{dir, "build", "dependencies"}]]
+```
 
 ## Make setup work on a fresh installation
 
@@ -168,6 +200,26 @@ CopyFile[archive, FileNameJoin[{resources, "PacletPage.paclet"}]]
 ```
 
 The loader prefers a compatible installed copy. On first use of a bundled archive, it extracts it into the user's cache and checks its compatibility with the running Wolfram system before loading it. Other consumers can reuse the same cached release. The loader checks the interface the paclet supplies, so two builds with the same version can be distinguished. If neither copy supplies the manager, the returned failure gives the publisher's install command. A kernel that already loaded an older package receives a restart instruction.
+
+## Install required libraries when the consumer loads
+
+A consumer that cannot work without some libraries can install them as it loads. Copy the second loader beside the first.
+
+```wl
+#| eval: false
+CopyFile[manager["AssetLocation", "RequiredDependencyLoader"], FileNameJoin[{resources, "LoadRequiredDependencies.wl"}]]
+```
+
+Then read it from the consumer's kernel code, before the code that needs those libraries.
+
+```wl
+#| eval: false
+Get[FileNameJoin[{PacletObject["Demo/Consumer"]["Location"], "Resources", "LoadRequiredDependencies.wl"}]]
+```
+
+It installs only the required dependencies that have no compatible installed version, skips those whose `"Platforms"` exclude the running system, and gives `Null` when nothing is missing. Then it does not load PacletPage at all, so loading the consumer costs one read of its `PacletInfo.wl`. Otherwise it loads the manager with `LoadDependencyManager.wl` and installs the missing libraries without readiness checks. It never installs an optional dependency: those install only from [PacletDependencyDialog]() or an explicit call. A failure names the libraries that could not be installed.
+
+The Wolfram System's own `PacletInstall` ignores a consumer's `"Dependencies"` list, required and optional entries alike, so installing the consumer archive installs none of them.
 
 ## Connect an existing consumer
 

@@ -11,6 +11,55 @@ dependencyArchivePath[owner_, path_String] := If[StringStartsQ[path, "/" | "\\"]
     File[FileNameJoin[{owner["Location"], path}]]
 ]
 
+(* With "TargetDirectory" each release is unpacked into a directory of the caller's own, which stays
+   loaded with PacletDirectoryLoad, and nothing is written under the user paclet base: a
+   documentation build installs this way, so the machine's other kernels never see its copies. A
+   directory loaded this way wins a version tie with the user repository. *)
+$dependencyTarget = None
+dependencyTargetQ[] := StringQ[$dependencyTarget]
+dependencyInTargetQ[p_] := dependencyTargetQ[] && With[{location = p["Location"]}, StringQ[location] &&
+    Most[FileNameSplit[ExpandFileName[location]]] === FileNameSplit[$dependencyTarget]]
+
+(* the copies of a paclet in the target directory, by its directories just beneath it *)
+dependencyTargetCopies[name_] := Select[FileNames[All, $dependencyTarget], DirectoryQ[#] && ! StringStartsQ[FileNameTake[#], "."] &&
+    AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, Function[file, FileExistsQ[FileNameJoin[{#, file}]]]] &&
+    PacletObject[File[#]]["Name"] === name &]
+
+(* Unpack beside the target, two levels down where PacletDirectoryLoad does not look, then replace
+   the earlier copies of the paclet and load the directory again. *)
+dependencyUnpackFile[source_, name_, version_, git_] := Module[{target = $dependencyTarget, file, staging, unpacked, destination, installed},
+    file = Replace[source, File[path_String] :> path];
+    staging = FileNameJoin[{target, ".staging", CreateUUID["unpack-"]}];
+    If[! StringQ[CreateDirectory[staging, CreateIntermediateDirectories -> True]],
+        Return[dependencyFailure["DependencyInstallFailed", "Could not write to `1`.", target]]];
+    WithCleanup[
+        unpacked = ExtractPacletArchive[file, staging];
+        If[! StringQ[unpacked] || ! DirectoryQ[unpacked],
+            Return[dependencyFailure["DependencyInstallFailed", "Could not unpack `1` `2` into `3`.", name, version, target], Module]];
+        destination = FileNameJoin[{target, FileNameTake[unpacked]}];
+        Scan[DeleteDirectory[#, DeleteContents -> True] &, dependencyTargetCopies[name]];
+        If[DirectoryQ[destination], DeleteDirectory[destination, DeleteContents -> True]];
+        If[! StringQ[RenameDirectory[unpacked, destination]],
+            Return[dependencyFailure["DependencyInstallFailed", "Could not move `1` `2` into `3`.", name, version, target], Module]];
+        PacletDirectoryUnload[target];
+        PacletDirectoryLoad[target];
+        installed = PacletObject[File[destination]];
+        If[MatchQ[installed, _PacletObject] && installed["Name"] === name && installed["Version"] === version &&
+                (! AssociationQ[git] || dependencyInstalledGit[installed] === git),
+            installed,
+            dependencyFailure["DependencyInstallFailed", "Could not install `1` `2` into `3`.", name, version, target]],
+        DeleteDirectory[staging, DeleteContents -> True]
+    ]
+]
+
+(* A paclet site serves each release at Paclets/<name>-<version>.paclet, with __ for a slash in the name. *)
+dependencySiteArchiveURL[p_PacletObject] := With[{site = p["Location"], qualifier = p["Qualifier"]},
+    If[StringQ[site] && StringStartsQ[site, "https://" | "http://", IgnoreCase -> True],
+        StringTrim[site, "/"] <> "/Paclets/" <> StringReplace[p["Name"], "/" -> "__"] <> "-" <>
+            If[StringQ[qualifier] && qualifier =!= "", qualifier <> "-", ""] <> p["Version"] <> ".paclet",
+        dependencyFailure["DependencyRelease", "The paclet site of `1` serves no archive this installation can download.", p["Name"]]]
+]
+
 $dependencyInternetMessage = "Wolfram internet access is disabled. Enable it in Internet & Mail Settings, then try again."
 dependencyOffline[] := dependencyFailure["DependencyInternetDisabled", $dependencyInternetMessage]
 
@@ -60,11 +109,12 @@ dependencyBundledRelease[owner_, entry_] := Module[{dir = dependencyBundledDirec
         p = Quiet[PacletObject[File[file]], {PacletObject::invfile}];
         If[MatchQ[p, _PacletObject] && p["Name"] === name && dependencyVersionQ[p["Version"]] &&
                 dependencyCompatibleQ[p["Version"], spec] && dependencyArchiveSupportedQ[p],
-            If[gitQ,
-                receipt = dependencyArchiveGitReceipt[file];
-                If[dependencyGitMatchesQ[receipt, entry],
-                    Sow[<|"Version" -> p["Version"], "Archive" -> File[file], "Bundled" -> True, "BundledGit" -> receipt|>]],
-                Sow[<|"Version" -> p["Version"], "Archive" -> File[file], "Bundled" -> True|>]
+            receipt = If[gitQ, dependencyArchiveGitReceipt[file], None];
+            Which[
+                gitQ && dependencyGitMatchesQ[receipt, entry],
+                    Sow[<|"Version" -> p["Version"], "Archive" -> File[file], "Bundled" -> True, "BundledGit" -> receipt|>],
+                dependencyCopySatisfiesQ[entry, receipt],
+                    Sow[<|"Version" -> p["Version"], "Archive" -> File[file], "Bundled" -> True|>]
             ]
         ]
     ]], FileNames["*.paclet", dir]]][[2]];
@@ -74,7 +124,15 @@ dependencyBundledRelease[owner_, entry_] := Module[{dir = dependencyBundledDirec
     best
 ]
 
-dependencyRelease[owner_, entry_, checkUpstream_ : False] := Module[{name = entry["Name"], spec = Lookup[entry, "Version", All], release, archive, p, meta, candidates, bundled},
+(* the version of a public cloud resource, read from its metadata *)
+dependencyResourceRelease[entry_] := With[{name = entry["Name"], meta = dependencyResourceMetadata[entry["Resource"]]},
+    If[! AssociationQ[meta] || Lookup[meta, "Name"] =!= name || Lookup[meta, "ResourceType"] =!= "Paclet" ||
+            ! MatchQ[Lookup[meta, "ResourceLocation"], CloudObject[_String, ___]],
+        dependencyFailure["DependencyRelease", "Could not read the published release of `1`.", name],
+        <|"Version" -> Lookup[meta, "PacletVersion"], "DescriptionURL" -> First[meta["ResourceLocation"]]|>]
+]
+
+dependencyRelease[owner_, entry_, checkUpstream_ : False] := Module[{name = entry["Name"], spec = Lookup[entry, "Version", All], release, archive, p, published, candidates, bundled},
     If[! TrueQ[checkUpstream] && ! KeyExistsQ[entry, "Archive"],
         bundled = dependencyBundledRelease[owner, entry];
         If[AssociationQ[bundled], Return[bundled]]
@@ -90,16 +148,20 @@ dependencyRelease[owner_, entry_, checkUpstream_ : False] := Module[{name = entr
                 Return[dependencyFailure["DependencyArchive", "The archive `1` does not contain `2`.", archive, name]]];
             If[! dependencyArchiveSupportedQ[p], Return[dependencyArchiveUnsupported[p]]];
             <|"Version" -> p["Version"], "Archive" -> archive|>,
+        (* a published release first, and the repository at its commit where none is compatible *)
+        KeyExistsQ[entry, "Git"] && KeyExistsQ[entry, "Resource"],
+            If[$AllowInternet === False, Return[dependencyOffline[]]];
+            published = dependencyResourceRelease[entry];
+            If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
+            If[AssociationQ[published] && dependencyVersionQ[published["Version"]] && dependencyCompatibleQ[published["Version"], spec],
+                published,
+                With[{git = dependencyGitRelease[entry]}, If[FailureQ[git], Return[git], git]]],
         KeyExistsQ[entry, "Git"],
             If[$AllowInternet === False, Return[dependencyOffline[]]];
             With[{git = dependencyGitRelease[entry]}, If[FailureQ[git], Return[git], git]],
         KeyExistsQ[entry, "Resource"],
             If[$AllowInternet === False, Return[dependencyOffline[]]];
-            meta = dependencyResourceMetadata[entry["Resource"]];
-            If[! AssociationQ[meta] || Lookup[meta, "Name"] =!= name || Lookup[meta, "ResourceType"] =!= "Paclet" ||
-                    ! MatchQ[Lookup[meta, "ResourceLocation"], CloudObject[_String, ___]],
-                Return[dependencyFailure["DependencyRelease", "Could not read the published release of `1`.", name]]];
-            <|"Version" -> Lookup[meta, "PacletVersion"], "DescriptionURL" -> First[meta["ResourceLocation"]]|>,
+            With[{resource = dependencyResourceRelease[entry]}, If[FailureQ[resource], Return[resource], resource]],
         True,
             With[{refresh = $AllowInternet =!= False && TrueQ[$refreshDependencySites]},
                 $refreshDependencySites = False;
@@ -148,26 +210,42 @@ dependencyPublisherURLQ[resource_, url_] := Module[{base = URLParse[resource], t
         ! MemberQ[target["Path"], ".." | "."] && Take[Rest[target["Path"]], UpTo[Length[path]]] === path
 ]
 
-dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text, url, resource, desc},
+dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]},
     Which[
         KeyExistsQ[release, "SitePaclet"],
-            If[$AllowInternet === False, dependencyOffline[], dependencyInstallFile[release["SitePaclet"], name, release["Version"]]],
+            Which[
+                $AllowInternet === False, dependencyOffline[],
+                dependencyTargetQ[], With[{url = dependencySiteArchiveURL[release["SitePaclet"]]},
+                    If[FailureQ[url], url, dependencyDownloadInstall[url, name, release["Version"]]]],
+                True, dependencyInstallFile[release["SitePaclet"], name, release["Version"]]],
         KeyExistsQ[release, "GitURL"] || KeyExistsQ[release, "GitArchive"],
             dependencyGitInstall[release, entry],
         KeyExistsQ[release, "Archive"],
             dependencyInstallFile[release["Archive"], name, release["Version"], Lookup[release, "BundledGit", None]],
         True,
-            resource = entry["Resource"];
-            desc = release["DescriptionURL"];
-            If[! dependencyPublisherURLQ[resource, desc], Return[dependencyFailure["DependencyPublisher", "Unexpected release description address for `1`.", name]]];
-            text = Block[{CloudConnect = ($Failed &)}, TimeConstrained[Import[CloudObject[desc], "Text"], 60, $Failed]];
-            If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
-            If[! StringQ[text], Return[dependencyFailure["DependencyRelease", "Could not read the release description for `1`.", name]]];
-            url = dependencyArchiveURL[text, name, release["Version"], $SystemID];
-            If[FailureQ[url], Return[url]];
-            If[! dependencyPublisherURLQ[resource, url], Return[dependencyFailure["DependencyPublisher", "Unexpected archive address for `1`.", name]]];
-            dependencyDownloadInstall[url, name, release["Version"]]
+            dependencyPublishedInstall[entry, release]
     ]
+]
+
+(* A published release that fails to install, as one with no archive for this system or one the
+   cloud cannot serve, leaves an entry with a Git source to its repository at the pinned commit. *)
+dependencyPublishedInstall[entry_, release_] := With[{installed = dependencyResourceInstall[entry, release]},
+    If[! FailureQ[installed] || ! KeyExistsQ[entry, "Git"] || dependencyCancelledQ[], installed,
+        With[{git = dependencyGitRelease[entry]},
+            With[{result = If[FailureQ[git], git, dependencyGitInstall[git, entry]]},
+                If[FailureQ[result] && MatchQ[result, Failure[_, _Association]],
+                    Failure[First[result], Append[Last[result], "PublishedFailure" -> installed]], result]]]]
+]
+
+dependencyResourceInstall[entry_, release_] := Module[{name = entry["Name"], resource = entry["Resource"], desc = release["DescriptionURL"], text, url},
+    If[! dependencyPublisherURLQ[resource, desc], Return[dependencyFailure["DependencyPublisher", "Unexpected release description address for `1`.", name]]];
+    text = Block[{CloudConnect = ($Failed &)}, TimeConstrained[Import[CloudObject[desc], "Text"], 60, $Failed]];
+    If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
+    If[! StringQ[text], Return[dependencyFailure["DependencyRelease", "Could not read the release description for `1`.", name]]];
+    url = dependencyArchiveURL[text, name, release["Version"], $SystemID];
+    If[FailureQ[url], Return[url]];
+    If[! dependencyPublisherURLQ[resource, url], Return[dependencyFailure["DependencyPublisher", "Unexpected archive address for `1`.", name]]];
+    dependencyDownloadInstall[url, name, release["Version"]]
 ]
 
 dependencyInstallFile[source_, name_, version_, git_: None] := Module[{p, result, installed},
@@ -177,6 +255,7 @@ dependencyInstallFile[source_, name_, version_, git_: None] := Module[{p, result
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     If[! dependencyArchiveSupportedQ[p], Return[dependencyArchiveUnsupported[p]]];
     $dependencyProgress["Installing", None];
+    If[dependencyTargetQ[], Return[dependencyUnpackFile[source, name, version, git]]];
     If[AssociationQ[git], Return[dependencyCommitGitFile[source, name, version, git]]];
     result = PacletInstall[source, KeepExistingVersion -> True];
     If[MatchQ[result, _PacletObject] && result["Name"] === name && result["Version"] === version, Return[result]];
@@ -396,7 +475,8 @@ dependencyLockAbandonedQ[file_String] := FileExistsQ[file] && With[{held = depen
             IntegerQ[process] && SystemProcesses["PID" -> process] === {}]]
 
 SetAttributes[withDependencyGitLock, HoldRest]
-withDependencyGitLock[name_, action_] := With[{wait = $dependencyLockWait, lock = File[FileNameJoin[{$UserBasePacletsDirectory,
+withDependencyGitLock[name_, action_] := With[{wait = $dependencyLockWait, lock = File[FileNameJoin[{
+        If[dependencyTargetQ[], $dependencyTarget, $UserBasePacletsDirectory],
         ".git-pin-" <> IntegerString[Hash[name, "SHA256"], 16] <> ".lock"}]]},
     If[dependencyLockAbandonedQ[First[lock]],
         (* A second kernel may have reclaimed the old lock and acquired a new one since the first read. *)
@@ -428,12 +508,20 @@ dependencyInstalledGit[p_] := Module[{location = p["Location"], file, source},
 ]
 dependencyGitMatchesQ[source_, entry_] := AssociationQ[source] &&
     source === dependencyGitSource[entry, source["Commit"]] && StringStartsQ[source["Commit"], dependencyGitCommit[entry]]
+(* A copy meets a Git pin by its receipt of the pinned commit. Beside a published "Resource", a copy
+   without a receipt came from that release and meets the declaration as well. *)
+dependencyCopySatisfiesQ[entry_, receipt_] := ! KeyExistsQ[entry, "Git"] || dependencyGitMatchesQ[receipt, entry] ||
+    (KeyExistsQ[entry, "Resource"] && MissingQ[receipt])
+dependencyGitReleaseQ[release_] := KeyExistsQ[release, "GitURL"] || KeyExistsQ[release, "GitArchive"] || AssociationQ[Lookup[release, "BundledGit", None]]
 dependencyGitUserCopyQ[p_] := With[{location = p["Location"]}, StringQ[location] &&
     Most[FileNameSplit[ExpandFileName[location]]] === FileNameSplit[ExpandFileName[FileNameJoin[{$UserBasePacletsDirectory, "Repository"}]]]]
+(* A target directory holds its own copies, which it replaces, and wins a tie with any other copy:
+   only a newer copy elsewhere would still load instead. *)
 dependencyGitConflict[p_, version_] := Which[
+    dependencyInTargetQ[p], None,
     PacletNewerQ[p["Version"], version], dependencyFailure["DependencyVersionConflict",
         "Installed `1` `2` is newer than the pinned version `3`.", p["Name"], p["Version"], version],
-    ! PacletNewerQ[version, p["Version"]] && ! dependencyGitUserCopyQ[p], dependencyFailure["ExternalInstallation",
+    ! dependencyTargetQ[] && ! PacletNewerQ[version, p["Version"]] && ! dependencyGitUserCopyQ[p], dependencyFailure["ExternalInstallation",
         "The active copy of `1` is outside the user paclet repository.", p["Name"]],
     True, None]
 

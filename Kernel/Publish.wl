@@ -1057,10 +1057,11 @@ Options[BuildPacletDocumentation] = {
     "CacheKey" -> Automatic,
     "EvaluationKernel" -> None,
     "InstallDependencies" -> False,
+    "DependencyDirectory" -> Automatic,
     "Monitor" -> False
 };
 
-BuildPacletDocumentation::dir = "`1` is not a paclet directory: it has no PacletInfo.wl.";
+BuildPacletDocumentation::dir ="`1` is not a paclet directory: it has no PacletInfo.wl.";
 BuildPacletDocumentation::lost = "`1` pages the build planned have no notebook and are not among its failures: `2`.";
 BuildPacletDocumentation::source = "`1` has no markdown documentation.";
 BuildPacletDocumentation::page = "`1` did not become a notebook: `2`.";
@@ -1068,19 +1069,31 @@ BuildPacletDocumentation::flagged = "`1` documentation pages carry a flag the do
 BuildPacletDocumentation::nodefinition = "No markdown definition was found, as ResourceDefinition.md in `1` or a Template: Paclet page under `2`, so `3` was not rebuilt; a deploy would publish it as it is. Give \"Definition\", or \"Definition\" -> None to build without one.";
 BuildPacletDocumentation::installdeps = "Could not install declared dependencies for `1`: `2`.";
 
-(* Install declared dependencies before loading the paclet or building its documentation.
-   Required dependency failures abort the build; optional dependencies unavailable on $SystemID
-   are skipped cleanly. *)
-installBuildDependencies[head_Symbol, dir_String, spec_] := Module[{owner, manifest, installed, failed},
+(* where a build installs the declared dependencies: a directory of its own under build/ unless it
+   names one, and the user paclet repository for None *)
+buildDependencyDirectory[dir_String, Automatic] := FileNameJoin[{dir, "build", "dependencies"}];
+buildDependencyDirectory[_, None] := Automatic;
+buildDependencyDirectory[_, File[target_String]] := target;
+buildDependencyDirectory[_, target_String] := target;
+buildDependencyDirectory[_, _] := $Failed;
+
+(* Install declared dependencies before loading the paclet or building its documentation, each
+   from the consumer's own list: a dependency's own dependencies are not followed. Required
+   dependency failures abort the build; optional dependencies unavailable on $SystemID are skipped. *)
+installBuildDependencies[head_Symbol, dir_String, spec_, directory_ : Automatic] := Module[{owner, manifest, target, installed, failed},
     If[spec === False || spec === None, Return[True]];
     If[! MatchQ[spec, All | _String | {___String}],
         Message[head::installdeps, dir, "Invalid InstallDependencies specification: " <> ToString[spec, InputForm]];
+        Return[$Failed]];
+    target = buildDependencyDirectory[dir, directory];
+    If[target === $Failed,
+        Message[head::installdeps, dir, "Invalid DependencyDirectory specification: " <> ToString[directory, InputForm]];
         Return[$Failed]];
     owner = PacletObject[File[dir]];
     manifest = dependencyManifest[owner];
     If[FailureQ[manifest], Message[head::installdeps, dir, manifest]; Return[$Failed]];
     If[manifest === <||>, Return[True]];
-    installed = InstallPacletDependencies[owner, spec, "CheckReadiness" -> False];
+    installed = InstallPacletDependencies[owner, spec, "CheckReadiness" -> False, "TargetDirectory" -> target];
     If[FailureQ[installed], Message[head::installdeps, dir, installed]; Return[$Failed]];
     failed = Select[Normal[installed], Function[pair,
         FailureQ[Last[pair]] && (TrueQ[manifest[First[pair]]["Required"]] || ! MatchQ[Last[pair], Failure["UnsupportedSystem", _]])]];
@@ -1102,7 +1115,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     },
     If[ ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] && ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]],
         Message[BuildPacletDocumentation::dir, dir]; Return[$Failed, Module]];
-    If[ installBuildDependencies[BuildPacletDocumentation, dir, OptionValue["InstallDependencies"]] === $Failed,
+    If[ installBuildDependencies[BuildPacletDocumentation, dir, OptionValue["InstallDependencies"], OptionValue["DependencyDirectory"]] === $Failed,
         Return[$Failed, Module]];
     source = Replace[OptionValue["Source"], Automatic -> FileNameJoin[{dir, "docs"}]];
     target = Replace[OptionValue["Target"], Automatic -> FileNameJoin[{dir, "Documentation", "English"}]];
@@ -3257,7 +3270,7 @@ stageBundledDependencies[head_Symbol, dir_String, stage_String, spec_] := Catch[
             ];
             match = SelectFirst[PacletFind[depName], Function[p,
                 dependencyVersionQ[p["Version"]] && dependencyCompatibleQ[p["Version"], verSpec] &&
-                (! gitQ || dependencyGitMatchesQ[dependencyInstalledGit[p], entry])
+                dependencyCopySatisfiesQ[entry, If[gitQ, dependencyInstalledGit[p], None]]
             ], None];
             Which[
                 MatchQ[match, _PacletObject],
@@ -3924,6 +3937,7 @@ Options[PublishPacletPage] = {
     "Submit" -> False,
     "DryRun" -> False,
     "InstallDependencies" -> False,
+    "DependencyDirectory" -> Automatic,
     "BundleDependencies" -> False,
     "BuildOptions" -> {},
     "ResourceOptions" -> {},
@@ -3964,7 +3978,7 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$d
     If[ stopsQ[offlineDryRunQ[OptionValue["DryRun"]] || publishingAccountQ[PublishPacletPage, OptionValue["Account"]], TrueQ[OptionValue["DryRun"]] && ! TrueQ[OptionValue["Build"]]],
         Throw[$Failed, "publish"]];
     If[ installDeps =!= False && installDeps =!= None,
-        If[ installBuildDependencies[PublishPacletPage, dir, installDeps] === $Failed, Throw[$Failed, "publish"]]];
+        If[ installBuildDependencies[PublishPacletPage, dir, installDeps, OptionValue["DependencyDirectory"]] === $Failed, Throw[$Failed, "publish"]]];
     build = If[ TrueQ[OptionValue["Build"]],
         BuildPacletDocumentation[dir,
             Sequence @@ If[installDeps =!= False && installDeps =!= None, {"InstallDependencies" -> False}, {}],

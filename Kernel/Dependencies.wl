@@ -45,10 +45,11 @@ dependencyEntryQ[entry_, owner_] := With[{
     dependencyTextMapQ[links] && AllTrue[Values[links], dependencyHTTPQ] &&
     (StringQ[size] || dependencyTextMapQ[size]) &&
     (! KeyExistsQ[entry, "Archive"] || (StringQ[entry["Archive"]] && entry["Archive"] =!= "" && ! KeyExistsQ[entry, "Resource"])) &&
-    (* a repository at a commit is a source of its own, and a commit or a path names nothing without one *)
+    (* a repository at a commit is a source of its own, or the fallback of a published "Resource",
+       and a commit or a path names nothing without one *)
     If[KeyExistsQ[entry, "Git"],
         dependencyGitURLQ[entry["Git"]] && dependencyCommitQ[Lookup[entry, "Commit", None]] &&
-            dependencyGitPathQ[Lookup[entry, "Path", ""]] && ! KeyExistsQ[entry, "Resource"] && ! KeyExistsQ[entry, "Archive"],
+            dependencyGitPathQ[Lookup[entry, "Path", ""]] && ! KeyExistsQ[entry, "Archive"],
         ! KeyExistsQ[entry, "Commit"] && ! KeyExistsQ[entry, "Path"]] &&
     (check === None || (StringQ[check] && StringMatchQ[check, RegularExpression["([a-zA-Z$][a-zA-Z0-9$]*`)+[a-zA-Z$][a-zA-Z0-9$]*"]] &&
         AnyTrue[Cases[Flatten[{owner["PrimaryContext"], owner["Context"]}], _String], StringStartsQ[check, #] &]))
@@ -130,7 +131,7 @@ dependencyLocalStatus[entry_, installed_, git_: Automatic] := Which[
     installed === {}, "Not installed",
     KeyExistsQ[$dependencyRestarts, entry["Name"]], "Restart required",
     ! dependencyCompatibleQ[First[installed]["Version"], Lookup[entry, "Version", All]], "Version mismatch",
-    KeyExistsQ[entry, "Git"] && ! dependencyGitMatchesQ[Replace[git, Automatic :> dependencyInstalledGit[First[installed]]], entry], "Revision mismatch",
+    KeyExistsQ[entry, "Git"] && ! dependencyCopySatisfiesQ[entry, Replace[git, Automatic :> dependencyInstalledGit[First[installed]]]], "Revision mismatch",
     True, "Installed"
 ]
 
@@ -178,7 +179,20 @@ dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{resu
     result
 ]
 
-Options[InstallPacletDependencies] = {"CheckReadiness" -> True}
+(* Automatic installs into the user paclet repository. A directory receives each release unpacked
+   and stays loaded with PacletDirectoryLoad, so this kernel and the kernels it starts find its copies. *)
+SetAttributes[withDependencyTarget, HoldRest]
+withDependencyTarget[Automatic, body_] := body
+withDependencyTarget[File[dir_String], body_] := withDependencyTarget[dir, body]
+withDependencyTarget[dir_String, body_] := With[{target = ExpandFileName[dir]},
+    If[! DirectoryQ[target] && ! StringQ[CreateDirectory[target, CreateIntermediateDirectories -> True]],
+        dependencyFailure["DependencyTarget", "Could not create the dependency directory `1`.", target],
+        PacletDirectoryLoad[target];
+        Block[{$dependencyTarget = target}, body]]
+]
+withDependencyTarget[spec_, _] := dependencyFailure["DependencyTarget", "Give Automatic or a directory as the target directory, not `1`.", spec]
+
+Options[InstallPacletDependencies] = {"CheckReadiness" -> True, "TargetDirectory" -> Automatic}
 InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject)] :=
     InstallPacletDependencies[owner, All]
 InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject),
@@ -186,10 +200,10 @@ InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject),
     InstallPacletDependencies[owner, All, first, rest]
 InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
     With[{check = TrueQ[OptionValue["CheckReadiness"]]},
-        dependencyMap[dependencyInstall[#1, #2, False, check] &, owner, names]
+        withDependencyTarget[OptionValue["TargetDirectory"], dependencyMap[dependencyInstall[#1, #2, False, check] &, owner, names]]
     ]
 
-Options[UpdatePacletDependencies] = {"CheckReadiness" -> True}
+Options[UpdatePacletDependencies] = {"CheckReadiness" -> True, "TargetDirectory" -> Automatic}
 UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject)] :=
     UpdatePacletDependencies[owner, All]
 UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject),
@@ -197,7 +211,7 @@ UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject),
     UpdatePacletDependencies[owner, All, first, rest]
 UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
     With[{check = TrueQ[OptionValue["CheckReadiness"]]},
-        dependencyMap[dependencyInstall[#1, #2, True, check] &, owner, names]
+        withDependencyTarget[OptionValue["TargetDirectory"], dependencyMap[dependencyInstall[#1, #2, True, check] &, owner, names]]
     ]
 
 dependencyRemovableQ[entry_] := ! TrueQ[entry["Required"]] && entry["Name"] =!= "WolframInstitute/PacletPage"
@@ -212,22 +226,26 @@ dependencyChecked[owner_, entry_, paclet_, checkReadiness_ : True] := Module[{re
         "InstalledVersion" -> paclet["Version"], "Cause" -> readiness|>]]
 ]
 
-dependencyInstall[owner_, entry_, update_, checkReadiness_ : True] := Module[{name = entry["Name"], installed, current, release, result, loaded, git = KeyExistsQ[entry, "Git"]},
+dependencyInstall[owner_, entry_, update_, checkReadiness_ : True] := Module[{name = entry["Name"], installed, current, receipt, release, pinned, result, loaded},
     If[! dependencySupportedQ[entry], Return[dependencyFailure["UnsupportedSystem", "`1` is unavailable on `2`.", name, $SystemID]]];
     installed = PacletFind[name];
     current = First[installed, None];
     If[update && current === None, Return[dependencyFailure["DependencyNotInstalled", "Install `1` before updating it.", name]]];
+    (* a copy with a receipt answers to the pin alone; any other copy, to the versions on offer *)
+    receipt = If[current =!= None && KeyExistsQ[entry, "Git"], dependencyInstalledGit[current], None];
     If[current =!= None && dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]] &&
-            If[git, dependencyGitMatchesQ[dependencyInstalledGit[current], entry], ! update],
+            If[KeyExistsQ[entry, "Git"] && ! (KeyExistsQ[entry, "Resource"] && MissingQ[receipt]), dependencyGitMatchesQ[receipt, entry], ! update],
         Return[dependencyChecked[owner, entry, current, checkReadiness]]];
     $dependencyProgress["Checking release", None];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     release = dependencyRelease[owner, entry, update];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     If[FailureQ[release], Return[release]];
-    If[git && current =!= None,
+    (* every release of a Git source alone is its pin; beside a published "Resource", only one checked out *)
+    pinned = KeyExistsQ[entry, "Git"] && (! KeyExistsQ[entry, "Resource"] || dependencyGitReleaseQ[release]);
+    If[pinned && current =!= None,
         With[{conflict = dependencyGitConflict[current, release["Version"]]}, If[FailureQ[conflict], Return[conflict]]]];
-    If[! git && current =!= None && ! PacletNewerQ[release["Version"], current["Version"]],
+    If[! pinned && current =!= None && ! PacletNewerQ[release["Version"], current["Version"]],
         Return[If[dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]], dependencyChecked[owner, entry, current, checkReadiness],
             dependencyFailure["DependencyVersionConflict", "Installed `1` `2` does not satisfy `3`.", name, current["Version"], entry["Version"]]]]];
     loaded = AnyTrue[installed, dependencyLoadedQ];

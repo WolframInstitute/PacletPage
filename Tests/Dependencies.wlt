@@ -975,7 +975,7 @@ VerificationTest[
     With[{git = <|"Name" -> "Demo/Git", "Git" -> "https://github.com/demo/git", "Commit" -> "abcdef0"|>},
         {
             AssociationQ[dependencyManifest[testDependencyOwner[{}, {git, Append[git, {"Name" -> "Demo/Sub", "Path" -> "Sub"}]}]]],
-            FailureQ[dependencyManifest[testDependencyOwner[{}, {Append[git, "Resource" -> "https://example.org/r"]}]]],
+            AssociationQ[dependencyManifest[testDependencyOwner[{}, {Append[git, "Resource" -> "https://example.org/r"]}]]],
             FailureQ[dependencyManifest[testDependencyOwner[{}, {Append[git, "Archive" -> "Resources/A.paclet"]}]]],
             FailureQ[dependencyManifest[testDependencyOwner[{}, {<|"Name" -> "Demo/Git", "Commit" -> "abcdef0"|>}]]],
             FailureQ[dependencyManifest[testDependencyOwner[{}, {KeyDrop[git, "Commit"]}]]],
@@ -983,7 +983,7 @@ VerificationTest[
         }
     ],
     {True, True, True, True, True, True},
-    TestID -> "Dependencies: a git declaration has a commit, no other source, and a commit or a path only with a repository"
+    TestID -> "Dependencies: a git declaration has a commit, a published resource as its only other source, and a commit or a path only with a repository"
 ]
 
 VerificationTest[

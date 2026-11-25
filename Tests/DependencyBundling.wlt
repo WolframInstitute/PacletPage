@@ -119,7 +119,7 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{root = CreateDirectory[], reqName, optName, reqDir, reqArc, consumerDir, okAll, failReq},
+    Module[{root = CreateDirectory[], reqName, optName, reqDir, reqArc, consumerDir, okAll, failReq, target, copies},
         reqName = "TestBuildReq" <> StringDelete[CreateUUID[], "-"];
         optName = "TestBuildOpt" <> StringDelete[CreateUUID[], "-"];
         WithCleanup[
@@ -135,7 +135,9 @@ VerificationTest[
                     <|"Name" -> optName, "Optional" -> True, "Platforms" -> {"NonExistent-OS-99"}|>
                 }
             |>], FileNameJoin[{consumerDir, "PacletInfo.wl"}]];
+            target = FileNameJoin[{consumerDir, "build", "dependencies"}];
             okAll = installBuildDependencies[BuildPacletDocumentation, consumerDir, All];
+            copies = PacletFind[reqName];
 
             (* Required unsupported dependency must abort with message *)
             Put[PacletObject[<|
@@ -143,13 +145,14 @@ VerificationTest[
                 "Dependencies" -> {<|"Name" -> optName, "Platforms" -> {"NonExistent-OS-99"}|>}
             |>], FileNameJoin[{consumerDir, "PacletInfo.wl"}]];
             failReq = Quiet[installBuildDependencies[BuildPacletDocumentation, consumerDir, "Required"], {BuildPacletDocumentation::installdeps}];
-            {okAll === True, PacletFind[reqName] =!= {}, failReq === $Failed},
-            Scan[PacletUninstall, PacletFind[reqName]];
+            {okAll === True, Length[copies] === 1 && StringStartsQ[ExpandFileName[First[copies]["Location"]], ExpandFileName[target]],
+                MemberQ[ExpandFileName /@ PacletDirectoryLoad[], ExpandFileName[target]], failReq === $Failed},
+            PacletDirectoryUnload[target];
             DeleteDirectory[root, DeleteContents -> True]
         ]
     ],
-    {True, True, True},
-    TestID -> "BuildPacletDocumentation: InstallDependencies installs required deps, tolerates unsupported optional deps, and fails on required errors"
+    {True, True, True, True},
+    TestID -> "BuildPacletDocumentation: InstallDependencies installs required deps into build/dependencies, tolerates unsupported optional deps, and fails on required errors"
 ]
 
 VerificationTest[
