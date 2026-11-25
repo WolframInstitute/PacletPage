@@ -52,9 +52,9 @@ A bare dependency name uses the configured paclet sites. The other sources are a
 | `"DownloadSize"` | Display text or an association of system IDs to display text |
 | `"URL"`, `"SetupLinks"` | Setup instructions and an optional association of additional link labels to HTTPS URLs |
 | `"Check"` | Fully qualified name of a zero-argument readiness function in the consumer's kernel context |
-| `"Git"`, `"Commit"`, `"Path"` | A GitHub repository, the commit to install, 7 to 40 hexadecimal digits, and the directory of the paclet in it; the version is the one the commit's `PacletInfo.wl` gives |
+| `"Git"`, `"Commit"`, `"Path"` | GitHub repository URL, commit ID (7 to 40 hexadecimal digits, either case), and optional paclet subdirectory |
 
-A library that is not published can come from its repository. This declaration installs Wolfram/Parser as it is at one commit, from the `Parser` directory of its repository:
+This declaration installs Wolfram/Parser from the `Parser` directory at the specified commit.
 
 ```wl
 #| eval: false
@@ -68,6 +68,8 @@ A library that is not published can come from its repository. This declaration i
     |>
 }
 ```
+
+The version and runtime requirements come from `PacletInfo.wl`, or from `PacletInfo.m` when the repository uses the legacy filename. The source manifest must give these as literal values. **Check for updates** verifies the requirements before offering a Git release.
 
 ## Check that a computation works
 
@@ -83,7 +85,7 @@ Demo`Consumer`TypeTheoryReadyQ[] := Block[{$ContextPath = $ContextPath},
 ]
 ```
 
-Register the consumer directory with `PacletDirectoryLoad` during development. Installed consumers can be addressed directly by name. Call the check explicitly or let installation run it. A failed check produces **Needs setup**. A missing toolchain, license or system executable can require a separate setup step even after installation succeeds.
+Register the consumer directory with `PacletDirectoryLoad` during development. Installed consumers can be addressed directly by name. Call the check explicitly or let installation run it. A failed check produces **Needs setup**. Expand the report or hover over that notice in the dialog to read the consumer’s diagnostic, such as a missing toolchain, license or system executable.
 
 ```wl
 #| eval: false
@@ -94,7 +96,9 @@ PacletDependencyInformation["Demo/Consumer", "WolframInstitute/TypeTheory", "Che
 
 Open the dialog from a desktop notebook. It reads the local installation. Choose **Install** beside a missing library to fetch its release. Once a library is installed, **Check for updates** looks up compatible releases for it and the other installed libraries. **Check readiness** runs any applicable tests supplied by the consumer. Each button becomes available as soon as a library qualifies.
 
-The footer names the library being checked. A newer release adds **Upgrade** to that library’s row. **Cancel check** stops after the current library and keeps completed results. When Wolfram internet access is disabled, cloud releases show **Offline**. You can still check a local archive. A version lookup that times out after ten seconds shows **Unavailable** and the check continues. Hover over a failure notice for details.
+The footer names the library being checked. **Upgrade** appears for a newer release or a changed Git pin at the same version in the user repository. **Cancel check** stops after the current library and keeps completed results.
+
+When Wolfram internet access is disabled, you can still check a local archive, a matching installed Git pin, or a bare name with a compatible release in the cached site index. Sources that need internet access show **Offline**. A version lookup that times out after ten seconds shows **Unavailable** and the check continues. Hover over a failure notice for details.
 
 The [Using the Dependency Dialog](paclet:WolframInstitute/PacletPage/tutorial/UsingTheDependencyDialog) tutorial shows the dialog in each of these states.
 
@@ -131,7 +135,7 @@ UpdatePacletDependencies["Demo/Consumer", "WolframInstitute/TypeTheory"]
 UninstallPacletDependencies["Demo/Consumer", "WolframInstitute/TypeTheory"]
 ```
 
-An update retains an equal or newer compatible version. Restart the kernel when a loaded library changes. Uninstalling removes user-installed copies, which other consumers may also use.
+Version-based updates retain an equal or newer compatible version. With a Git source, changing the pin can replace a user-installed library even when both commits declare the same version. A matching pin can be reused offline. Restart the kernel when a loaded library changes. Uninstalling removes user-installed copies, which other consumers may also use.
 
 ## Make setup work on a fresh installation
 

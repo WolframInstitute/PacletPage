@@ -2948,7 +2948,7 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Module[{seen = {}},
+    Block[{seen = {}, $sitesRefreshed = False},
         Block[{readyToPublishQ = Function[Null, AppendTo[seen, {ResourceSystemClient`$AsyncronousResourceInformationUpdates, PacletManager`Services`Private`doWeeklyUpdate[]}]; False]},
             DeployPacletResource["/no/such/paclet/dir"]
         ];
@@ -2970,6 +2970,18 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{package = FileNameJoin[{$packageDirectory, "PacletPage.wl"}], calls = {}},
+        PacletSites[];
+        Block[{$AllowInternet = True, $AllowDataUpdates = True, PacletManager`Services`Private`getPacletSiteData,
+                PacletSiteUpdate = Function[Null, AppendTo[calls, {##}]; $Failed]},
+            DownValues[PacletManager`Services`Private`getPacletSiteData] = {HoldPattern[PacletManager`Services`Private`getPacletSiteData[]] :>
+                {{"https://never.example", "No cached index", None, {}, {}, None}}};
+            Get[package]; calls]],
+    {},
+    TestID -> "Build: loading PacletPage leaves a stale site untouched even when data updates are allowed"
+]
+
+VerificationTest[
     Block[{PacletManager`Services`Private`getPacletSiteData},
         PacletSites[];
         DownValues[PacletManager`Services`Private`getPacletSiteData] = {HoldPattern[PacletManager`Services`Private`getPacletSiteData[]] :> {
@@ -2978,16 +2990,26 @@ VerificationTest[
         staleSites[]
     ],
     {"https://old.example", "https://never.example"},
-    TestID -> "Build: the paclet sites last updated over three days ago, or never, are the stale ones PacletPage refreshes when it loads"
+    TestID -> "Build: the paclet sites last updated over three days ago, or never, are the stale ones considered for a build or deploy"
 ]
 
 VerificationTest[
-    {
-        Block[{$AllowInternet = False, staleSites = (Throw["asked", "stale"] &)}, Catch[refreshStaleSites[], "stale"]],
-        dependencyName /@ {"A/B", "C/D" -> "1.0", {"E/F", "2.0"}, <|"Name" -> "G/H", "Description" -> "x", "Resource" -> "https://example.org/r"|>, 7}
-    },
-    {Null, {"A/B", "C/D", "E/F", "G/H"}},
-    TestID -> "Build: a kernel with internet access disallowed refreshes no site when PacletPage loads, and a dependency declared as an association is named by its Name"
+    Module[{calls = {}, site = First[PacletSites[]]},
+        Block[{$sitesRefreshed = False, staleSites = ({"https://old.example"} &),
+                PacletSiteUpdate = Function[{url, option}, AppendTo[calls, {url, option}]; site]},
+            Block[{$AllowInternet = False, $AllowDataUpdates = True}, refreshPacletSites[]];
+            Block[{$AllowInternet = True, $AllowDataUpdates = False}, refreshPacletSites[]];
+            With[{before = calls},
+                Block[{$AllowInternet = True, $AllowDataUpdates = True}, refreshPacletSites[]; refreshPacletSites[]];
+                {before, calls}]]],
+    {{}, {{"https://old.example", Asynchronous -> False}}},
+    TestID -> "Build: stale sites are refreshed synchronously once, only when both internet and data updates are enabled"
+]
+
+VerificationTest[
+    dependencyName /@ {"A/B", "C/D" -> "1.0", {"E/F", "2.0"}, <|"Name" -> "G/H", "Description" -> "x", "Resource" -> "https://example.org/r"|>, 7},
+    {"A/B", "C/D", "E/F", "G/H"},
+    TestID -> "Build: a dependency declared as an association is named by its Name"
 ]
 
 (* a page whose code never yields is not stopped by TimeConstrained: its kernel is killed *)

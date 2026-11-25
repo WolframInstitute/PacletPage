@@ -77,7 +77,7 @@ PacletDependencyReport::usage = "PacletDependencyReport[owner, records] displays
 
 InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] installs the selected dependencies and checks their readiness. Give one name, a list of names, or All."
 
-UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] checks the declared sources and upgrades the selected installed dependencies when a newer compatible version is available."
+UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] updates the selected installed dependencies to compatible releases or to their declared Git commits."
 
 UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes selected optional dependencies from the current user's paclet repository. All selects the removable optional dependencies. PacletPage protects its own installation."
 
@@ -128,10 +128,6 @@ $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage"
 (* Reading definitions in a fresh kernel must use locally available paclets. *)
 Block[{$AllowInternet = False, $AllowDataUpdates = False},
     Scan[Get[FileNameJoin[{$packageDirectory, #}]] &, {"Processes.wl", "Catalog.wl", "Site.wl", "Shell.wl", "Cloud.wl", "Feedback.wl", "Check.wl", "Publish.wl", "Local.wl", "Unpublish.wl", "Dependencies.wl", "DependencySources.wl", "DependencyReport.wl", "DependencyDialog.wl", "Page.wl"}]];
-
-(* the paclet sites refreshed when they are stale, outside the offline load above, so that it sees
-   whether this kernel may reach the internet *)
-refreshStaleSites[];
 
 End[]
 

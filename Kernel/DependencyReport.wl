@@ -14,6 +14,12 @@ dependencyDisplayValue[value_] := value
 dependencyDisplayRecord[name_, failure_Failure] := <|"Name" -> name, "Status" -> "Failed", "Diagnostic" -> failure["Message"]|>
 dependencyDisplayRecord[_, row_Association] := row
 
+dependencyReadinessDetail[failure_Failure, summary_ : Automatic] := StringRiffle[DeleteDuplicates[Cases[
+    Flatten[{Replace[summary, Automatic :> failure["Message"]], Lookup[Last[failure], {"Messages", "ReadinessMessages"}, {}]}],
+    _String]], "\n"]
+
+dependencyReadinessPane[failure_Failure] := Pane[dependencyReadinessDetail[failure], ImageSize -> {UpTo[370], Automatic}]
+
 dependencyReportDetails[row_] := {
     If[StringQ[row["Description"]], {"Description: ", Pane[row["Description"], ImageSize -> {UpTo[370], Automatic}]}, Nothing],
     If[KeyExistsQ[row, "Required"], {"Dependency: ", If[row["Required"], "Required", "Optional"]}, Nothing],
@@ -21,7 +27,7 @@ dependencyReportDetails[row_] := {
     If[ListQ[row["Platforms"]], {"Platforms: ", StringRiffle[row["Platforms"], ", "]}, Nothing],
     If[StringQ[row["License"]], {"License: ", row["License"]}, Nothing],
     If[StringQ[row["URL"]], {"Setup: ", Hyperlink["Instructions", row["URL"]]}, Nothing],
-    If[FailureQ[row["ReadinessFailure"]], {"Readiness: ", row["ReadinessFailure"]["Message"]}, Nothing],
+    If[FailureQ[row["ReadinessFailure"]], {"Readiness: ", dependencyReadinessPane[row["ReadinessFailure"]]}, Nothing],
     If[KeyExistsQ[row, "Diagnostic"], {"Diagnostic: ", row["Diagnostic"]}, Nothing]
 }
 
@@ -42,6 +48,8 @@ PacletDependencyReport /: MakeBoxes[report : PacletDependencyReport[owner_String
                If[KeyExistsQ[row, "LatestVersion"], {"Latest version: ", dependencyDisplayValue[row["LatestVersion"]]}, Nothing]};
            details = Prepend[dependencyReportDetails[row], {"Declared by: ", owner}],
         _, summary = {{"Paclet: ", owner}, {"Dependencies: ", Length[records]}};
+           records = Map[Function[record, If[FailureQ[record["ReadinessFailure"]],
+               Append[record, "Status" -> Column[{record["Status"], dependencyReadinessPane[record["ReadinessFailure"]]}]], record]], records];
            columns = {"Name", "Status", "InstalledVersion", If[AnyTrue[records, KeyExistsQ[#, "LatestVersion"] &], "LatestVersion", Nothing]};
            details = {{"Libraries: ", Pane[Grid[Prepend[
                (dependencyDisplayValue /@ Lookup[#, columns, Missing[]] & /@ records),
