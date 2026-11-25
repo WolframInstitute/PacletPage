@@ -1835,9 +1835,9 @@ VerificationTest[
         noRoot = PacletPage[dir, "RootGuide" -> False];
         WithCleanup[
             {
-                (* Unified shell parity: identical data-id order, native filter input, splitters, and layout buttons across HTML site and WL expression *)
-                StringCases[html, "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id] ===
-                    Cases[expr, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity],
+                (* Unified shell parity: identical page data-ids (HTML streams #side-right first), native filter input, splitters, and layout buttons across HTML site and WL expression *)
+                Sort[StringCases[html, "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id]] ===
+                    Sort[Cases[expr, XMLElement["a", {___, "data-id" -> id_, ___}, _] :> id, Infinity]],
                 Cases[expr, XMLElement["button", {___, "data-pp-layout" -> k_, ___}, _] :> k, Infinity] ===
                     {"left", "right", "fullscreen", "fullscreen-exit"},
                 ! FreeQ[expr, XMLElement["input", {___, "class" -> "pp-filter", ___}, {}]] &&
