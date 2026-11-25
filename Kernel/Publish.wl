@@ -1056,6 +1056,7 @@ Options[BuildPacletDocumentation] = {
     "CacheVersion" -> True,
     "CacheKey" -> Automatic,
     "EvaluationKernel" -> None,
+    "InstallDependencies" -> False,
     "Monitor" -> False
 };
 
@@ -1065,6 +1066,29 @@ BuildPacletDocumentation::source = "`1` has no markdown documentation.";
 BuildPacletDocumentation::page = "`1` did not become a notebook: `2`.";
 BuildPacletDocumentation::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, from a Flag frontmatter key, a flag cell or the palette's flag buttons: `2`.";
 BuildPacletDocumentation::nodefinition = "No markdown definition was found, as ResourceDefinition.md in `1` or a Template: Paclet page under `2`, so `3` was not rebuilt; a deploy would publish it as it is. Give \"Definition\", or \"Definition\" -> None to build without one.";
+BuildPacletDocumentation::installdeps = "Could not install declared dependencies for `1`: `2`.";
+
+(* Install declared dependencies before loading the paclet or building its documentation.
+   Required dependency failures abort the build; optional dependencies unavailable on $SystemID
+   are skipped cleanly. *)
+installBuildDependencies[head_Symbol, dir_String, spec_] := Module[{owner, manifest, installed, failed},
+    If[spec === False || spec === None, Return[True]];
+    If[! MatchQ[spec, All | _String | {___String}],
+        Message[head::installdeps, dir, "Invalid InstallDependencies specification: " <> ToString[spec, InputForm]];
+        Return[$Failed]];
+    owner = PacletObject[File[dir]];
+    manifest = dependencyManifest[owner];
+    If[FailureQ[manifest], Message[head::installdeps, dir, manifest]; Return[$Failed]];
+    If[manifest === <||>, Return[True]];
+    installed = InstallPacletDependencies[owner, spec, "CheckReadiness" -> False];
+    If[FailureQ[installed], Message[head::installdeps, dir, installed]; Return[$Failed]];
+    failed = Select[Normal[installed], Function[pair,
+        FailureQ[Last[pair]] && (TrueQ[manifest[First[pair]]["Required"]] || ! MatchQ[Last[pair], Failure["UnsupportedSystem", _]])]];
+    If[failed =!= {},
+        Message[head::installdeps, dir, failed];
+        Return[$Failed]];
+    True
+];
 
 (* a build, as a deploy, keeps the kernel's asynchronous site update and information refresh from
    starting while it runs (see $sitesRefreshed) *)
@@ -1078,6 +1102,8 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     },
     If[ ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] && ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]],
         Message[BuildPacletDocumentation::dir, dir]; Return[$Failed, Module]];
+    If[ installBuildDependencies[BuildPacletDocumentation, dir, OptionValue["InstallDependencies"]] === $Failed,
+        Return[$Failed, Module]];
     source = Replace[OptionValue["Source"], Automatic -> FileNameJoin[{dir, "docs"}]];
     target = Replace[OptionValue["Target"], Automatic -> FileNameJoin[{dir, "Documentation", "English"}]];
     all = Sort @ FileNames["*.md", source, Infinity];
@@ -3180,9 +3206,87 @@ pageProcesses[_] := 0;
    With "Incremental", the pages PacletBuild built last time are kept, less those whose authoring
    notebook is gone, and only changed pages are built again; with "Parallel", the changed pages are
    built on parallel kernels first. *)
+(* Bundle selected declared dependencies as .paclet archives under Assets/Dependencies in the
+   staged copy and register the "Dependencies" Asset extension in the staged PacletInfo.wl. *)
+addBundledDependenciesAsset[stage_String] := Module[{wl = FileNameJoin[{stage, "PacletInfo.wl"}], m = FileNameJoin[{stage, "PacletInfo.m"}],
+        info, exts, idx, ext, rules, root, assets, entry, updated},
+    info = PacletObject[File[stage]]["PacletInfo"];
+    exts = Replace[Lookup[info, "Extensions", {}], Except[_List] -> {}];
+    idx = FirstPosition[exts, {"Asset", ___Rule}, None, {1}, Heads -> False];
+    If[idx === None,
+        exts = Append[exts, {"Asset", "Root" -> "Assets", "Assets" -> {{"Dependencies", "Dependencies"}}}],
+        ext = exts[[First[idx]]];
+        rules = Cases[Rest[ext], _Rule];
+        root = Lookup[rules, "Root", ""];
+        entry = If[StringTrim[root, "/" | "\\"] === "Assets", {"Dependencies", "Dependencies"}, {"Dependencies", "Assets/Dependencies"}];
+        assets = Replace[Lookup[rules, "Assets", {}], Except[_List] -> {}];
+        If[! MemberQ[assets, {"Dependencies", _}], assets = Append[assets, entry]];
+        If[StringTrim[root, "/" | "\\"] === "Assets" || root === "",
+            updated = Prepend[Join[DeleteCases[rules, "Assets" -> _], {"Assets" -> assets}], "Asset"];
+            exts = ReplacePart[exts, First[idx] -> updated],
+            exts = Append[exts, {"Asset", "Root" -> "Assets", "Assets" -> {{"Dependencies", "Dependencies"}}}]
+        ]
+    ];
+    Export[wl, "(* ::Package:: *)\n\n" <> ToString[PacletObject[Append[info, "Extensions" -> exts]], InputForm] <> "\n", "Text"];
+    If[FileExistsQ[m], DeleteFile[m]];
+    wl
+];
+
+stageBundledDependencies[head_Symbol, dir_String, stage_String, spec_] := Catch[Module[
+    {owner, manifest, names, unknown, depsDir, bundled = {}},
+    If[spec === False || spec === None, Throw[{}, "bundle"]];
+    If[! MatchQ[spec, All | _String | {___String}],
+        Message[head::bundledeps, dir, "Invalid BundleDependencies specification: " <> ToString[spec, InputForm]];
+        Throw[$Failed, "bundle"]];
+    owner = PacletObject[File[dir]];
+    manifest = dependencyManifest[owner];
+    If[FailureQ[manifest], Message[head::bundledeps, dir, manifest]; Throw[$Failed, "bundle"]];
+    names = dependencySelectionNames[manifest, spec];
+    unknown = Complement[names, Keys[manifest]];
+    If[unknown =!= {}, Message[head::bundledeps, dir, "Unknown dependencies: " <> ToString[unknown, InputForm]]; Throw[$Failed, "bundle"]];
+    If[names === {}, Throw[{}, "bundle"]];
+    depsDir = CreateDirectory[FileNameJoin[{stage, "Assets", "Dependencies"}], CreateIntermediateDirectories -> True];
+    Do[
+        Module[{entry = manifest[depName], verSpec, gitQ, match, relArchive, packed},
+            verSpec = Lookup[entry, "Version", All];
+            gitQ = KeyExistsQ[entry, "Git"];
+            If[! dependencySupportedQ[entry],
+                If[! TrueQ[entry["Required"]], Continue[]];
+                Message[head::bundledeps, dir, depName <> " is unsupported on " <> $SystemID];
+                Throw[$Failed, "bundle"]
+            ];
+            match = SelectFirst[PacletFind[depName], Function[p,
+                dependencyVersionQ[p["Version"]] && dependencyCompatibleQ[p["Version"], verSpec] &&
+                (! gitQ || dependencyGitMatchesQ[dependencyInstalledGit[p], entry])
+            ], None];
+            Which[
+                MatchQ[match, _PacletObject],
+                    packed = CreatePacletArchive[match["Location"], depsDir];
+                    If[! StringQ[packed] || ! FileExistsQ[packed],
+                        Message[head::bundledeps, dir, "Could not pack installed dependency " <> depName];
+                        Throw[$Failed, "bundle"]];
+                    AppendTo[bundled, FileNameTake[packed]],
+                KeyExistsQ[entry, "Archive"],
+                    relArchive = dependencyArchivePath[owner, entry["Archive"]];
+                    If[FailureQ[relArchive] || ! FileExistsQ[First[relArchive]],
+                        Message[head::bundledeps, dir, "Missing archive for " <> depName];
+                        Throw[$Failed, "bundle"]];
+                    packed = CopyFile[First[relArchive], FileNameJoin[{depsDir, FileNameTake[First[relArchive]]}], OverwriteTarget -> True];
+                    AppendTo[bundled, FileNameTake[packed]],
+                True,
+                    Message[head::bundledeps, dir, "No compatible installed copy of " <> depName <> " was found (install dependencies first)"];
+                    Throw[$Failed, "bundle"]
+            ]
+        ],
+        {depName, names}
+    ];
+    If[bundled =!= {}, addBundledDependenciesAsset[stage]];
+    bundled
+], "bundle"];
+
 freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True, pageOptions_Association : <||>] := Module[
     {buildDir, prefix, recordFile, builtDocsDir, authoring, stageRoot, source, built, pages, load, dependencies, processes, changed, parallel, pruned,
-     excludedQ, links, missing, declared, sources, flagged},
+     excludedQ, links, missing, declared, sources, flagged, bundleSpec, bundleActiveQ, bundled},
     (* the files the archive leaves out; a symbolic link that leads outside the paclet must be one *)
     excludedQ = Function[path, AnyTrue[Flatten[{Lookup[pageOptions, "Exclude", {}]}], StringMatchQ[path, #] &]];
     links = outsideLinks[dir];
@@ -3205,14 +3309,20 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
         If[ FileExistsQ[recordFile], DeleteFile[recordFile]]
     ];
     dependencies = loadedPacletDirectories[dir];
+    bundleSpec = Lookup[pageOptions, "BundleDependencies", False];
+    bundleActiveQ = bundleSpec =!= False && bundleSpec =!= None;
     (* PacletBuild builds the paclet directory itself, or a staged copy of it: without the files
-       left out, and with docSource as its Documentation *)
-    source = If[ docSource === Automatic && Lookup[pageOptions, "Exclude", {}] === {},
+       left out, with docSource as its Documentation, and with any bundled dependency archives *)
+    source = If[ docSource === Automatic && Lookup[pageOptions, "Exclude", {}] === {} && ! bundleActiveQ,
         dir,
         stageRoot = CreateDirectory[];
         With[{stage = CreateDirectory[FileNameJoin[{stageRoot, FileNameTake[dir]}]]},
             copyTree[dir, stage, "", Function[path, path === "build" || (docSource =!= Automatic && path === "Documentation") || excludedQ[path]]];
             If[ docSource =!= Automatic, CopyDirectory[docSource, FileNameJoin[{stage, "Documentation"}]]];
+            If[ bundleActiveQ,
+                bundled = stageBundledDependencies[head, dir, stage, bundleSpec];
+                If[ bundled === $Failed, DeleteDirectory[stageRoot, DeleteContents -> True]; Return[$Failed, Module]]
+            ];
             stage
         ]
     ];
@@ -3295,7 +3405,7 @@ sourceHash[dir_String, docSource_, pageOptions_Association] := With[
                 FileNameSplit[#][[1]] =!= "build" && ! AnyTrue[FileNameSplit[#], StringStartsQ[#, "."] &] && ! excludedQ[#] &]],
         If[ docSource === Automatic, None,
             Map[{relativePath[docSource, #], FileHash[#, "SHA256", "HexString"]} &, Sort @ Select[FileNames["*", docSource, Infinity], FileType[#] === File &]]],
-        KeyTake[pageOptions, {"Exclude", "Symbols"}]
+        KeyTake[pageOptions, {"Exclude", "Symbols", "BundleDependencies"}]
     }]
 ];
 
@@ -3458,10 +3568,12 @@ Options[DeployPacletResource] = {
     "Build" -> True,
     "MaxFailures" -> 0,
     "SourceArchive" -> None,
+    "BundleDependencies" -> False,
     Permissions -> "Public"
 };
 
 DeployPacletResource::blockers = "The definition notebook's own check finds these errors: `1`.";
+DeployPacletResource::bundledeps = "Could not bundle dependencies for `1`: `2`.";
 DeployPacletResource::nobuild = "`1`/build holds no archive built from the paclet's present sources; build it first, with \"DryRun\" -> True, or deploy with \"Build\" -> True.";
 DeployPacletResource::write = "`1` Nothing was deleted, so the resource keeps its pages; deploy again.";
 DeployPacletResource::nodef = "`1` has no ResourceDefinition.nb or no documentation: build it first with BuildPacletDocumentation.";
@@ -3558,7 +3670,7 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
             Throw[$Failed, "deploy"]]
     ];
     built = With[
-        {pageOptions = <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"], "MaxFailures" -> OptionValue["MaxFailures"]|>},
+        {pageOptions = <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"], "MaxFailures" -> OptionValue["MaxFailures"], "BundleDependencies" -> OptionValue["BundleDependencies"]|>},
         If[ TrueQ[OptionValue["Build"]],
             freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], loadCheckOf[OptionValue["LoadCheck"], OptionValue["EvaluationKernel"], dir], pageOptions],
             builtArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], pageOptions]
@@ -3697,11 +3809,13 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
 
 Options[SubmitPacletResource] = {
     "Account" -> Automatic, "DryRun" -> False, "DocumentationSource" -> Automatic, "LoadCheck" -> True, "EvaluationKernel" -> None,
-    "Incremental" -> False, "Parallel" -> False, "TimeConstraint" -> 900, "Exclude" -> {}, "ArchiveCheck" -> None, "Symbols" -> Automatic
+    "Incremental" -> False, "Parallel" -> False, "TimeConstraint" -> 900, "Exclude" -> {}, "ArchiveCheck" -> None, "Symbols" -> Automatic,
+    "BundleDependencies" -> False
 };
 
 SubmitPacletResource::nodef = DeployPacletResource::nodef;
 SubmitPacletResource::build = DeployPacletResource::build;
+SubmitPacletResource::bundledeps = DeployPacletResource::bundledeps;
 SubmitPacletResource::pages = DeployPacletResource::pages;
 SubmitPacletResource::missing = DeployPacletResource::missing;
 SubmitPacletResource::flagged = DeployPacletResource::flagged;
@@ -3768,7 +3882,7 @@ submitPacletResource[dir_String, opts : OptionsPattern[SubmitPacletResource]] :=
 ];
     If[ issues =!= {}, Message[SubmitPacletResource::check, Lookup[issues, "Tag"]]; Throw[$Failed, "submit"]];
     built = freshArchive[SubmitPacletResource, dir, paclet["Name"], OptionValue["DocumentationSource"], loadCheckOf[OptionValue["LoadCheck"], OptionValue["EvaluationKernel"], dir],
-        <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"]|>];
+        <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"], "BundleDependencies" -> OptionValue["BundleDependencies"]|>];
     If[ built === $Failed, Throw[$Failed, "submit"]];
     (* Scrape and submit with the notebook open: the scraped record reads its notebook data while
        it is open, and a closed notebook puts $Failed into the request. *)
@@ -3809,6 +3923,8 @@ Options[PublishPacletPage] = {
     "Check" -> True,
     "Submit" -> False,
     "DryRun" -> False,
+    "InstallDependencies" -> False,
+    "BundleDependencies" -> False,
     "BuildOptions" -> {},
     "ResourceOptions" -> {},
     "SiteOptions" -> {},
@@ -3827,33 +3943,45 @@ submissionOptions[options_List] := Sequence @@ FilterRules[options, Except["Acco
 
 (* the resource's options and, after them, the build's evaluation kernel: a paclet whose examples
    run on another kernel is checked to load alone there *)
-resourceOptionsWith[resourceOptions_, buildOptions_] := Join[
+resourceOptionsWith[resourceOptions_, buildOptions_, bundleDependencies_ : False] := Join[
     Cases[Flatten[{resourceOptions}], _Rule | _RuleDelayed],
+    If[bundleDependencies =!= False && bundleDependencies =!= None && ! MemberQ[Keys[Cases[Flatten[{resourceOptions}], _Rule | _RuleDelayed]], "BundleDependencies"],
+        {"BundleDependencies" -> bundleDependencies}, {}],
     Replace[Lookup[Association[Cases[Flatten[{buildOptions}], _Rule]], "EvaluationKernel", None], {None -> {}, evaluation_ :> {"EvaluationKernel" -> evaluation}}]
 ];
 
 PublishPacletPage::cloud = DeployPacletResource::cloud;
 PublishPacletPage::account = "Connected to the Wolfram Cloud as `1`, not as `2`; nothing was built or published. Connect as `2` to publish this paclet.";
+PublishPacletPage::installdeps = BuildPacletDocumentation::installdeps;
 
 PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$deployMonitor = TrueQ[$deployMonitor] || TrueQ[OptionValue["Monitor"]],
     $skipSiteRefresh = TrueQ[$skipSiteRefresh] || TrueQ[OptionValue["DryRun"]],
     ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, Catch[Module[
-    {build, resource, catalog, site, check, monitored = TrueQ[OptionValue["Monitor"]]},
+    {build, resource, catalog, site, check, monitored = TrueQ[OptionValue["Monitor"]],
+     installDeps = OptionValue["InstallDependencies"], bundleDeps = OptionValue["BundleDependencies"], resOpts},
     (* the account first: a paclet's documentation may publish as it is built, as PacletPage's own
        tutorial does, so a dry run that builds takes the account too; one that does not only reports *)
     If[ stopsQ[offlineDryRunQ[OptionValue["DryRun"]] || publishingAccountQ[PublishPacletPage, OptionValue["Account"]], TrueQ[OptionValue["DryRun"]] && ! TrueQ[OptionValue["Build"]]],
         Throw[$Failed, "publish"]];
-    build = If[ TrueQ[OptionValue["Build"]], BuildPacletDocumentation[dir, Sequence @@ OptionValue["BuildOptions"], "Monitor" -> monitored], None];
+    If[ installDeps =!= False && installDeps =!= None,
+        If[ installBuildDependencies[PublishPacletPage, dir, installDeps] === $Failed, Throw[$Failed, "publish"]]];
+    build = If[ TrueQ[OptionValue["Build"]],
+        BuildPacletDocumentation[dir,
+            Sequence @@ If[installDeps =!= False && installDeps =!= None, {"InstallDependencies" -> False}, {}],
+            Sequence @@ OptionValue["BuildOptions"],
+            "Monitor" -> monitored],
+        None];
     If[ build === $Failed || FailureQ[build], Throw[build, "publish"]];
+    resOpts = resourceOptionsWith[OptionValue["ResourceOptions"], OptionValue["BuildOptions"], bundleDeps];
     (* the parallel kernels the deploy asks for serve the site's uploads too, so they stay until the
        site is published and checked *)
     withDeployKernels[Lookup[Association[Cases[Flatten[{OptionValue["ResourceOptions"]}], _Rule]], "Parallel", False], Function[kernels,
         resource = DeployPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> OptionValue["DryRun"],
-            Sequence @@ resourceOptionsWith[OptionValue["ResourceOptions"], OptionValue["BuildOptions"]]];
+            Sequence @@ resOpts];
         If[ resource === $Failed || FailureQ[resource], Throw[resource, "publish"]];
         If[ TrueQ[OptionValue["DryRun"]],
             Throw[<|"Build" -> build, "Resource" -> resource, "Site" -> None, "Check" -> None,
-                "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[resourceOptionsWith[OptionValue["ResourceOptions"], OptionValue["BuildOptions"]]]], None]|>, "publish"]];
+                "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], "DryRun" -> True, submissionOptions[resOpts]], None]|>, "publish"]];
         (* the version just deployed, whatever the catalog read from the cloud *)
         catalog = Replace[PacletPageCatalog[resource["Resource"], "Documentation" -> dir, "Monitor" -> monitored],
             c_Association :> Append[c, "Version" -> resource["Version"]]];
@@ -3868,6 +3996,6 @@ PublishPacletPage[dir_String, name_String, opts : OptionsPattern[]] := Block[{$d
 ];
     <|
         "Build" -> build, "Resource" -> resource, "Site" -> site, "Check" -> check,
-        "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], submissionOptions[resourceOptionsWith[OptionValue["ResourceOptions"], OptionValue["BuildOptions"]]]], None]
+        "Submission" -> If[TrueQ[OptionValue["Submit"]], SubmitPacletResource[dir, "Account" -> OptionValue["Account"], submissionOptions[resOpts]], None]
     |>
 ], "publish"]];

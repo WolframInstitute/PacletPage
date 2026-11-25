@@ -16,7 +16,8 @@ RelatedTutorials: [DependencyManagement]
 
 ## Details & Options
 
-- Give a full dependency name, a list, or `All`. Each result is a `PacletObject` or a `Failure` keyed by dependency name.
+- Give a full dependency name, a list, `All`, `"Required"`, or `"Optional"`. Each result is a `PacletObject` or a `Failure` keyed by dependency name.
+- Pass `"CheckReadiness" -> False` to skip readiness checks after updating.
 - For version-based sources, an equal or newer compatible local version is retained. Changing a Git pin can replace a user-installed copy at the same version. A pin requiring a downgrade returns `"DependencyVersionConflict"`.
 - When an update replaces a library whose context has loaded, its status is `"Restart required"` for the rest of the kernel session.
 - A missing library gives `"DependencyNotInstalled"`. Use [InstallPacletDependencies]() for the first installation.

@@ -25,7 +25,60 @@ dependencyResourceMetadata[url_] := Block[{$ProgressReporting = False, CloudConn
 dependencyArchiveSupportedQ[p_PacletObject] := PacletFind[p["Name"], <|"Paclets" -> {p}, "Enabled" -> All, "Internal" -> All|>] === {p}
 dependencyArchiveUnsupported[p_] := dependencyFailure["DependencyArchive", "The archive for `1` `2` does not support this Wolfram system.", p["Name"], p["Version"]]
 
-dependencyRelease[owner_, entry_] := Module[{name = entry["Name"], spec = Lookup[entry, "Version", All], release, archive, p, meta, candidates},
+(* Bundled dependency archives live in the owner's "Dependencies" Asset directory (Assets/Dependencies). *)
+dependencyBundledDirectory[owner_PacletObject] := Module[{loc = owner["Location"], asset, fallback},
+    If[! StringQ[loc] || ! DirectoryQ[loc], Return[None]];
+    asset = Quiet[owner["AssetLocation", "Dependencies"], {PacletObject::noasset}];
+    If[StringQ[asset] && DirectoryQ[asset], Return[asset]];
+    fallback = FileNameJoin[{loc, "Assets", "Dependencies"}];
+    If[DirectoryQ[fallback], fallback, None]
+]
+dependencyBundledDirectory[_] := None
+
+dependencyArchiveGitReceipt[archive_String] := Module[{entries, receiptEntry, text, source},
+    entries = Quiet[Import[archive, {"ZIP", "FileNames"}], {Import::nffil, Import::fmterr, General::noopen}];
+    If[! ListQ[entries], Return[Missing["Unknown"]]];
+    receiptEntry = SelectFirst[entries, # === $dependencyGitReceipt || StringMatchQ[#, Except["/"] .. ~~ "/" ~~ $dependencyGitReceipt] &, None];
+    If[! StringQ[receiptEntry], Return[Missing["Unknown"]]];
+    text = Quiet[Import[archive, {"ZIP", receiptEntry, "String"}], {Import::nffil, Import::fmterr, General::noopen}];
+    If[! StringQ[text], Return[Missing["Unknown"]]];
+    source = Quiet[Developer`ReadRawJSONString[text], {
+        Developer`ReadRawJSONString::jsonnullinput, Developer`ReadRawJSONString::jsonkeynstr,
+        Developer`ReadRawJSONString::jsonhintposandchar, Developer`ReadRawJSONString::jsonunexpected,
+        Developer`ReadRawJSONString::jsonsyntax, Developer`ReadRawJSONString::jsonarrayelem,
+        Developer`ReadRawJSONString::jsoncolon, Developer`ReadRawJSONString::jsonobjsep,
+        Developer`ReadRawJSONString::jsoninvalidval, Developer`ReadRawJSONString::jsonnum,
+        Developer`ReadRawJSONString::jsonstr, Developer`ReadRawJSONString::jsonutf8
+    }];
+    If[AssociationQ[source] && dependencyFullCommitQ[source["Commit"]], source, Missing["Unknown"]]
+]
+
+dependencyBundledRelease[owner_, entry_] := Module[{dir = dependencyBundledDirectory[owner], name = entry["Name"],
+        spec = Lookup[entry, "Version", All], gitQ = KeyExistsQ[entry, "Git"], candidates, best},
+    If[! StringQ[dir], Return[None]];
+    candidates = Reap[Scan[Function[file, Module[{p, receipt},
+        p = Quiet[PacletObject[File[file]], {PacletObject::invfile}];
+        If[MatchQ[p, _PacletObject] && p["Name"] === name && dependencyVersionQ[p["Version"]] &&
+                dependencyCompatibleQ[p["Version"], spec] && dependencyArchiveSupportedQ[p],
+            If[gitQ,
+                receipt = dependencyArchiveGitReceipt[file];
+                If[dependencyGitMatchesQ[receipt, entry],
+                    Sow[<|"Version" -> p["Version"], "Archive" -> File[file], "Bundled" -> True, "BundledGit" -> receipt|>]],
+                Sow[<|"Version" -> p["Version"], "Archive" -> File[file], "Bundled" -> True|>]
+            ]
+        ]
+    ]], FileNames["*.paclet", dir]]][[2]];
+    candidates = If[candidates === {}, {}, First[candidates]];
+    If[candidates === {}, Return[None]];
+    best = First[Sort[candidates, PacletNewerQ[#1["Version"], #2["Version"]] &]];
+    best
+]
+
+dependencyRelease[owner_, entry_, checkUpstream_ : False] := Module[{name = entry["Name"], spec = Lookup[entry, "Version", All], release, archive, p, meta, candidates, bundled},
+    If[! TrueQ[checkUpstream] && ! KeyExistsQ[entry, "Archive"],
+        bundled = dependencyBundledRelease[owner, entry];
+        If[AssociationQ[bundled], Return[bundled]]
+    ];
     release = Which[
         KeyExistsQ[entry, "Archive"],
             archive = dependencyArchivePath[owner, entry["Archive"]];
@@ -99,8 +152,10 @@ dependencyInstallRelease[entry_, release_] := Module[{name = entry["Name"], text
     Which[
         KeyExistsQ[release, "SitePaclet"],
             If[$AllowInternet === False, dependencyOffline[], dependencyInstallFile[release["SitePaclet"], name, release["Version"]]],
-        KeyExistsQ[release, "GitArchive"], dependencyGitInstall[release, entry],
-        KeyExistsQ[release, "Archive"], dependencyInstallFile[release["Archive"], name, release["Version"]],
+        KeyExistsQ[release, "GitURL"] || KeyExistsQ[release, "GitArchive"],
+            dependencyGitInstall[release, entry],
+        KeyExistsQ[release, "Archive"],
+            dependencyInstallFile[release["Archive"], name, release["Version"], Lookup[release, "BundledGit", None]],
         True,
             resource = entry["Resource"];
             desc = release["DescriptionURL"];
@@ -169,15 +224,23 @@ dependencyDownloadInstall[url_, name_, version_] := Module[{file = FileNameJoin[
 ]
 
 (* ::Section:: *)
-(*A GitHub repository at a commit*)
+(*A Git repository at a commit*)
 
 (* Git sources identify a repository, a commit, and an optional paclet subdirectory.
-   Discovery reads the commit's manifest without evaluating it. Installation packs that
-   directory from GitHub's archive and records the full commit in the installed copy. *)
+   Discovery reads the commit's manifest without evaluating it. Installation checks out only the
+   paclet's directory using WolframInstitute/GitLink (shallow fetch + sparse path checkout),
+   falling back to GitHub's archive when GitLink is unavailable, and records the full commit. *)
 dependencyGitRepository[url_] := If[StringQ[url],
     Replace[StringCases[url, RegularExpression["^https://github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\\.git)?/?$"] :> {"$1", "$2"}],
         {{{owner_String, repository_String}} :> {owner, repository}, _ -> None}],
     None
+]
+dependencyGitURLQ[url_] := dependencyGitRepository[url] =!= None || dependencyHTTPQ[url]
+dependencyGitCanonical[url_String] := With[{gh = dependencyGitRepository[url]},
+    If[gh =!= None,
+        ToLowerCase[StringRiffle[gh, "/"]],
+        StringReplace[ToLowerCase[StringTrim[url, "/"]], ".git" ~~ EndOfString -> ""]
+    ]
 ]
 dependencyCommitQ[commit_] := StringQ[commit] && StringMatchQ[commit, RegularExpression["[0-9a-fA-F]{7,40}"]]
 dependencyFullCommitQ[commit_] := StringQ[commit] && StringMatchQ[commit, RegularExpression["[0-9a-f]{40}"]]
@@ -187,6 +250,79 @@ dependencyGitPathQ[path_] := StringQ[path] && (path === "" ||
 (* the declared commit as addresses and receipts write it, and the directories of the declared path *)
 dependencyGitCommit[entry_] := ToLowerCase[entry["Commit"]]
 dependencyGitPath[entry_] := FileNameSplit[Lookup[entry, "Path", ""]]
+
+dependencyGitLinkAvailableQ[] := Module[{loaded},
+    If[NameQ["WolframInstitute`GitLink`GitSparseCheckout"] && DownValues[WolframInstitute`GitLink`GitSparseCheckout] =!= {},
+        Return[True]];
+    If[PacletFind["WolframInstitute/GitLink"] === {}, Return[False]];
+    loaded = Quiet[
+        Block[{$ContextPath = $ContextPath}, Needs["WolframInstitute`GitLink`"]],
+        {Needs::nocont, Get::noopen, WolframInstitute`GitLink`InitializeGitLibrary::libnotfound}
+    ];
+    loaded =!= $Failed && NameQ["WolframInstitute`GitLink`GitSparseCheckout"] &&
+        DownValues[WolframInstitute`GitLink`GitSparseCheckout] =!= {}
+]
+
+(* Fetch a commit using WolframInstitute/GitLink (shallow over network transports) and check out
+   only the requested path patterns into targetDir. Returns <|"Source" -> ..., "Commit" -> ...|>
+   or $Failed. *)
+dependencyGitLinkCheckout[url_String, requested_String, path_List, targetDir_String, explicitPaths_ : Automatic] := Module[
+    {gitInit, gitAddRemote, gitFetch, gitSparse, gitSHA, gitToObj, gitClose,
+     repo = None, networkQ, fetchRes, paths, checked, commit, source, gitDir},
+    If[! dependencyGitLinkAvailableQ[], Return[$Failed]];
+    gitInit = Symbol["WolframInstitute`GitLink`GitInit"];
+    gitAddRemote = Symbol["WolframInstitute`GitLink`GitAddRemote"];
+    gitFetch = Symbol["WolframInstitute`GitLink`GitFetch"];
+    gitSparse = Symbol["WolframInstitute`GitLink`GitSparseCheckout"];
+    gitSHA = Symbol["WolframInstitute`GitLink`GitSHA"];
+    gitToObj = Symbol["WolframInstitute`GitLink`ToGitObject"];
+    gitClose = Symbol["WolframInstitute`GitLink`GitClose"];
+    networkQ = ! StringStartsQ[url, "file://"];
+    paths = Replace[explicitPaths, Automatic :> If[path === {}, All, {StringRiffle[path, "/"] <> "/*"}]];
+    Quiet[
+        WithCleanup[
+            repo = gitInit[targetDir];
+            If[! MatchQ[repo, _WolframInstitute`GitLink`GitRepo], Return[$Failed, Module]];
+            If[gitAddRemote[repo, "origin", url] === $Failed, Return[$Failed, Module]];
+            If[dependencyCancelledQ[], Return[dependencyCancelled[], Module]];
+            $dependencyProgress["Fetching Git commit", None];
+            fetchRes = Which[
+                networkQ && dependencyFullCommitQ[requested],
+                    With[{r = gitFetch[repo, "origin", "Depth" -> 1, "Refspecs" -> {requested}]},
+                        If[! TrueQ[r] || gitToObj[repo, requested] === $Failed,
+                            With[{r2 = gitFetch[repo, "origin", "Depth" -> 1]},
+                                If[! TrueQ[r2] || gitToObj[repo, requested] === $Failed,
+                                    If[TrueQ[r2], gitFetch[repo, "origin"], False], r2]],
+                            r]],
+                networkQ,
+                    With[{r = gitFetch[repo, "origin", "Depth" -> 1]},
+                        If[! TrueQ[r] || gitToObj[repo, requested] === $Failed,
+                            If[TrueQ[r], gitFetch[repo, "origin"], False], r]],
+                True,
+                    gitFetch[repo, "origin"]
+            ];
+            If[! TrueQ[fetchRes] || gitToObj[repo, requested] === $Failed, Return[$Failed, Module]];
+            If[dependencyCancelledQ[], Return[dependencyCancelled[], Module]];
+            $dependencyProgress["Checking out files", None];
+            checked = gitSparse[repo, requested, paths];
+            If[checked === $Failed, Return[$Failed, Module]];
+            commit = gitSHA[repo, "HEAD"];
+            If[! dependencyFullCommitQ[commit] || ! StringStartsQ[commit, requested], Return[$Failed, Module]];
+            gitClose[repo];
+            repo = None;
+            source = If[path === {}, targetDir, FileNameJoin[Prepend[path, targetDir]]];
+            gitDir = FileNameJoin[{targetDir, ".git"}];
+            If[path === {} && DirectoryQ[gitDir], DeleteDirectory[gitDir, DeleteContents -> True]];
+            If[DirectoryQ[source], <|"Source" -> source, "Commit" -> commit|>, $Failed],
+            If[MatchQ[repo, _WolframInstitute`GitLink`GitRepo], gitClose[repo]]
+        ],
+        {
+            General::fetchfailed, General::noconnect, General::downloadfailed, General::updatetipsfailed,
+            General::badcommitish, General::checkoutfailed, General::gitoperationfailed, General::nosrcdir,
+            General::badrepo, General::badremote, General::notree
+        }
+    ]
+]
 
 (* A request that reports its progress leaves a script's kernel printing "Connecting" for the rest of its session. *)
 dependencyGitText[url_String] := With[{response = Block[{$ProgressReporting = False},
@@ -211,13 +347,30 @@ dependencyPacletInfoFields[text_String] := Module[{rules},
 ]
 
 dependencyGitRelease[entry_] := Module[{name = entry["Name"], commit = dependencyGitCommit[entry],
-        repository, directory, manifest = "PacletInfo.wl", text, fields, paclet},
+        repository, path = dependencyGitPath[entry], directory, manifest = "PacletInfo.wl", text, fields, paclet, probeDir, checked, file},
     repository = dependencyGitRepository[entry["Git"]];
-    directory = Join[{"https://raw.githubusercontent.com"}, repository, {commit}, dependencyGitPath[entry]];
-    text = dependencyGitText[URLBuild[Append[directory, manifest]]];
-    If[text === Missing["NotFound"],
-        manifest = "PacletInfo.m";
-        text = dependencyGitText[URLBuild[Append[directory, manifest]]]];
+    If[repository =!= None,
+        directory = Join[{"https://raw.githubusercontent.com"}, repository, {commit}, path];
+        text = dependencyGitText[URLBuild[Append[directory, manifest]]];
+        If[text === Missing["NotFound"],
+            manifest = "PacletInfo.m";
+            text = dependencyGitText[URLBuild[Append[directory, manifest]]]],
+        (* Non-GitHub Git URL: fetch only the paclet manifest via GitLink sparse checkout. *)
+        If[! dependencyGitLinkAvailableQ[],
+            Return[dependencyFailure["DependencyRelease", "WolframInstitute/GitLink is required to read `1` from `2`.", name, entry["Git"]]]];
+        probeDir = CreateDirectory[];
+        WithCleanup[
+            checked = dependencyGitLinkCheckout[entry["Git"], commit, path, probeDir,
+                With[{prefix = If[path === {}, "", StringRiffle[path, "/"] <> "/"]}, {prefix <> "PacletInfo.wl", prefix <> "PacletInfo.m"}]];
+            If[AssociationQ[checked],
+                file = FileNameJoin[{checked["Source"], "PacletInfo.wl"}];
+                If[! FileExistsQ[file], manifest = "PacletInfo.m"; file = FileNameJoin[{checked["Source"], "PacletInfo.m"}]];
+                text = If[FileExistsQ[file], ReadString[file], $Failed],
+                text = $Failed
+            ],
+            DeleteDirectory[probeDir, DeleteContents -> True]
+        ]
+    ];
     If[! StringQ[text], Return[dependencyFailure["DependencyRelease", "Could not read the paclet manifest of `1` at commit `2`.", name, commit]]];
     fields = dependencyPacletInfoFields[text];
     If[! FreeQ[fields, _Missing], Return[dependencyFailure["DependencyRelease",
@@ -226,8 +379,10 @@ dependencyGitRelease[entry_] := Module[{name = entry["Name"], commit = dependenc
     If[! dependencyVersionQ[Lookup[fields, "Version", None]], Return[dependencyFailure["DependencyVersion", "The manifest for `1` at commit `2` must declare a numeric version.", name, commit]]];
     paclet = PacletObject[fields];
     If[! dependencyArchiveSupportedQ[paclet], Return[dependencyArchiveUnsupported[paclet]]];
-    <|"Version" -> fields["Version"], "GitArchive" -> URLBuild[Join[{"https://codeload.github.com"}, repository, {"zip", commit}]],
-        "GitManifest" -> manifest|>
+    Join[
+        <|"Version" -> fields["Version"], "GitURL" -> entry["Git"], "GitManifest" -> manifest|>,
+        If[repository =!= None, <|"GitArchive" -> URLBuild[Join[{"https://codeload.github.com"}, repository, {"zip", commit}]]|>, <||>]
+    ]
 ]
 
 (* One operation at a time changes a library installed from Git: replacing it moves its directory
@@ -253,7 +408,7 @@ withDependencyGitLock[name_, action_] := With[{wait = $dependencyLockWait, lock 
 
 (* The receipt travels with this installation. A copy from another source has no known revision. *)
 $dependencyGitReceipt = ".pacletpage-git.json"
-dependencyGitSource[entry_, commit_] := <|"Git" -> ToLowerCase[StringRiffle[dependencyGitRepository[entry["Git"]], "/"]],
+dependencyGitSource[entry_, commit_] := <|"Git" -> dependencyGitCanonical[entry["Git"]],
     "Path" -> StringRiffle[dependencyGitPath[entry], "/"], "Commit" -> commit|>
 
 dependencyInstalledGit[p_] := Module[{location = p["Location"], file, source},
@@ -321,23 +476,38 @@ dependencyCommitGitFile[file_, name_, version_, git_] := Module[{current, confli
                 If[! FileExistsQ[location], RenameDirectory[backup, location]; PacletDataRebuild[]]]]]
 ]
 
-(* The commit's archive is downloaded, and only the paclet's directory leaves it: a repository can
-   hold far more than its paclet. That directory is packed with its receipt and installed. *)
+(* Check out the paclet's directory at the pinned commit using WolframInstitute/GitLink
+   (shallow fetch + sparse checkout), falling back to GitHub's archive when GitLink is unavailable
+   or cannot reach the repository. That directory is packed with its receipt and installed. *)
 dependencyGitInstall[release_, entry_] := Module[{name = entry["Name"], path = dependencyGitPath[entry], dir = CreateDirectory[],
-        zip, tree, download, top, source, archive, commit, git, receipt},
+        gitTree, zip, tree, checked = $Failed, download, top, source = None, archive, commit = $Failed, git, receipt},
+    gitTree = FileNameJoin[{dir, "git"}];
     zip = FileNameJoin[{dir, "tree.zip"}];
     tree = FileNameJoin[{dir, "tree"}];
     WithCleanup[
-        download = dependencyDownloaded[release["GitArchive"], zip];
-        If[FailureQ[download], Return[download, Module]];
-        If[dependencyCancelledQ[], Return[dependencyCancelled[], Module]];
-        ExtractArchive[zip, tree, Sequence @@ If[path === {}, {}, {"*/" <> StringRiffle[path, "/"] <> "/*"}]];
-        top = FileNames["*", tree];
-        source = If[MatchQ[top, {_String?DirectoryQ}], FileNameJoin[Join[top, path]], None];
-        If[! StringQ[source] || ! FileExistsQ[FileNameJoin[{source, release["GitManifest"]}]],
-            Return[dependencyFailure["DependencyArchive", "The commit's tree has no paclet at `1`.", StringRiffle[path, "/"]], Module]];
-        commit = dependencyGitArchiveCommit[zip, dependencyGitCommit[entry], First[top]];
-        If[FailureQ[commit], Return[commit, Module]];
+        If[KeyExistsQ[release, "GitURL"] && dependencyGitLinkAvailableQ[],
+            checked = dependencyGitLinkCheckout[release["GitURL"], dependencyGitCommit[entry], path, gitTree];
+            If[MatchQ[checked, _Failure], Return[checked, Module]];
+            If[AssociationQ[checked] && FileExistsQ[FileNameJoin[{checked["Source"], release["GitManifest"]}]],
+                source = checked["Source"];
+                commit = checked["Commit"]
+            ]
+        ];
+        If[! StringQ[source],
+            If[! KeyExistsQ[release, "GitArchive"],
+                Return[dependencyFailure["DependencyArchive", "Could not check out `1` at commit `2` from `3`.",
+                    name, dependencyGitCommit[entry], Lookup[release, "GitURL", entry["Git"]]], Module]];
+            download = dependencyDownloaded[release["GitArchive"], zip];
+            If[FailureQ[download], Return[download, Module]];
+            If[dependencyCancelledQ[], Return[dependencyCancelled[], Module]];
+            ExtractArchive[zip, tree, Sequence @@ If[path === {}, {}, {"*/" <> StringRiffle[path, "/"] <> "/*"}]];
+            top = FileNames["*", tree];
+            source = If[MatchQ[top, {_String?DirectoryQ}], FileNameJoin[Join[top, path]], None];
+            If[! StringQ[source] || ! FileExistsQ[FileNameJoin[{source, release["GitManifest"]}]],
+                Return[dependencyFailure["DependencyArchive", "The commit's tree has no paclet at `1`.", StringRiffle[path, "/"]], Module]];
+            commit = dependencyGitArchiveCommit[zip, dependencyGitCommit[entry], First[top]];
+            If[FailureQ[commit], Return[commit, Module]]
+        ];
         git = dependencyGitSource[entry, commit];
         receipt = FileNameJoin[{source, $dependencyGitReceipt}];
         If[FileExistsQ[receipt] || ! StringQ[Export[receipt, git, "RawJSON"]],

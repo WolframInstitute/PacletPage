@@ -75,9 +75,9 @@ PacletDependencyInformation::usage = "PacletDependencyInformation[owner] gives a
 
 PacletDependencyReport::usage = "PacletDependencyReport[owner, records] displays a dependency snapshot. report[name] gives one library's record and Normal[report] gives the association of all records."
 
-InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] installs the selected dependencies and checks their readiness. Give one name, a list of names, or All."
+InstallPacletDependencies::usage = "InstallPacletDependencies[owner, names] installs the selected dependencies and checks their readiness. Give one name, a list of names, All, \"Required\", or \"Optional\". Use \"CheckReadiness\" -> False to install without running readiness checks."
 
-UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] updates the selected installed dependencies to compatible releases or to their declared Git commits."
+UpdatePacletDependencies::usage = "UpdatePacletDependencies[owner, names] updates the selected installed dependencies to compatible releases or to their declared Git commits. Give one name, a list of names, All, \"Required\", or \"Optional\"."
 
 UninstallPacletDependencies::usage = "UninstallPacletDependencies[owner, names] removes selected optional dependencies from the current user's paclet repository. All selects the removable optional dependencies. PacletPage protects its own installation."
 

@@ -47,7 +47,7 @@ dependencyEntryQ[entry_, owner_] := With[{
     (! KeyExistsQ[entry, "Archive"] || (StringQ[entry["Archive"]] && entry["Archive"] =!= "" && ! KeyExistsQ[entry, "Resource"])) &&
     (* a repository at a commit is a source of its own, and a commit or a path names nothing without one *)
     If[KeyExistsQ[entry, "Git"],
-        dependencyGitRepository[entry["Git"]] =!= None && dependencyCommitQ[Lookup[entry, "Commit", None]] &&
+        dependencyGitURLQ[entry["Git"]] && dependencyCommitQ[Lookup[entry, "Commit", None]] &&
             dependencyGitPathQ[Lookup[entry, "Path", ""]] && ! KeyExistsQ[entry, "Resource"] && ! KeyExistsQ[entry, "Archive"],
         ! KeyExistsQ[entry, "Commit"] && ! KeyExistsQ[entry, "Path"]] &&
     (check === None || (StringQ[check] && StringMatchQ[check, RegularExpression["([a-zA-Z$][a-zA-Z0-9$]*`)+[a-zA-Z$][a-zA-Z0-9$]*"]] &&
@@ -66,12 +66,22 @@ dependencyManifest[owner_PacletObject] := Module[{declared = Lookup[owner["Pacle
     AssociationThread[names, entries]
 ]
 
+(* Resolve All, "Required", "Optional", a single name, or a list of names against the manifest. *)
+dependencySelectionNames[entries_Association, selection_] := Which[
+    selection === All, Keys[entries],
+    selection === "Required" && ! KeyExistsQ[entries, "Required"],
+        Keys[Select[entries, TrueQ[#["Required"]] &]],
+    selection === "Optional" && ! KeyExistsQ[entries, "Optional"],
+        Keys[Select[entries, ! TrueQ[#["Required"]] &]],
+    True, DeleteDuplicates[Flatten[{selection}]]
+]
+
 (* Validate the whole selection before its first action. Each library then keeps its own result. *)
 withDependencySelection[ownerSpec_, selection_, action_] := Module[{owner = dependencyOwner[ownerSpec], entries, names, unknown},
     If[! MatchQ[owner, _PacletObject], Return[owner]];
     entries = dependencyManifest[owner];
     If[FailureQ[entries], Return[entries]];
-    names = If[selection === All, Keys[entries], DeleteDuplicates[Flatten[{selection}]]];
+    names = dependencySelectionNames[entries, selection];
     unknown = Complement[names, Keys[entries]];
     If[unknown =!= {}, Return[dependencyFailure["UnknownDependency", "`1` does not declare `2`.", owner["Name"], unknown]]];
     Block[{$refreshDependencySites = True}, action[owner, AssociationThread[names, Lookup[entries, names]]]]
@@ -158,7 +168,7 @@ dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{resu
     If[updates && dependencySupportedQ[entry],
         latest = If[TrueQ[result["GitRevisionMatch"]] && dependencyCompatibleQ[result["InstalledVersion"], Lookup[entry, "Version", All]],
             <|"Version" -> result["InstalledVersion"]|>,
-            TimeConstrained[dependencyRelease[owner, entry], $dependencyVersionTimeout,
+            TimeConstrained[dependencyRelease[owner, entry, True], $dependencyVersionTimeout,
                 dependencyFailure["DependencyTimeout", "The version check for `1` timed out. Try checking for updates again.", entry["Name"]]]];
         result["LatestVersion"] = If[FailureQ[latest], latest, latest["Version"]]];
     If[StringTrim[Lookup[entry, "Description", ""]] === "",
@@ -168,46 +178,64 @@ dependencyInfo[owner_, entry_, installed_List, probe_, updates_] := Module[{resu
     result
 ]
 
-InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
-    dependencyMap[dependencyInstall[#1, #2, False] &, owner, names]
-UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
-    dependencyMap[dependencyInstall[#1, #2, True] &, owner, names]
+Options[InstallPacletDependencies] = {"CheckReadiness" -> True}
+InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject)] :=
+    InstallPacletDependencies[owner, All]
+InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject),
+        first : (_Rule | _RuleDelayed | {(_Rule | _RuleDelayed) ..}), rest : OptionsPattern[]] :=
+    InstallPacletDependencies[owner, All, first, rest]
+InstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
+    With[{check = TrueQ[OptionValue["CheckReadiness"]]},
+        dependencyMap[dependencyInstall[#1, #2, False, check] &, owner, names]
+    ]
+
+Options[UpdatePacletDependencies] = {"CheckReadiness" -> True}
+UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject)] :=
+    UpdatePacletDependencies[owner, All]
+UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject),
+        first : (_Rule | _RuleDelayed | {(_Rule | _RuleDelayed) ..}), rest : OptionsPattern[]] :=
+    UpdatePacletDependencies[owner, All, first, rest]
+UpdatePacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String}), OptionsPattern[]] :=
+    With[{check = TrueQ[OptionValue["CheckReadiness"]]},
+        dependencyMap[dependencyInstall[#1, #2, True, check] &, owner, names]
+    ]
+
 dependencyRemovableQ[entry_] := ! TrueQ[entry["Required"]] && entry["Name"] =!= "WolframInstitute/PacletPage"
 UninstallPacletDependencies[owner : (_String | File[_String] | _PacletObject), names : (All | _String | {___String})] :=
-    dependencyMap[dependencyUninstall, owner, names, If[names === All, Select[dependencyRemovableQ], Identity]]
+    dependencyMap[dependencyUninstall, owner, names, If[names === All || names === "Optional", Select[dependencyRemovableQ], Identity]]
 
-dependencyChecked[owner_, entry_, paclet_] := Module[{readiness},
-    If[KeyExistsQ[$dependencyRestarts, entry["Name"]] || ! StringQ[entry["Check"]], Return[paclet]];
+dependencyChecked[owner_, entry_, paclet_, checkReadiness_ : True] := Module[{readiness},
+    If[! TrueQ[checkReadiness] || KeyExistsQ[$dependencyRestarts, entry["Name"]] || ! StringQ[entry["Check"]], Return[paclet]];
     readiness = dependencyReadiness[owner, entry];
     If[readiness === True, paclet, Failure["DependencySetupRequired", <|
         "MessageTemplate" -> "`1` `2` needs setup. `3`", "MessageParameters" -> {entry["Name"], paclet["Version"], readiness["Message"]},
         "InstalledVersion" -> paclet["Version"], "Cause" -> readiness|>]]
 ]
 
-dependencyInstall[owner_, entry_, update_] := Module[{name = entry["Name"], installed, current, release, result, loaded, git = KeyExistsQ[entry, "Git"]},
+dependencyInstall[owner_, entry_, update_, checkReadiness_ : True] := Module[{name = entry["Name"], installed, current, release, result, loaded, git = KeyExistsQ[entry, "Git"]},
     If[! dependencySupportedQ[entry], Return[dependencyFailure["UnsupportedSystem", "`1` is unavailable on `2`.", name, $SystemID]]];
     installed = PacletFind[name];
     current = First[installed, None];
     If[update && current === None, Return[dependencyFailure["DependencyNotInstalled", "Install `1` before updating it.", name]]];
     If[current =!= None && dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]] &&
             If[git, dependencyGitMatchesQ[dependencyInstalledGit[current], entry], ! update],
-        Return[dependencyChecked[owner, entry, current]]];
+        Return[dependencyChecked[owner, entry, current, checkReadiness]]];
     $dependencyProgress["Checking release", None];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
-    release = dependencyRelease[owner, entry];
+    release = dependencyRelease[owner, entry, update];
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     If[FailureQ[release], Return[release]];
     If[git && current =!= None,
         With[{conflict = dependencyGitConflict[current, release["Version"]]}, If[FailureQ[conflict], Return[conflict]]]];
     If[! git && current =!= None && ! PacletNewerQ[release["Version"], current["Version"]],
-        Return[If[dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]], dependencyChecked[owner, entry, current],
+        Return[If[dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]], dependencyChecked[owner, entry, current, checkReadiness],
             dependencyFailure["DependencyVersionConflict", "Installed `1` `2` does not satisfy `3`.", name, current["Version"], entry["Version"]]]]];
     loaded = AnyTrue[installed, dependencyLoadedQ];
     result = dependencyInstallRelease[entry, release];
     If[! MatchQ[result, _PacletObject], Return[result]];
     If[loaded, AssociateTo[$dependencyRestarts, name -> True]];
     $dependencyProgress["Checking readiness", None];
-    dependencyChecked[owner, entry, result]
+    dependencyChecked[owner, entry, result, checkReadiness]
 ]
 
 dependencyUninstall[owner_, entry_] := Module[{name = entry["Name"], userCopies, loaded, result},

@@ -118,7 +118,12 @@ PacletDependencyDialog["Demo/Consumer",
     "Description" -> "Install TypeTheory to check proofs in this notebook."]
 ```
 
-A script can apply the same operations to one name, a list of names or `All`. Each selected name has its own result. The following cells change the current user's installation when evaluated.
+A script can apply the same operations to one name, a list of names, `All`, `"Required"`, or `"Optional"`. Pass `"CheckReadiness" -> False` when installing for headless documentation builds. The following cells change the current user's installation when evaluated.
+
+```wl
+#| eval: false
+InstallPacletDependencies["Demo/Consumer", "Required", "CheckReadiness" -> False]
+```
 
 ```wl
 #| eval: false
@@ -135,7 +140,13 @@ UpdatePacletDependencies["Demo/Consumer", "WolframInstitute/TypeTheory"]
 UninstallPacletDependencies["Demo/Consumer", "WolframInstitute/TypeTheory"]
 ```
 
-Version-based updates retain an equal or newer compatible version. With a Git source, changing the pin can replace a user-installed library even when both commits declare the same version. A matching pin can be reused offline. Restart the kernel when a loaded library changes. Uninstalling removes user-installed copies, which other consumers may also use.
+Version-based updates retain an equal or newer compatible version. With a Git source, PacletPage uses `WolframInstitute/GitLink` for shallow fetch and sparse path checkout when installed, falling back to GitHub archives otherwise. Changing the pin can replace a user-installed library even when both commits declare the same version. A matching pin can be reused offline. Restart the kernel when a loaded library changes. Uninstalling removes user-installed copies, which other consumers may also use.
+
+## Bundle dependencies inside a published paclet
+
+To ship required (or all) dependencies inside a published `.paclet` archive for offline installation, pass `"BundleDependencies" -> "Required"` (or `All`, or a list of names) to [DeployPacletResource](), [SubmitPacletResource](), or [PublishPacletPage](). PacletPage packs compatible installed copies into `Assets/Dependencies/` in the staged build and registers `{"Dependencies", "Dependencies"}` in the paclet's `"Asset"` extension. When a user runs [InstallPacletDependencies](), matching bundled archives in `owner["AssetLocation", "Dependencies"]` (including `.pacletpage-git.json` receipts for Git-pinned dependencies) are installed offline first without network access.
+
+For headless documentation builds that need every declared library (both required and optional) available so all examples evaluate, pass `"InstallDependencies" -> All` to [BuildPacletDocumentation]() or [PublishPacletPage](). At runtime load, a consumer installs only `"Required"` dependencies automatically and leaves `"Optional"` dependencies to [PacletDependencyDialog]().
 
 ## Make setup work on a fresh installation
 

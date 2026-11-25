@@ -6,9 +6,18 @@ PacletObject[<|
     "Creator" -> "Nikolay Murzin",
     "PublisherID" -> "WolframInstitute",
     "License" -> "MIT",
-    "Version" -> "0.3.92",
+    "Version" -> "0.3.93",
     "WolframVersion" -> "14.3+",
     "PrimaryContext" -> "WolframInstitute`PacletPage`",
+    "Dependencies" -> {
+        <|
+            "Name" -> "WolframInstitute/GitLink",
+            "Version" -> "2.0+",
+            "Resource" -> "https://www.wolframcloud.com/obj/wolframinstitute/DeployedResources/Paclet/WolframInstitute/GitLink",
+            "Platforms" -> {"MacOSX-ARM64", "Linux-x86-64"},
+            "Description" -> "Native libgit2 1.9 bindings for shallow Git fetches and sparse path checkouts"
+        |>
+    },
     "Extensions" -> {
         {
             "Kernel",

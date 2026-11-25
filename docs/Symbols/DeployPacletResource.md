@@ -73,6 +73,7 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Build"` | `True` | whether to build the archive, or take the one an earlier run built from the same sources |
 | `"MaxFailures"` | `0` | how many documentation pages the archive may lack: a number, `Automatic` or `Infinity` |
 | `"SourceArchive"` | `None` | a cloud directory to publish the paclet as it is authored in, for editing elsewhere |
+| `"BundleDependencies"` | `False` | package selected declared dependencies (`"Required"`, `All`, or a list of names) as `.paclet` archives under `Assets/Dependencies/` registered as an `"Asset"` extension for offline installation |
 | `Permissions` | `"Public"` | the resource's permissions |
 
 ## Basic Examples

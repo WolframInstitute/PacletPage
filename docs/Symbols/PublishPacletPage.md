@@ -38,6 +38,8 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"Check"` | `True` | whether to check the site; what fails is checked again for up to two minutes, while the cloud renders the new pages |
 | `"Submit"` | `False` | whether to submit the paclet to the Paclet Repository |
 | `"DryRun"` | `False` | build and scrape, deploy nothing |
+| `"InstallDependencies"` | `False` | install declared dependencies (`"Required"`, `All`, or a list of names) before building documentation |
+| `"BundleDependencies"` | `False` | package selected declared dependencies (`"Required"`, `All`, or a list of names) as an `"Asset"` extension inside the published `.paclet` archive |
 | `"BuildOptions"` | `{}` | options for `BuildPacletDocumentation` |
 | `"ResourceOptions"` | `{}` | options for `DeployPacletResource`, such as `"Archive"` or `"Exclude"`; the submission builds its archive with them too |
 | `"SiteOptions"` | `{}` | options for `DeployPacletPage`; a `"Source"` among them wins over the paclet's own, and `"ViewSource" -> False` publishes no sources and shows none |
