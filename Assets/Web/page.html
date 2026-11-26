@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>`title`</title>
+`head`
 <style>
   /* The page the site's frame shows. The notebook embedder renders lazily as the WINDOW scrolls
      and froze inside an overflow:auto container, so the notebook lives in normal flow: the cloud's
@@ -118,6 +119,37 @@
     #feedback-form { width: 100%; height: 100%; max-height: none; border-radius: 0; }
   }
   @media (max-width: 900px) { #notebook-embed { padding: 0 14px 40px; } }
+  /* The dark theme. The cloud's render of a notebook has its colors fixed, so the notebook is
+     inverted, with its hues turned back; a picture or a plot (img.pp-graphic, marked by the script
+     by its size) is turned back whole, slightly dimmed, while icons and typeset images stay inverted
+     with the text around them. The page's own controls have colors of their own. */
+  html[data-theme="dark"] { color-scheme: dark; background: #141516; }
+  html[data-theme="dark"] body { background: #141516; }
+  /* the notebook keeps the light scheme's defaults, black text on no background, before the
+     inversion: the dark scheme's default text is white, which would invert to black */
+  html[data-theme="dark"] #notebook-embed { color-scheme: light; color: #000; filter: invert(.92) hue-rotate(180deg); }
+  html[data-theme="dark"] #notebook-embed img.pp-graphic, html[data-theme="dark"] #notebook-embed video,
+  html[data-theme="dark"] #notebook-embed canvas { filter: invert(1) hue-rotate(180deg); }
+  html[data-theme="dark"] #resource-frame { background: #141516; }
+  html[data-theme="dark"] #err { color: #9aa1a7; }
+  html[data-theme="dark"] #err a, html[data-theme="dark"] #fb-browse, html[data-theme="dark"] #feedback-form .foot a { color: #78aee8; }
+  html[data-theme="dark"] .pagetool { color: #d4d7da; background: rgba(36, 38, 41, .92); border-color: #3b3f44; }
+  html[data-theme="dark"] .pagetool:hover { background: #2c2f33; border-color: #555b61; color: #fff; }
+  html[data-theme="dark"] #viewtoggle[data-view="source"] { background: #3a3220; border-color: #5c4f2a; color: #e8d9a8; }
+  html[data-theme="dark"] #feedback-note { color: #d4d7da; background: #1f2124; border-color: #3b3f44; box-shadow: 0 2px 10px rgba(0, 0, 0, .5); }
+  html[data-theme="dark"] #feedback-overlay { background: rgba(0, 0, 0, .5); }
+  html[data-theme="dark"] #feedback-form { background: #1f2124; color: #e2e4e6; box-shadow: 0 8px 30px rgba(0, 0, 0, .6); }
+  html[data-theme="dark"] #feedback-form .head, html[data-theme="dark"] #feedback-form .foot { border-color: #33363a; }
+  html[data-theme="dark"] #feedback-form .opt, html[data-theme="dark"] #feedback-form .foot { color: #8f969c; }
+  html[data-theme="dark"] #feedback-dismiss { color: #a0a6ac; }
+  html[data-theme="dark"] #feedback-dismiss:hover { background: #2c2f33; color: #fff; }
+  html[data-theme="dark"] #feedback-form textarea, html[data-theme="dark"] #feedback-form input[type="text"],
+  html[data-theme="dark"] #feedback-form input[type="email"] { background: #17181a; border-color: #3b3f44; }
+  html[data-theme="dark"] #fb-drop { background: #191b1d; border-color: #43484d; color: #a0a6ac; }
+  html[data-theme="dark"] #fb-drop.dragging { background: #1d2a38; border-color: #4a90d9; }
+  html[data-theme="dark"] #fb-list li { border-color: #3b3f44; color: #b5bbc0; }
+  html[data-theme="dark"] #fb-list .remove { background: rgba(30, 32, 35, .9); color: #b5bbc0; }
+  html[data-theme="dark"] #fb-status.error { color: #f28b82; }
 </style>
 </head>
 <body>
@@ -181,6 +213,16 @@
       site = null;
   // the shell this page is framed in, on the same origin; null when the page is opened alone
   try { if (window.parent !== window && window.parent.ppSite) site = window.parent.ppSite; } catch (e) {}
+
+  // In the dark theme the notebook is inverted; a picture or a plot, an image of 64 pixels or more
+  // each way, is turned back, while icons and lines of typeset text stay inverted with the text.
+  function markGraphic(img) {
+    if (img.naturalWidth >= 64 && img.naturalHeight >= 64) img.classList.add('pp-graphic');
+  }
+  document.addEventListener('load', function (e) {
+    var t = e.target;
+    if (t && t.tagName === 'IMG' && node.contains(t)) markGraphic(t);
+  }, true);
 
   function safeDecode(s) {
     try { return decodeURIComponent(s); } catch (e) { return s; }
@@ -540,6 +582,7 @@
         st.textContent = C.hide;
         d.head.appendChild(st);
       }
+      resourceTheme(frame);
       // the resource page always has an Examples section; one whose definition had no examples
       // is empty, and then hidden with its heading. A page that embeds its example notebook fills
       // the section as the notebook renders, so it is never hidden.
@@ -571,8 +614,28 @@
       }
     } catch (e) {}
   }
+  // the resource page in the dark theme: inverted, with its pictures turned back, as the shell
+  // treats a page it frames as published
+  function resourceTheme(frame) {
+    try {
+      var d = frame.contentDocument;
+      if (!d || !d.head) return;
+      if (!d.getElementById('pp-dark')) {
+        var s = d.createElement('style');
+        s.id = 'pp-dark';
+        s.textContent = 'html[data-pp-dark]{background:#141516}html[data-pp-dark] body{filter:invert(.92) hue-rotate(180deg)}' +
+          'html[data-pp-dark] body img,html[data-pp-dark] body video,html[data-pp-dark] body canvas,html[data-pp-dark] body picture{filter:invert(1) hue-rotate(180deg)}';
+        d.head.appendChild(s);
+      }
+      d.documentElement.toggleAttribute('data-pp-dark', document.documentElement.getAttribute('data-theme') === 'dark');
+    } catch (e) {}
+  }
   if (definitionPage && view === 'built') {
     var resourceFrame = document.getElementById('resource-frame');
+    if (window.MutationObserver) {
+      new MutationObserver(function () { resourceTheme(resourceFrame); })
+        .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    }
     resourceFrame.style.display = 'block';
     resourceFrame.src = C.resource;
     var watched = 0, watch = setInterval(function () {
@@ -599,6 +662,7 @@
         node.innerHTML = html;
         var nh = node.querySelector('.notebook-html');
         if (nh) nh.style.display = 'block';
+        Array.prototype.forEach.call(node.querySelectorAll('img'), function (img) { if (img.complete) markGraphic(img); });
       }
       hydrate();
     });

@@ -1,4 +1,28 @@
-:root { --pp-accent: #dd1100; --pp-active-bg: #fdeee9; --pp-active-fg: #c4280b; }
+:root { --pp-accent: #dd1100; --pp-active-bg: #fdeee9; --pp-active-fg: #c4280b; --pp-dark-active-bg: #481d1b; --pp-dark-active-fg: #e96459; }
+/* the shell's colors, light, and dark with "DarkMode": the head script sets data-theme on the root
+   before the first paint, and the header's button switches it */
+:root {
+  --pp-bg: #fff; --pp-fg: #333; --pp-strong: #2a2a2a;
+  --pp-rail-bg: #fafafa; --pp-rail-line: #e3e3e3; --pp-row-line: #eee; --pp-hover: #f0f1f2;
+  --pp-muted: #7a838c; --pp-faint: #9aa3ab; --pp-link: #1a6ba5; --pp-app: #1f7a6b;
+  --pp-stub: #8a8f98; --pp-stub-hover: #5c6168; --pp-sep: #cfd2d6; --pp-arrow: #aaa; --pp-arrow-hover: #666;
+  --pp-ftr-bg: #f4f5f6; --pp-ftr-line: #e1e4e6; --pp-ftr-fg: #7a838b; --pp-ftr-link: #4b555e; --pp-loading: #999;
+  --pp-ctl-bg: #fff; --pp-ctl-line: #cbd0d3; --pp-ctl-hover: #edf2f5; --pp-ctl-disabled: #92989c;
+  --pp-count: #575e63; --pp-index-line: #dedfe0;
+  --pp-exit-bg: rgba(255, 255, 255, .92); --pp-exit-line: #d0d4d8; --pp-exit-fg: #333; --pp-shadow: rgba(0, 0, 0, .28);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --pp-bg: #141516; --pp-fg: #d4d7da; --pp-strong: #eceef0;
+  --pp-rail-bg: #1e2023; --pp-rail-line: #2e3135; --pp-row-line: #282b2e; --pp-hover: #2a2d31;
+  --pp-muted: #8d959c; --pp-faint: #788087; --pp-link: #74b3ea; --pp-app: #5cc6b3;
+  --pp-stub: #7d848b; --pp-stub-hover: #a7adb3; --pp-sep: #3a3e43; --pp-arrow: #6c737a; --pp-arrow-hover: #b0b6bb;
+  --pp-ftr-bg: #1b1d20; --pp-ftr-line: #2e3135; --pp-ftr-fg: #80878e; --pp-ftr-link: #b3b9be; --pp-loading: #80878e;
+  --pp-ctl-bg: #24272a; --pp-ctl-line: #3c4146; --pp-ctl-hover: #2d3135; --pp-ctl-disabled: #626970;
+  --pp-count: #9aa1a7; --pp-index-line: #2e3135;
+  --pp-exit-bg: rgba(36, 39, 42, .92); --pp-exit-line: #3c4146; --pp-exit-fg: #d4d7da; --pp-shadow: rgba(0, 0, 0, .6);
+  --pp-active-bg: var(--pp-dark-active-bg); --pp-active-fg: var(--pp-dark-active-fg);
+}
 /* A slow font host must still leave the shell readable on its first paint. */
 @font-face {
   font-family: 'Source Sans Pro'; font-weight: 400; font-display: swap;
@@ -16,8 +40,8 @@
 html, body { margin: 0; height: 100%; }
 body {
   font-family: 'Source Sans Pro', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  color: #333;
-  background: #fff;
+  color: var(--pp-fg);
+  background: var(--pp-bg);
 }
 a { text-decoration: none; color: inherit; }
 
@@ -61,6 +85,19 @@ a { text-decoration: none; color: inherit; }
 .pp-layout-btn:hover { background: #2e3236; color: #fff; }
 .pp-layout-btn.on { background: #2e3236; color: #fff; border-color: #555b62; }
 .pp-layout-btn svg { width: 16px; height: 16px; display: block; }
+/* the switch between the light theme and the dark one, a moon while light and a sun while dark */
+.pp-theme-btn {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 30px; height: 28px; padding: 0; cursor: pointer;
+  background: transparent; color: #b9bdc1; border: 1px solid #3a3f44; border-radius: 4px;
+}
+.pp-theme-btn:hover { background: #2e3236; color: #fff; }
+.pp-theme-btn svg { width: 16px; height: 16px; display: block; }
+.pp-theme-btn .pp-sun, :root[data-theme="dark"] .pp-theme-btn .pp-moon { display: none; }
+:root[data-theme="dark"] .pp-theme-btn .pp-sun { display: block; }
+.pp-layout-controls + .pp-theme-btn { margin-left: 6px; }
+.pp-theme-btn + #resourcelink { margin-left: 10px; }
+.no-filter .pp-theme-btn { margin-left: 6px; }
 body.pp-hide-left #side, body.pp-hide-left #splitL { display: none !important; }
 body.pp-hide-right #side-right, body.pp-hide-right #splitR { display: none !important; }
 body.pp-fullscreen #hdr, body.pp-fullscreen #side, body.pp-fullscreen #splitL,
@@ -69,8 +106,8 @@ body.pp-fullscreen #main { top: 0; bottom: 0; }
 .pp-full-exit {
   display: none; position: fixed; top: 10px; right: 12px; z-index: 50;
   width: 32px; height: 32px; padding: 0; align-items: center; justify-content: center;
-  border-radius: 6px; border: 1px solid #d0d4d8; background: rgba(255, 255, 255, .92);
-  color: #333; cursor: pointer; opacity: .7; box-shadow: 0 2px 8px rgba(0, 0, 0, .14);
+  border-radius: 6px; border: 1px solid var(--pp-exit-line); background: var(--pp-exit-bg);
+  color: var(--pp-exit-fg); cursor: pointer; opacity: .7; box-shadow: 0 2px 8px rgba(0, 0, 0, .14);
   transition: opacity .15s;
 }
 .pp-full-exit:hover, .pp-full-exit:focus-visible { opacity: 1; color: var(--pp-accent); border-color: var(--pp-accent); }
@@ -82,7 +119,7 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 .no-filter #hdr .brand { margin-right: auto; }
 .no-filter #hdr .home { margin-left: 0; }
 /* a rail whose every entry is filtered out says so, instead of going blank */
-.nav-empty { padding: 10px 14px; color: #9aa3ab; font-size: 12px; font-style: italic; }
+.nav-empty { padding: 10px 14px; color: var(--pp-faint); font-size: 12px; font-style: italic; }
 
 /* layout: guides and tutorials (left) | content | symbols (right) */
 #main { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; display: flex; reading-flow: flex-visual; }
@@ -90,22 +127,22 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 #ftr {
   position: fixed; left: 0; right: 0; bottom: 0; height: 22px; z-index: 20;
   display: flex; align-items: center; justify-content: flex-end; padding: 0 14px;
-  background: #f4f5f6; border-top: 1px solid #e1e4e6; color: #7a838b; font-size: 11px;
+  background: var(--pp-ftr-bg); border-top: 1px solid var(--pp-ftr-line); color: var(--pp-ftr-fg); font-size: 11px;
 }
-#ftr a { color: #4b555e; margin-left: 4px; }
+#ftr a { color: var(--pp-ftr-link); margin-left: 4px; }
 #ftr a:hover { color: var(--pp-accent); }
 .with-footer #main { bottom: 22px; }
 #side, #side-right {
   height: 100%; overflow-y: auto; overflow-x: hidden;
-  background: #fafafa; padding: 14px 0 40px;
+  background: var(--pp-rail-bg); padding: 14px 0 40px;
 }
-#side { width: 340px; min-width: 200px; max-width: 45%; border-right: 1px solid #e3e3e3; }
-#side-right { order: 1; margin-left: auto; width: 240px; min-width: 160px; max-width: 45%; border-left: 1px solid #e3e3e3; }
-#content { flex: 1; min-width: 0; height: 100%; position: relative; background: #fff; }
-#frame { width: 100%; height: 100%; border: 0; display: block; }
+#side { width: 340px; min-width: 200px; max-width: 45%; border-right: 1px solid var(--pp-rail-line); }
+#side-right { order: 1; margin-left: auto; width: 240px; min-width: 160px; max-width: 45%; border-left: 1px solid var(--pp-rail-line); }
+#content { flex: 1; min-width: 0; height: 100%; position: relative; background: var(--pp-bg); }
+#frame { width: 100%; height: 100%; border: 0; display: block; background: var(--pp-bg); }
 #loading {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  color: #999; font-size: 14px; background: #fff; pointer-events: none;
+  color: var(--pp-loading); font-size: 14px; background: var(--pp-bg); pointer-events: none;
   opacity: 0; transition: opacity .15s;
 }
 #loading.on { opacity: 1; }
@@ -115,53 +152,63 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 #side li, #side-right li { position: relative; }
 #side a, #side-right a {
   display: block; padding: 6px 30px 6px 18px; line-height: 1.35;
-  color: #333; font-size: 14px; border-left: 3px solid transparent; white-space: normal;
+  color: var(--pp-fg); font-size: 14px; border-left: 3px solid transparent; white-space: normal;
   overflow-wrap: break-word;
 }
-#side a:hover, #side-right a:hover { background: #f0f1f2; }
+#side a:hover, #side-right a:hover { background: var(--pp-hover); }
 #side a.active, #side-right a.active { background: var(--pp-active-bg); color: var(--pp-active-fg); border-left-color: var(--pp-accent); }
 
 /* left: the guide tree */
-#side .nav-root > li { border-bottom: 1px solid #eee; }
+#side .nav-root > li { border-bottom: 1px solid var(--pp-row-line); }
 #side ul ul { padding-left: 14px; }
-#side a.gd { font-weight: 600; color: #2a2a2a; }
+#side a.gd { font-weight: 600; color: var(--pp-strong); }
 /* the resource's definition notebook, at the top of the rail */
-#side a.res { font-weight: 600; color: #2a2a2a; font-size: 15px; }
+#side a.res { font-weight: 600; color: var(--pp-strong); font-size: 15px; }
 #side .nav-root > li > details > summary > a.gd,
 #side .nav-root > li > a.gd { font-size: 15px; }
 
 /* left: a thick delimiter, then the tutorials */
-.nav-sep { border-top: 4px solid #cfd2d6; margin: 18px 0 6px; }
+.nav-sep { border-top: 4px solid var(--pp-sep); margin: 18px 0 6px; }
 /* indented like the link text below it (the links' 18px padding plus their 3px border) */
 #side .nav-label {
   margin: 10px 0 2px; padding: 0 30px 0 21px; font-size: 11px; font-weight: 700;
-  letter-spacing: 0.08em; text-transform: uppercase; color: #7a838c;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--pp-muted);
 }
-#side a.tut { color: #1a6ba5; }
+#side a.tut { color: var(--pp-link); }
 /* worked applications, kept apart from the tutorials */
-#side a.app { color: #1f7a6b; }
+#side a.app { color: var(--pp-app); }
 #side a.app.active, #side a.tut.active { color: var(--pp-active-fg); }
-#side a.tut.stub, #side a.app.stub { color: #8a8f98; font-style: italic; }
-#side a.tut.stub:hover, #side a.app.stub:hover { color: #5c6168; }
+#side a.tut.stub, #side a.app.stub { color: var(--pp-stub); font-style: italic; }
+#side a.tut.stub:hover, #side a.app.stub:hover { color: var(--pp-stub-hover); }
 #side a.tut.stub.active, #side a.app.stub.active { color: var(--pp-active-fg); font-style: normal; }
 
 /* right: symbols */
-#side-right a.sym { color: #1a6ba5; }
-#side-right.indexed { display: flex; flex-direction: column; padding: 0; overflow: hidden; container-type: inline-size; }
+#side-right a.sym { color: var(--pp-link); }
+/* a rail that can show the A-Z index keeps its heading, with the index's switch, above the list;
+   off, the index's controls are hidden and the list holds every symbol */
+#side-right.indexable { display: flex; flex-direction: column; padding: 0; overflow: hidden; container-type: inline-size; }
 #side-right [hidden] { display: none; }
-.symbol-index { flex: none; padding: 12px; border-bottom: 1px solid #dedfe0; }
-.symbol-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
-.symbol-heading h2 { margin: 0; font-size: 16px; font-weight: 600; }
-.symbol-total, .symbol-count { color: #575e63; font-size: 13px; font-variant-numeric: tabular-nums; }
+#side-right.indexable:not(.indexed) .symbol-browse, #side-right.indexable:not(.indexed) .symbol-count,
+#side-right.indexable:not(.indexed) .symbol-more { display: none !important; }
+.symbol-index { flex: none; padding: 12px; border-bottom: 1px solid var(--pp-index-line); }
+.symbol-heading { display: flex; align-items: center; gap: 6px; }
+.symbol-heading h2 { margin: 0 auto 0 0; font-size: 16px; font-weight: 600; }
+.symbol-total, .symbol-count { color: var(--pp-count); font-size: 13px; font-variant-numeric: tabular-nums; }
+.symbol-index-toggle {
+  font: inherit; font-size: 12px; font-weight: 600; line-height: 1.2; padding: 2px 7px; cursor: pointer;
+  color: var(--pp-link); background: var(--pp-ctl-bg); border: 1px solid var(--pp-ctl-line); border-radius: 3px;
+}
+.symbol-index-toggle:hover { background: var(--pp-ctl-hover); }
+.symbol-index-toggle[aria-pressed="true"] { background: var(--pp-active-bg); color: var(--pp-active-fg); border-color: currentColor; }
 .symbol-count { margin-top: 6px; overflow-wrap: anywhere; }
 .symbol-letters { display: grid; grid-template-columns: repeat(auto-fit, minmax(26px, 1fr)); gap: 2px; margin-top: 8px; }
 .symbol-letters button, .symbol-more, .symbol-index select {
-  font: inherit; color: #1a6ba5; border: 1px solid #cbd0d3; border-radius: 3px; background: #fff;
+  font: inherit; color: var(--pp-link); border: 1px solid var(--pp-ctl-line); border-radius: 3px; background: var(--pp-ctl-bg);
 }
 .symbol-letters button { min-width: 0; padding: 3px 0; font-size: 13px; cursor: pointer; }
-.symbol-letters button:disabled { border-color: transparent; background: transparent; color: #92989c; cursor: default; }
+.symbol-letters button:disabled { border-color: transparent; background: transparent; color: var(--pp-ctl-disabled); cursor: default; }
 .symbol-letters button[aria-pressed="true"] { background: var(--pp-active-bg); color: var(--pp-active-fg); border-color: currentColor; font-weight: 600; }
-.symbol-letters button:enabled:hover, .symbol-more:hover { background: #edf2f5; }
+.symbol-letters button:enabled:hover, .symbol-more:hover { background: var(--pp-ctl-hover); }
 .symbol-index label { display: block; margin-top: 7px; font-size: 13px; font-weight: 600; }
 .symbol-select { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; margin-top: 2px; font-size: 13px; }
 .symbol-index select {
@@ -171,7 +218,7 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 /* Keep the native picker and its focus ring. A long symbol name can wrap before the arrow. */
 .symbol-selection {
   grid-area: 1 / 1 / 2 / -1; align-self: stretch; display: flex; align-items: center; min-width: 0;
-  margin: 1px; padding: 4px 7px; padding-inline-end: 29px; background: #fff; border-radius: 2px;
+  margin: 1px; padding: 4px 7px; padding-inline-end: 29px; background: var(--pp-ctl-bg); border-radius: 2px;
   overflow-wrap: anywhere; pointer-events: none;
 }
 .symbol-select::after {
@@ -184,7 +231,7 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 .symbol-index .symbol-letter-picker { display: none; }
 .symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letters { display: none; }
 .symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letter-picker { display: block; }
-.indexed .symbol-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 3px 0 12px; }
+.indexable .symbol-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 3px 0 12px; }
 .symbol-more { display: block; margin: 6px auto; padding: 5px 12px; font-size: 13px; cursor: pointer; }
 @container (max-width: 196px) {
   .symbol-letters { display: none; }
@@ -201,10 +248,10 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 #side summary::-webkit-details-marker { display: none; }
 #side summary::after {
   content: '\25B8'; position: absolute; right: 12px; top: 11px;
-  color: #aaa; font-size: 11px;
+  color: var(--pp-arrow); font-size: 11px;
 }
 #side details[open] > summary::after { content: '\25BE'; }
-#side summary:hover::after { color: #666; }
+#side summary:hover::after { color: var(--pp-arrow-hover); }
 
 /* ---- narrow screens ---------------------------------------------------------------------
    Below 900px the rails become off-canvas drawers opened from the header and the content takes
@@ -229,7 +276,7 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
   #side, #side-right {
     position: fixed; top: 56px; bottom: 0; z-index: 40; width: 82vw; max-width: 340px;
     visibility: hidden; transform: translateX(-102%); transition: transform .18s ease-out;
-    box-shadow: 0 0 24px rgba(0, 0, 0, .28);
+    box-shadow: 0 0 24px var(--pp-shadow);
   }
   #side { left: 0; }
   #side-right { right: 0; left: auto; height: auto; transform: translateX(102%); }
@@ -242,6 +289,8 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 
 @media (max-width: 560px) {
   #hdr .home { display: none; }
+  /* a phone's rails are drawers already, and the header keeps its room for the filter and the theme */
+  .pp-layout-controls { display: none; }
   #hdr #q { font-size: 16px; }   /* 16px keeps iOS from zooming the page on focus */
 }
 
@@ -272,5 +321,5 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 @media (max-width: 900px) {
   /* the rails are drawers here, so there is nothing to resize or collapse on desktop */
   .splitter, #toggleSideL, #toggleSideR { display: none; }
-  .pp-layout-controls { margin-left: 0; }
+  .pp-layout-controls, .pp-theme-btn { margin-left: 0; }
 }

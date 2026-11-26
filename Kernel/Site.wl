@@ -110,10 +110,10 @@ sidebarHTML[catalog_Association, notebooks_Association, rootGuide_ : True, strip
         "IncludeSymbols" -> False, "GuidesHeading" -> False
     |>]];
 
-symbolRailSlots[catalog_Association, notebooks_Association, enabled_ : True] :=
+symbolRailSlots[catalog_Association, notebooks_Association, enabled_ : True, index_ : Automatic] :=
     htmlSymbolsRailParts[catalog, <|
         "Mode" -> "HTML", "Name" -> Lookup[catalog, "Name", ""], "Prefix" -> "", "Notebooks" -> notebooks,
-        "SymbolsRail" -> TrueQ[enabled], "Resource" -> Lookup[catalog, "Resource", ""],
+        "SymbolsRail" -> TrueQ[enabled], "SymbolIndex" -> index, "Resource" -> Lookup[catalog, "Resource", ""],
         "Filter" -> "", "Current" -> None
     |>]["Slots"];
 
@@ -256,8 +256,41 @@ Options[PacletPageFiles] = {
     "Footer" -> False,
     "RootGuide" -> True,
     "StripTitleNumbers" -> True,
-    "LayoutControls" -> False
+    "LayoutControls" -> True,
+    "DarkMode" -> Automatic,
+    "SymbolIndex" -> Automatic
 };
+
+(* "DarkMode": Automatic follows the reader's system setting, True starts dark, False keeps the
+   site light; with either of the first two the header has a button that switches, and the reader's
+   choice is kept for every PacletPage site on the cloud, which share one origin *)
+siteTheme[Automatic] := "auto";
+siteTheme[True] := "dark";
+siteTheme[False | None] := "off";
+siteTheme[_] := $Failed;
+
+(* "SymbolIndex": the A-Z index of a symbols rail of more than 24 symbols, off until the reader
+   turns it on (Automatic), on until the reader turns it off (True), or none (False) *)
+siteSymbolIndex[spec : (Automatic | True | False)] := spec;
+siteSymbolIndex[None] := False;
+siteSymbolIndex[_] := $Failed;
+
+(* The theme before the first paint: the reader's choice, else the site's default, the system's for
+   "auto". The shell and the page each run it in their head, and follow a choice made in another
+   document of the origin, and a change of the system's setting. *)
+themeHeadScript["off"] := "";
+themeHeadScript[default_String] := StringJoin[
+    "<script>(function () {",
+    "var root = document.documentElement, fallback = '", default, "';",
+    "function stored() { try { return localStorage.getItem('pp-theme'); } catch (e) { return null; } }",
+    "function system() { return !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches); }",
+    "function apply() { var s = stored(); root.setAttribute('data-theme', s === 'dark' || s === 'light' ? s : ",
+    "(fallback === 'dark' || (fallback === 'auto' && system())) ? 'dark' : 'light'); }",
+    "root.setAttribute('data-theme-default', fallback); apply(); window.ppApplyTheme = apply;",
+    "addEventListener('storage', function (e) { if (e.key === 'pp-theme' || e.key === null) apply(); });",
+    "if (window.matchMedia) { var q = matchMedia('(prefers-color-scheme: dark)'); if (q.addEventListener) q.addEventListener('change', apply); }",
+    "})();</script>"
+];
 
 (* The label under the site's name: the version given, or with True the catalog's "Version", the
    paclet's published version; none otherwise. *)
@@ -273,11 +306,13 @@ PacletPageFiles::accent = "`1` is not a color; give a color or a hex string such
 PacletPageFiles::home = "`1` is not a home page; use \"Definition\", \"RootGuide\", \"Resource\" or Automatic.";
 PacletPageFiles::email = "The feedback email `1` is not an address, a template with a To: line, or a File of one.";
 PacletPageFiles::layoutcontrols = "`1` is not a LayoutControls setting; use False, True, All, or a list of \"LeftSidebar\", \"RightSidebar\", and \"Fullscreen\".";
+PacletPageFiles::darkmode = "`1` is not a DarkMode setting; use Automatic, True or False.";
+PacletPageFiles::symbolindex = "`1` is not a SymbolIndex setting; use Automatic, True or False.";
 
 PacletPageFiles[catalog_, opts : OptionsPattern[]] /; ! catalogQ[catalog] := (Message[PacletPageFiles::catalog, catalog]; $Failed);
 
 PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
-    {catalog, title, subtitle, accent, home, mail, controls, prefix, notebooks, routes, kind, page, shellConfig, pageConfig, css},
+    {catalog, title, subtitle, accent, home, mail, controls, theme, index, prefix, notebooks, routes, kind, page, shellConfig, pageConfig, css},
     (* the definition notebook is a page of the site unless "DefinitionPage" -> False *)
     catalog = If[ TrueQ[OptionValue["DefinitionPage"]], site, MapAt[KeySelect[! StringStartsQ[#, "resource/"] &], site, Key["Pages"]]];
     title = Replace[OptionValue["Title"], Automatic -> catalog["Title"]];
@@ -296,6 +331,10 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
     If[! StringQ[mail], Message[PacletPageFiles::email, OptionValue["FeedbackEmail"]]; Return[$Failed, Module]];
     controls = normalizeLayoutControls[OptionValue["LayoutControls"]];
     If[controls === $Failed, Message[PacletPageFiles::layoutcontrols, OptionValue["LayoutControls"]]; Return[$Failed, Module]];
+    theme = siteTheme[OptionValue["DarkMode"]];
+    If[theme === $Failed, Message[PacletPageFiles::darkmode, OptionValue["DarkMode"]]; Return[$Failed, Module]];
+    index = siteSymbolIndex[OptionValue["SymbolIndex"]];
+    If[index === $Failed, Message[PacletPageFiles::symbolindex, OptionValue["SymbolIndex"]]; Return[$Failed, Module]];
     kind = Switch[catalog["Kind"], "Cloud", "cloud", "Local", "local", _, "repository"];
     prefix = Switch[kind, "cloud", catalog["DocBase"], "local", "", _, notebookPrefix[catalog]];
     notebooks = If[kind === "local", <||>, notebookNames[catalog, prefix]];
@@ -323,7 +362,8 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
         "routes" -> routes,
         "hide" -> If[kind === "local", $localChromeCSS, $stockChromeCSS],
         "prefetch" -> If[kind =!= "local" && KeyExistsQ[catalog["Pages"], catalog["RootGuide"]], catalog["Pages"][catalog["RootGuide"]]["Notebook"], ""],
-        "filter" -> TrueQ[OptionValue["Filter"]]
+        "filter" -> TrueQ[OptionValue["Filter"]],
+        "theme" -> theme
     |>;
     pageConfig = <|
         "title" -> title,
@@ -340,15 +380,19 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
         "routes" -> routes,
         "hide" -> $stockChromeCSS,
         "mail" -> mail,
-        "thanks" -> Replace[OptionValue["FeedbackThanks"], Except[_String] -> ""]
+        "thanks" -> Replace[OptionValue["FeedbackThanks"], Except[_String] -> ""],
+        "theme" -> theme
     |>;
-    (* the stylesheet's first rule holds its colors *)
+    (* the stylesheet's first rule holds the colors made from the accent, for the light theme and
+       the dark one *)
     css = StringReplace[readAsset["site.css"], RegularExpression["^:root \\{[^}]*\\}"] ->
         ":root { --pp-accent: " <> accent <> "; --pp-active-bg: " <> cssTintHex[accent, 0.92] <>
-        "; --pp-active-fg: " <> accent <> "; }", 1];
+        "; --pp-active-fg: " <> accent <> "; --pp-dark-active-bg: " <> cssMixHex[accent, "#1e2023", 0.78] <>
+        "; --pp-dark-active-fg: " <> cssMixHex[accent, "#ffffff", 0.35] <> "; }", 1];
     <|
         "index.html" -> fillTemplate[readAsset["site.html"], <|
             "title" -> esc[title],
+            "head" -> themeHeadScript[theme],
             (* the parts of the shell a switch leaves out, hidden by the stylesheet *)
             "bodyClass" -> StringRiffle[Join[
                 Pick[{"no-filter", "no-symbols", "no-resource-link"}, ! TrueQ[OptionValue[#]] & /@ {"Filter", "SymbolsRail", "ResourceLink"}],
@@ -370,6 +414,8 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
                 "StripTitleNumbers" -> TrueQ[OptionValue["StripTitleNumbers"]],
                 "SymbolsRail" -> TrueQ[OptionValue["SymbolsRail"]],
                 "LayoutControls" -> controls,
+                "Theme" -> theme,
+                "SymbolIndex" -> index,
                 "Footer" -> TrueQ[OptionValue["Footer"]],
                 "PacletPageVersion" -> $pacletPageVersion,
                 "Filter" -> "",
@@ -381,6 +427,7 @@ PacletPageFiles[site_?catalogQ, opts : OptionsPattern[]] := Module[
         |>],
         "page.html" -> fillTemplate[readAsset["page.html"], <|
             "title" -> esc[title],
+            "head" -> themeHeadScript[theme],
             "accent" -> accent,
             "config" -> toJSON[pageConfig]
         |>]

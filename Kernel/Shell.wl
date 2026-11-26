@@ -35,15 +35,15 @@ xmlToHTML[XMLElement[tag_String, attrs_List, children_List]] := With[
 
 (* Parse #rgb or #rrggbb and compute the 92% lighter active-background tint in pure arithmetic,
    avoiding ColorConvert/Lighter so kernels without those functions compute it directly. *)
-cssTintHex[hex_String, frac_ : 0.92] := Module[{digits, pairs, rgb},
-    digits = StringDrop[hex, 1];
-    pairs = If[StringLength[digits] === 3,
-        StringJoin[#, #] & /@ Characters[digits],
-        StringPartition[digits, 2]
-    ];
-    rgb = FromDigits[#, 16] & /@ pairs;
-    "#" <> StringJoin[IntegerString[Round[# * (1 - frac) + 255 * frac], 16, 2] & /@ rgb]
+cssTintHex[hex_String, frac_ : 0.92] := cssMixHex[hex, "#ffffff", frac];
+
+(* the color frac of the way from hex to toward, both #rgb or #rrggbb: the dark theme's active
+   colors mix the accent with its rail and with white *)
+cssHexRGB[hex_String] := With[{digits = StringDrop[hex, 1]},
+    FromDigits[#, 16] & /@ If[StringLength[digits] === 3, StringJoin[#, #] & /@ Characters[digits], StringPartition[digits, 2]]
 ];
+cssMixHex[hex_String, toward_String, frac_] :=
+    "#" <> StringJoin[IntegerString[Round[#1 * (1 - frac) + #2 * frac], 16, 2] & @@@ Transpose[{cssHexRGB[hex], cssHexRGB[toward]}]];
 
 $layoutControlNames = {"LeftSidebar", "RightSidebar", "Fullscreen"};
 
@@ -124,6 +124,24 @@ layoutControlsXML[controls_List, hasLeft_, hasSymbols_, mode_String, standalone_
         If[mode === "Expression", {"data-pp-layout-controls" -> StringRiffle[$layoutControlSpecs[#]["Kind"] & /@ active, ","]}, {}]
     ], layoutButtonXML[$layoutControlSpecs[#], mode] & /@ active]
 ];
+
+(* The header's switch between the light theme and the dark one: a moon while the site is light, a
+   sun while it is dark; the stylesheet shows the one for the theme the page has, and the shell's
+   script keeps aria-pressed. None for a site with "DarkMode" -> False. *)
+themeButtonXML["off"] := Nothing;
+themeButtonXML[_] := XMLElement["button", {
+    "id" -> "themeToggle", "class" -> "pp-theme-btn", "type" -> "button",
+    "aria-label" -> "Dark mode", "title" -> "Dark mode", "aria-pressed" -> "false"
+}, {
+    XMLElement["svg", {"class" -> "pp-moon", "aria-hidden" -> "true", "viewBox" -> "0 0 20 20", "fill" -> "none", "stroke" -> "currentColor",
+        "stroke-width" -> "1.5", "stroke-linecap" -> "round", "stroke-linejoin" -> "round"},
+        {XMLElement["path", {"d" -> "M16 12.5A6.5 6.5 0 0 1 7.5 4a6.5 6.5 0 1 0 8.5 8.5z"}, {}]}],
+    XMLElement["svg", {"class" -> "pp-sun", "aria-hidden" -> "true", "viewBox" -> "0 0 20 20", "fill" -> "none", "stroke" -> "currentColor",
+        "stroke-width" -> "1.5", "stroke-linecap" -> "round", "stroke-linejoin" -> "round"}, {
+        XMLElement["circle", {"cx" -> "10", "cy" -> "10", "r" -> "3.5"}, {}],
+        XMLElement["path", {"d" -> "M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M4.3 15.7l1.4-1.4M14.3 5.7l1.4-1.4"}, {}]
+    }]
+}];
 
 fullExitXML[controls_List, mode_String] := If[ MemberQ[controls, "Fullscreen"],
     XMLElement["button", Join[
@@ -458,12 +476,20 @@ symbolsRailXML[catalog_Association, cfg_Association] := Module[
     }, Nothing]
 ];
 
-(* HTML-only right rail with A-Z symbol index for paclets with > 24 symbols. Streams the first
-   letter and up to 45 links before the guide tree and places the remaining links in an inert
-   <template id="symbol-rest">; Expression mode (PacletPage[...]) uses symbolsRailXML directly so
-   no <script>/<select>/<option>/<template>/<noscript> tags enter Studio's $trustedPacletTags. *)
+(* HTML-only right rail with an A-Z symbol index for paclets with > 24 symbols, unless
+   "SymbolIndex" -> False. The index starts on with "SymbolIndex" -> True and off with Automatic,
+   and the button in the rail's heading switches it, remembered for the reader. Started on, the rail
+   streams the first letter and up to 45 links before the guide tree and places the remaining links
+   in an inert <template id="symbol-rest">; started off, it lists every link. Expression mode
+   (PacletPage[...]) uses symbolsRailXML directly so no <script>/<select>/<option>/<template>/
+   <noscript> tags enter Studio's $trustedPacletTags. The inline script applies the reader's choice
+   before the rail paints, and keeps a letter chosen before the shell's script runs. *)
 $symbolRailPreScript = StringJoin[
     "(function (rail) {",
+    "if (rail.classList.contains('indexable')) {",
+    "var choice = null; try { choice = localStorage.getItem('pp-symbol-index:' + location.pathname); } catch (e) {}",
+    "if (choice === 'on' || choice === 'off') rail.classList.toggle('indexed', choice === 'on');",
+    "}",
     "if (!rail.classList.contains('indexed')) return;",
     "function choose(value) { rail.dataset.pendingLetter = value; delete rail.dataset.extraBatches; }",
     "rail.onclick = function (event) {",
@@ -476,14 +502,16 @@ $symbolRailPreScript = StringJoin[
 
 htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
     {pages = catalog["Pages"], enabled = TrueQ[Lookup[cfg, "SymbolsRail", True]],
+        setting = Lookup[cfg, "SymbolIndex", Automatic],
         resource = Replace[Lookup[cfg, "Resource", ""], Except[_String] -> ""],
-        ids, indexed, letters, buckets, initial, group, batch, batchSize = 45,
+        ids, indexable, indexed, letters, buckets, initial, group, batch, batchSize = 45,
         positions, label, remaining, count, initialOf, rowXML, rowsXML, buttonXML, optionXML,
-        symbolCountText, moreText, ulEl, remainingEl, letterButtons, letterOptions, railEl},
+        symbolCountText, moreText, ulEl, remainingEl, letterButtons, letterOptions, railEl, railClass},
     ids = SortBy[Select[Keys[pages], StringStartsQ[#, "ref/"] &], symbolKey[pages[#]] &];
-    indexed = enabled && Length[ids] > 24;
+    indexable = enabled && setting =!= False && Length[ids] > 24;
+    indexed = indexable && TrueQ[setting];
     initialOf[id_String] := Replace[ToUpperCase[StringTake[StringDrop[id, 4], UpTo[1]]], "" -> "#"];
-    buckets = If[indexed, GroupBy[ids, initialOf], <||>];
+    buckets = If[indexable, GroupBy[ids, initialOf], <||>];
     letters = Join[
         CharacterRange["A", "Z"],
         Select[Keys[buckets], ! StringMatchQ[#, RegularExpression["[A-Z]"] | "$"] &],
@@ -494,11 +522,11 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
     batch = Which[indexed, Take[group, UpTo[batchSize]], enabled, ids, True, {}];
     positions = If[indexed, KeyTake[AssociationThread[ids -> Range[0, Length[ids] - 1]], batch], <||>];
     remaining = Which[indexed, Select[ids, ! KeyExistsQ[positions, #] &], enabled, {}, True, ids];
-    label = If[indexed, "All " <> initial <> " names", ""];
+    label = If[indexable, "All " <> initial <> " names", ""];
     count[number_Integer] := StringReplace[IntegerString[number], RegularExpression["(?<=\\d)(?=(?:\\d{3})+$)"] -> ","];
     rowXML[id_String] := XMLElement["li", DeleteCases[{
         If[KeyExistsQ[positions, id], "data-position" -> IntegerString[positions[id]], Nothing],
-        If[indexed && ! StringStartsQ[id, "ref/" ~~ RegularExpression["[a-zA-Z$]"]], "data-letter" -> initialOf[id], Nothing]
+        If[indexable && ! StringStartsQ[id, "ref/" ~~ RegularExpression["[a-zA-Z$]"]], "data-letter" -> initialOf[id], Nothing]
     }, Nothing], {navLinkXML[id, pages[id], "sym", cfg]}];
     rowsXML[names_List] := rowXML /@ names;
     buttonXML[letter_String] := XMLElement["button", DeleteCases[{
@@ -509,23 +537,29 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
         If[KeyExistsQ[buckets, letter], Nothing, "disabled" -> True]
     }, Nothing], {letter}];
     optionXML[letter_String] := XMLElement["option", {"value" -> letter}, {letter}];
-    symbolCountText = If[indexed, initial <> " \:00b7 " <> count[Length[group]] <> If[Length[group] === 1, " symbol", " symbols"], ""];
-    moreText = If[Length[group] > batchSize, "Show " <> IntegerString[Min[batchSize, Length[group] - batchSize]] <> " more", ""];
+    symbolCountText = If[indexable, initial <> " \:00b7 " <> count[Length[group]] <> If[Length[group] === 1, " symbol", " symbols"], ""];
+    moreText = If[indexable && Length[group] > batchSize, "Show " <> IntegerString[Min[batchSize, Length[group] - batchSize]] <> " more", ""];
     ulEl = XMLElement["ul", {"class" -> "nav-symbols"}, rowsXML[batch]];
     remainingEl = If[remaining === {}, Nothing, XMLElement["template", {"id" -> "symbol-rest"}, rowsXML[remaining]]];
-    letterButtons = If[indexed, buttonXML /@ letters, {}];
+    letterButtons = If[indexable, buttonXML /@ letters, {}];
     letterOptions = optionXML /@ Select[letters, KeyExistsQ[buckets, #] &];
+    railClass = StringRiffle[Join[If[indexable, {"indexable"}, {}], If[indexed, {"indexed"}, {}]], " "];
     railEl = XMLElement["nav", DeleteCases[{
         "id" -> "side-right",
-        If[indexed, "class" -> "indexed", Nothing],
+        If[railClass =!= "", "class" -> railClass, Nothing],
         "data-batch-size" -> IntegerString[batchSize],
         "aria-label" -> "Symbols"
     }, Nothing], {
         XMLElement["script", {}, {$symbolRailPreScript}],
-        XMLElement["div", DeleteCases[{"class" -> "symbol-index", If[indexed, Nothing, "hidden" -> True]}, Nothing], {
+        XMLElement["div", DeleteCases[{"class" -> "symbol-index", If[indexable, Nothing, "hidden" -> True]}, Nothing], {
             XMLElement["div", {"class" -> "symbol-heading"}, {
-                XMLElement["h2", {}, {"Symbol index"}],
-                XMLElement["span", {"class" -> "symbol-total"}, {count[Length[ids]]}]
+                XMLElement["h2", {}, {"Symbols"}],
+                XMLElement["span", {"class" -> "symbol-total"}, {count[Length[ids]]}],
+                XMLElement["button", {
+                    "type" -> "button", "class" -> "symbol-index-toggle",
+                    "aria-pressed" -> If[indexed, "true", "false"],
+                    "aria-label" -> "Index by first letter", "title" -> "Index by first letter"
+                }, {"A\:2013Z"}]
             }],
             XMLElement["div", {"class" -> "symbol-browse"}, {
                 XMLElement["div", {"class" -> "symbol-letters", "role" -> "group", "aria-label" -> "First letter"}, letterButtons],
@@ -535,7 +569,7 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
                         XMLElement["select", {"id" -> "symbol-first-letter"}, letterOptions]
                     }]
                 }],
-                XMLElement["div", DeleteCases[{"class" -> "symbol-prefix", If[Length[group] > batchSize, Nothing, "hidden" -> True]}, Nothing], {
+                XMLElement["div", DeleteCases[{"class" -> "symbol-prefix", If[indexed && Length[group] > batchSize, Nothing, "hidden" -> True]}, Nothing], {
                     XMLElement["label", {"for" -> "symbol-prefix"}, {"Symbol group"}],
                     XMLElement["div", {"class" -> "symbol-select"}, {
                         XMLElement["select", {"id" -> "symbol-prefix"}, {
@@ -553,7 +587,7 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
             XMLElement["button", DeleteCases[{
                 "class" -> "symbol-more",
                 "type" -> "button",
-                If[Length[group] > batchSize, Nothing, "hidden" -> True]
+                If[indexed && Length[group] > batchSize, Nothing, "hidden" -> True]
             }, Nothing], If[moreText === "", {}, {moreText}]]
         }]
     }];
@@ -561,18 +595,18 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
         "Rail" -> railEl,
         "Remaining" -> remainingEl,
         "Slots" -> <|
-            "railClass" -> If[indexed, "indexed", ""],
+            "railClass" -> railClass,
             "batchSize" -> IntegerString[batchSize],
-            "indexHidden" -> If[indexed, "", "hidden"],
+            "indexHidden" -> If[indexable, "", "hidden"],
             "symbolTotal" -> count[Length[ids]],
             "letterButtons" -> xmlToHTML[letterButtons],
             "letterOptions" -> xmlToHTML[letterOptions],
-            "prefixHidden" -> If[Length[group] > batchSize, "", "hidden"],
+            "prefixHidden" -> If[indexed && Length[group] > batchSize, "", "hidden"],
             "initialOption" -> "<option value=\"\">" <> esc[label] <> "</option>",
             "initialGroup" -> esc[label],
             "symbolCount" -> esc[symbolCountText],
             "symbols" -> xmlToHTML[ulEl],
-            "moreHidden" -> If[Length[group] > batchSize, "", "hidden"],
+            "moreHidden" -> If[indexed && Length[group] > batchSize, "", "hidden"],
             "moreText" -> moreText,
             "remainingSymbols" -> xmlToHTML[remainingEl]
         |>
@@ -609,6 +643,7 @@ headerXML[catalog_Association, cfg_Association, layoutEl_] := Module[
             filterInputXML["", "HTML"],
             XMLElement["button", {"id" -> "symToggle", "type" -> "button", "aria-label" -> "Symbols", "aria-controls" -> "side-right", "aria-expanded" -> "false"}, {"\:22ee"}],
             layoutEl,
+            themeButtonXML[Lookup[cfg, "Theme", "off"]],
             resourceLinkXML[Lookup[cfg, "Resource", ""], Lookup[cfg, "ResourceLabel", "Resource page"], "HTML"]
         }, Nothing]],
         (* Expression mode *)

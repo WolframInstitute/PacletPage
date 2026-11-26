@@ -41,7 +41,9 @@ RelatedTutorials: [PublishingADocumentationSite]
 | `"ResourceLink"` | `True` | whether the header links to the page shown, opened on its own |
 | `"VersionLabel"` | `False` | the label under the site's name: a string, or `True` for the paclet's version |
 | `"Footer"` | `False` | whether a footer names the PacletPage the site was made with |
-| `"LayoutControls"` | `False` | whether the header includes buttons to toggle the left sidebar, right sidebar, and fullscreen view |
+| `"LayoutControls"` | `True` | whether the header includes buttons to toggle the left sidebar, right sidebar, and fullscreen view |
+| `"DarkMode"` | `Automatic` | the site's theme: `Automatic` follows the reader's system setting, `True` starts dark, `False` keeps it light; with either of the first two the header has a switch |
+| `"SymbolIndex"` | `Automatic` | the A-Z index of a symbols rail of more than 24 symbols: off until the reader turns it on (`Automatic`), on from the start (`True`), or none (`False`) |
 | `"Monitor"` | `False` | whether to print how many pages render and how many come from the cache |
 
 ## Basic Examples

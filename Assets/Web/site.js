@@ -20,9 +20,19 @@
   var symbolLinks = rest ? Array.from(rest.content.querySelectorAll('a[data-id]')) : painted;
   if (rest) {
     painted.forEach(function (link) { symbolLinks.splice(Number(link.parentNode.dataset.position), 0, link); });
-    if (!sideRight.classList.contains('indexed')) sideRight.querySelector('.nav-symbols').appendChild(rest.content);
     rest.remove();
   }
+  // Without the A-Z index, on or switched off, the rail lists every symbol in the catalog's order.
+  function listAllSymbols() {
+    var list = sideRight && sideRight.querySelector('.nav-symbols');
+    if (!list) return;
+    list.replaceChildren.apply(list, symbolLinks.map(function (link) {
+      var row = link.parentNode;
+      row.style.display = '';
+      return row;
+    }));
+  }
+  if (sideRight && !sideRight.classList.contains('indexed')) listAllSymbols();
   // Match keyboard and reading order to the finished three-column layout.
   if (sideRight) sideRight.parentNode.appendChild(sideRight);
 
@@ -161,7 +171,7 @@
     if (cur) { cur.classList.remove('active'); cur.removeAttribute('aria-current'); }
     cur = a;
     if (!a) return;
-    if (symbolIndex && a.classList.contains('sym')) {
+    if (symbolIndex && symbolIndex.active() && a.classList.contains('sym')) {
       if (qBox && qBox.value.trim() && !matches(a, qBox.value.trim().toLowerCase())) {
         qBox.value = ''; runFilter();
       }
@@ -267,20 +277,25 @@
       }
     } catch (e) {}
     if (!hostPageQ()) { injectHide(); hookFrame(); watchFrame(); }
+    syncTheme();
   });
 
   // ---- alphabetical symbol index ------------------------------------------------------------
   // Index the links the shell already knows. Only the current batch occupies the scroll pane;
   // the same links retain their keywords, notebook paths and identities while off screen.
+  // The button in the rail's heading switches the index on and off; the choice is kept per site,
+  // as the rails' widths are, and the inline script in the rail applies it before the first paint.
   function makeSymbolIndex(rail) {
-    if (!rail || !rail.classList.contains('indexed')) return null;
+    if (!rail || !rail.classList.contains('indexable')) return null;
     var list = rail.querySelector('.nav-symbols'), batchSize = Number(rail.dataset.batchSize);
     var tools = rail.querySelector('.symbol-index'), browse = tools.querySelector('.symbol-browse'),
         buttons = tools.querySelector('.symbol-letters'), letterPicker = tools.querySelector('.symbol-letter-picker select'),
         prefixLabel = tools.querySelector('.symbol-prefix'), prefixPicker = prefixLabel.querySelector('select'),
         selection = prefixLabel.querySelector('.symbol-selection'),
         count = tools.querySelector('.symbol-count'), more = rail.querySelector('.symbol-more'),
-        scroll = rail.querySelector('.symbol-scroll'), byLetter = new Map(), byLink = new Map(), prefixCache = new Map();
+        scroll = rail.querySelector('.symbol-scroll'), byLetter = new Map(), byLink = new Map(), prefixCache = new Map(),
+        toggle = tools.querySelector('.symbol-index-toggle'), on = rail.classList.contains('indexed'),
+        CHOICE = 'pp-symbol-index:' + location.pathname;
     var entries = symbolLinks.map(function (link) {
       var row = link.parentNode, name = link.getAttribute('data-id').slice(4),
           initial = row.dataset.letter || (Array.from(name)[0] || '#').toUpperCase(),
@@ -423,12 +438,39 @@
         }
       }
     }
+    // Off, the list holds every symbol and the filter works on it as on any rail; on, the index
+    // shows a letter, or the filter's matches.
+    function setOn(value) {
+      on = value;
+      rail.classList.toggle('indexed', on);
+      toggle.setAttribute('aria-pressed', String(on));
+      term = ''; browse.hidden = false;
+      if (on) {
+        entries.forEach(function (entry) { entry.row.style.display = ''; });
+        jump(letter || letterPicker.value);
+      } else {
+        visible = []; shown = 0; more.hidden = true;
+        listAllSymbols();
+      }
+    }
+    toggle.addEventListener('click', function () {
+      setOn(!on);
+      try { localStorage.setItem(CHOICE, on ? 'on' : 'off'); } catch (e) {}
+      if (qBox) runFilter();
+      if (cur && cur.classList.contains('sym')) {
+        if (on) reveal(cur);
+        cur.scrollIntoView({ block: 'nearest' });
+      }
+    });
     rail.onclick = rail.onchange = null;
-    jump(rail.dataset.pendingLetter || letterPicker.value);
-    if (rail.dataset.extraBatches) appendUntil(shown + Number(rail.dataset.extraBatches) * batchSize);
+    toggle.setAttribute('aria-pressed', String(on));
+    if (on) {
+      jump(rail.dataset.pendingLetter || letterPicker.value);
+      if (rail.dataset.extraBatches) appendUntil(shown + Number(rail.dataset.extraBatches) * batchSize);
+    }
     delete rail.dataset.pendingLetter;
     delete rail.dataset.extraBatches;
-    return { filter: filter, reveal: reveal };
+    return { filter: filter, reveal: reveal, active: function () { return on; } };
   }
 
   // ---- filter --------------------------------------------------------------------------------
@@ -505,7 +547,7 @@
       for (var i = 0; i < ds.length; i++) openState.set(ds[i], ds[i].open);
     }
     filterRail(side, term);
-    if (symbolIndex) symbolIndex.filter(term);
+    if (symbolIndex && symbolIndex.active()) symbolIndex.filter(term);
     else filterRail(sideRight, term);
     if (!term) openState = null;
   }
@@ -634,6 +676,49 @@
       closeDrawers();
     }
   });
+
+  // ---- theme -----------------------------------------------------------------------------------
+  // The header's switch keeps the reader's choice for every site on the cloud (one origin, one
+  // localStorage); the head script applies it to the shell, and the shell passes it to the page in
+  // the frame: the host page follows it itself, and a page framed as published gets the dark
+  // treatment injected, its content inverted and its pictures restored.
+  var themeBtn = document.getElementById('themeToggle');
+  function themeIsDark() { return document.documentElement.getAttribute('data-theme') === 'dark'; }
+  function syncTheme() {
+    var dark = themeIsDark();
+    if (themeBtn) themeBtn.setAttribute('aria-pressed', String(dark));
+    try {
+      var d = frame.contentDocument, root = d && d.documentElement;
+      if (!root) return;
+      if (root.hasAttribute('data-theme-default')) {
+        root.setAttribute('data-theme', dark ? 'dark' : 'light');
+      } else if (d.head && themeBtn) {
+        if (!d.getElementById('pp-dark')) {
+          var s = d.createElement('style');
+          s.id = 'pp-dark';
+          s.textContent = 'html[data-pp-dark]{background:#141516}html[data-pp-dark] body{filter:invert(.92) hue-rotate(180deg)}' +
+            'html[data-pp-dark] body img,html[data-pp-dark] body video,html[data-pp-dark] body canvas,html[data-pp-dark] body picture{filter:invert(1) hue-rotate(180deg)}';
+          d.head.appendChild(s);
+        }
+        root.toggleAttribute('data-pp-dark', dark);
+      }
+    } catch (e) {}
+  }
+  if (themeBtn) {
+    themeBtn.addEventListener('click', function () {
+      var next = themeIsDark() ? 'light' : 'dark', kept = false;
+      try { localStorage.setItem('pp-theme', next); kept = true; } catch (e) {}
+      if (kept && window.ppApplyTheme) window.ppApplyTheme();
+      else document.documentElement.setAttribute('data-theme', next);
+      syncTheme();
+    });
+    window.addEventListener('storage', function (e) { if (e.key === 'pp-theme') syncTheme(); });
+    if (window.matchMedia) {
+      var themeQuery = matchMedia('(prefers-color-scheme: dark)');
+      if (themeQuery.addEventListener) themeQuery.addEventListener('change', syncTheme);
+    }
+    syncTheme();
+  }
 
   // ---- rail splitters --------------------------------------------------------------------------
   // Drag a divider to rebalance the columns, double-click to restore it. The widths are kept per

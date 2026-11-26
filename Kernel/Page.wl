@@ -20,7 +20,7 @@ Options[PacletPage] = {
     "VersionLabel" -> Automatic,
     "RootGuide" -> Automatic,
     "ResourceLink" -> Automatic,
-    "LayoutControls" -> False,
+    "LayoutControls" -> True,
     "ViewSource" -> True,
     "View" -> "Built",
     "Source" -> Automatic,

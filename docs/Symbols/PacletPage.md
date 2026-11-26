@@ -38,7 +38,7 @@ RelatedGuides: [PacletPage]
 | `"VersionLabel"` | `Automatic` | the version tag under the title: `Automatic` or `True` for the paclet's version, a string for a custom label, or `False` to omit it |
 | `"RootGuide"` | `Automatic` | the guide id or name used as the home page and root of the guide tree, or `False` to omit the root guide link above its children |
 | `"ResourceLink"` | `Automatic` | header link to the published resource page: `Automatic` uses the catalog's resource or paclet URL when present, a URL string sets it directly, `False` omits it |
-| `"LayoutControls"` | `False` | whether to include toggle buttons for showing/hiding the left sidebar, showing/hiding the right sidebar, and toggling a fullscreen view of the center notebook frame; accepts `False`, `True`, `All`, or a list of `"LeftSidebar"`, `"RightSidebar"`, and `"Fullscreen"` |
+| `"LayoutControls"` | `True` | whether to include toggle buttons for showing/hiding the left sidebar, showing/hiding the right sidebar, and toggling a fullscreen view of the center notebook frame; accepts `False`, `True`, `All`, or a list of `"LeftSidebar"`, `"RightSidebar"`, and `"Fullscreen"` |
 | `"ViewSource"` | `True` | whether the page tools bar includes the View source / View built page toggle |
 | `"View"` | `"Built"` | `"Built"` for the built documentation notebook, or `"Source"` for the page's authoring source (authoring notebook, `docs/` markdown, or raw notebook source) |
 | `"Source"` | `Automatic` | optional directory of authoring `.nb` or `.md` files for `"View" -> "Source"` |
@@ -65,9 +65,9 @@ A symbol's page, addressed directly by its `paclet:` URI:
 PacletPage["paclet:WolframInstitute/PacletPage/ref/PacletPage"]
 ```
 
-Include optional sidebar and fullscreen layout controls:
+Leave out the sidebar and fullscreen layout controls, which the shell includes by default:
 
 ```wl
 #| eval: false
-PacletPage["WolframInstitute/PacletPage", "LayoutControls" -> True]
+PacletPage["WolframInstitute/PacletPage", "LayoutControls" -> False]
 ```

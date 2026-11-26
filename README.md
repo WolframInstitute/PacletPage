@@ -58,12 +58,13 @@ Declare the libraries in the consumer's `PacletInfo.wl` `"Dependencies"`, an opt
   definition notebook, the guides and the tutorials in the left rail, the symbols in the right, and
   each page painted at once from the cloud's static render, then made live. Every page has its own
   address, Back and Forward step through the pages read, links to the paclet's own pages stay in
-  the site, and any other link opens in a new tab. Large symbol lists show the A–Z index and the
-  first letter’s links (up to 45) as the page loads. In crowded letters, each family shows its
-  first symbol and its size, such as `AdjointOperator… (2)`.
-  The header filter searches the whole catalog from any letter.
-  A label under the site's name can show the
-  paclet's version, and a footer the PacletPage the site was made with.
+  the site, and any other link opens in a new tab. A large symbol list offers an A–Z index behind a
+  button in its heading, which a site can start on; on, it shows the first letter’s links (up to 45)
+  as the page loads, and in crowded letters each family shows its first symbol and its size, such as
+  `AdjointOperator… (2)`. The header filter searches the whole catalog from any letter.
+  A dark theme follows the reader's system setting, with a switch in the header, and buttons hide
+  either rail or show the page alone. A label under the site's name can show the paclet's version,
+  and a footer the PacletPage the site was made with.
 - Feedback on every page: text in any language and attachments, kept in a Databin of the
   publishing account and confirmed to the reader once stored, with an email fallback. The team
   reads and triages it, each entry with a status, set one at a time or many in one write, on pages

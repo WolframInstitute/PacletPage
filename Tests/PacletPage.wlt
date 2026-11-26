@@ -267,7 +267,7 @@ VerificationTest[
         names = Join[{"0Before", "$Last", "\[Beta]Symbol"}, "Apple" <> IntegerString[#, 10, 2] & /@ Range[47]];
         catalog = <|"Pages" -> AssociationMap[Function[id, With[{name = StringDrop[id, 4]},
             fixturePage["ref", name, name, id <> ".nb"]]], "ref/" <> # & /@ names]|>;
-        slots = symbolRailSlots[catalog, <||>, True];
+        slots = symbolRailSlots[catalog, <||>, True, True];
         ids = StringCases[slots["symbols"] <> slots["remainingSymbols"], "data-id=\"" ~~ id : Except["\""] .. ~~ "\"" :> id];
         {
             slots["symbolCount"], slots["moreText"], slots["prefixHidden"], slots["initialGroup"],
@@ -286,7 +286,7 @@ VerificationTest[
             fixturePage["ref", name, name, id <> ".nb"]]], "ref/" <> # & /@ names];
         catalog = <|"Name" -> "Pub/Big", "Title" -> "Big", "Kind" -> "Local",
             "Resource" -> "", "DocBase" -> "Documentation/", "RootGuide" -> None, "Pages" -> pages|>;
-        html = PacletPageFiles[catalog, "LayoutControls" -> True]["index.html"];
+        html = PacletPageFiles[catalog, "LayoutControls" -> True, "SymbolIndex" -> True]["index.html"];
         expr = shellXML[catalog, <|
             "Mode" -> "Expression", "Name" -> "Pub/Big", "Prefix" -> "pp-", "Title" -> "Big",
             "Subtitle" -> "", "Resource" -> "", "HomeID" -> None, "ShowRootGuide" -> True,
@@ -296,7 +296,7 @@ VerificationTest[
         |>];
         forbidden = Cases[expr, XMLElement["script" | "select" | "option" | "template" | "noscript", _, _], Infinity];
         {
-            StringContainsQ[html, "id=\"side-right\" class=\"indexed\""],
+            StringContainsQ[html, "id=\"side-right\" class=\"indexable indexed\""],
             StringContainsQ[html, "<template id=\"symbol-rest\">"],
             StringContainsQ[html, "id=\"toggleSideR\""],
             StringContainsQ[html, "id=\"splitR\""],
@@ -443,8 +443,8 @@ VerificationTest[
 
 VerificationTest[
     With[{
-        def = PacletPageFiles[cloudCatalog]["index.html"],
-        all = PacletPageFiles[cloudCatalog, "LayoutControls" -> True]["index.html"],
+        def = PacletPageFiles[cloudCatalog, "LayoutControls" -> False]["index.html"],
+        all = PacletPageFiles[cloudCatalog]["index.html"],
         noSym = PacletPageFiles[cloudCatalog, "LayoutControls" -> True, "SymbolsRail" -> False]["index.html"],
         subset = PacletPageFiles[cloudCatalog, "LayoutControls" -> {"LeftSidebar", "Fullscreen"}]["index.html"],
         leftOnly = PacletPageFiles[cloudCatalog, "LayoutControls" -> {"LeftSidebar"}]["index.html"]
@@ -459,7 +459,83 @@ VerificationTest[
         }
     ],
     {True, True, {True, True, True}, {True, True, True, True}, {True, True, True, True}},
-    TestID -> "Site: \"LayoutControls\" adds optional left/right sidebar and fullscreen buttons, off by default"
+    TestID -> "Site: \"LayoutControls\" adds left/right sidebar and fullscreen buttons, on by default, and False leaves them out"
+]
+
+VerificationTest[
+    With[{
+        auto = PacletPageFiles[cloudCatalog],
+        dark = PacletPageFiles[cloudCatalog, "DarkMode" -> True],
+        off = PacletPageFiles[cloudCatalog, "DarkMode" -> False]
+    },
+        {
+            StringContainsQ[auto["index.html"], "id=\"themeToggle\""],
+            StringContainsQ[auto["index.html"], "fallback = 'auto'"] && StringContainsQ[auto["page.html"], "fallback = 'auto'"],
+            StringContainsQ[dark["index.html"], "fallback = 'dark'"] && StringContainsQ[dark["page.html"], "fallback = 'dark'"],
+            StringFreeQ[off["index.html"], {"id=\"themeToggle\"", "ppApplyTheme"}] && StringFreeQ[off["page.html"], "ppApplyTheme"],
+            (* the head script runs before the stylesheet, so the first paint has the theme *)
+            Less @@ (First[First[StringPosition[auto["index.html"], #]]] & /@ {"ppApplyTheme", "<style>"}),
+            StringContainsQ[auto["index.html"], "--pp-dark-active-bg: #481d1b; --pp-dark-active-fg: #e96459;"],
+            StringContainsQ[auto["page.html"], "html[data-theme=\"dark\"] #notebook-embed"],
+            StringFreeQ[auto["index.html"] <> auto["page.html"], "`head`"]
+        }
+    ],
+    {True, True, True, True, True, True, True, True},
+    TestID -> "Site: \"DarkMode\" follows the system by default with a switch in the header, True starts dark, False keeps the site light"
+]
+
+VerificationTest[
+    PacletPageFiles[cloudCatalog, "DarkMode" -> "Dim"],
+    $Failed,
+    {PacletPageFiles::darkmode},
+    TestID -> "Site: an invalid \"DarkMode\" value reports a message and fails"
+]
+
+VerificationTest[
+    {cssMixHex["#dd1100", "#1e2023", 0.78], cssMixHex["#dd1100", "#ffffff", 0.35], cssTintHex["#dd1100", 0.92], cssMixHex["#abc", "#000", 0]},
+    {"#481d1b", "#e96459", "#fceceb", "#aabbcc"},
+    TestID -> "Site: the dark theme's active colors mix the accent with its rail and with white"
+]
+
+VerificationTest[
+    Module[{pages, catalog, small, html, rail},
+        pages = AssociationMap[Function[id, With[{name = StringDrop[id, 4]}, fixturePage["ref", name, name, id <> ".nb"]]],
+            "ref/" <> # & /@ Join[{"Zebra"}, "Apple" <> IntegerString[#, 10, 2] & /@ Range[30]]];
+        catalog = <|"Name" -> "Pub/Big", "Title" -> "Big", "Kind" -> "Local", "Resource" -> "", "DocBase" -> "Documentation/",
+            "RootGuide" -> None, "Pages" -> pages|>;
+        small = MapAt[Take[#, 24] &, catalog, Key["Pages"]];
+        html = Function[{c, opts}, PacletPageFiles[c, Sequence @@ opts]["index.html"]];
+        rail = Function[h, First[StringCases[h, "<nav id=\"side-right\"" ~~ Shortest[attrs___] ~~ ">" :> attrs], ""]];
+        {
+            (* Automatic: the index there and off, every symbol listed, a button to turn it on *)
+            {rail[html[catalog, {}]], StringFreeQ[html[catalog, {}], "<template id=\"symbol-rest\">"],
+                StringCount[html[catalog, {}], "class=\"sym\""], StringContainsQ[html[catalog, {}], "class=\"symbol-index-toggle\" aria-pressed=\"false\""]},
+            (* True: on from the start, streamed in batches, the button to turn it off *)
+            {rail[html[catalog, {"SymbolIndex" -> True}]], StringContainsQ[html[catalog, {"SymbolIndex" -> True}], "<template id=\"symbol-rest\">"],
+                StringContainsQ[html[catalog, {"SymbolIndex" -> True}], "class=\"symbol-index-toggle\" aria-pressed=\"true\""]},
+            (* False, and a rail of 24 symbols: no index and no button *)
+            {StringFreeQ[rail[html[catalog, {"SymbolIndex" -> False}]], "indexable"], StringFreeQ[html[catalog, {"SymbolIndex" -> False}], "symbol-index-toggle"],
+                StringCount[html[catalog, {"SymbolIndex" -> False}], "class=\"sym\""]},
+            {StringFreeQ[rail[html[small, {}]], "indexable"], StringFreeQ[html[small, {}], "symbol-index-toggle"]},
+            (* the reader's choice, kept per site, applies before the rail paints *)
+            StringContainsQ[html[catalog, {}], "localStorage.getItem('pp-symbol-index:' + location.pathname)"]
+        }
+    ],
+    {
+        {" class=\"indexable\" data-batch-size=\"45\" aria-label=\"Symbols\"", True, 31, True},
+        {" class=\"indexable indexed\" data-batch-size=\"45\" aria-label=\"Symbols\"", True, True},
+        {True, True, 31},
+        {True, True},
+        True
+    },
+    TestID -> "Site: \"SymbolIndex\" makes the A-Z index optional, off until the reader turns it on by default, on with True, none with False"
+]
+
+VerificationTest[
+    PacletPageFiles[cloudCatalog, "SymbolIndex" -> "Sometimes"],
+    $Failed,
+    {PacletPageFiles::symbolindex},
+    TestID -> "Site: an invalid \"SymbolIndex\" value reports a message and fails"
 ]
 
 VerificationTest[
@@ -1794,7 +1870,7 @@ VerificationTest[
                     MemberQ[First /@ anchors[FirstCase[noSym, XMLElement["nav", {___, "class" -> "pp-side", ___}, _], None, Infinity]], "F"]
                 },
                 {
-                    Cases[main, XMLElement["div", {___, "data-pp-layout-controls" -> _, ___}, _], Infinity] === {},
+                    FirstCase[main, XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity] === "left,right,fullscreen",
                     FirstCase[controlsAll, XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
                     FirstCase[controlsSub, XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
                     FirstCase[PacletPage[dir, "SymbolsRail" -> False, "LayoutControls" -> True], XMLElement["div", {___, "data-pp-layout-controls" -> v_, ___}, _] :> v, None, Infinity],
