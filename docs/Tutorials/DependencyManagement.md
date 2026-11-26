@@ -55,7 +55,7 @@ Only the consumer's own list is read: a dependency's own dependencies are not fo
 | `"URL"`, `"SetupLinks"` | Setup instructions and an optional association of additional link labels to HTTPS URLs |
 | `"Check"` | Fully qualified name of a zero-argument readiness function in the consumer's kernel context |
 | `"Pin"` | What a documentation build installs instead: an association of `"Version"` (exact), `"Archive"`, `"Git"`, `"Commit"` and `"Path"` |
-| `"Archive"` | A `.paclet` file relative to the consumer directory, or the https address of one, with an exact `"Version"` |
+| `"Archive"` | A `.paclet` file relative to the consumer directory, or the https address of one, with an exact `"Version"`; for a paclet built for each system, an association of system IDs (and `"All"`) to addresses. A published `<address>.sha256` is checked |
 | `"Git"`, `"Commit"`, `"Path"` | HTTPS Git repository URL, commit ID (7 to 40 hexadecimal digits, either case), and optional paclet subdirectory |
 
 This declaration installs Wolfram/Parser from the `Parser` directory at the specified commit.
@@ -187,7 +187,17 @@ A build installs exact versions, while users keep minimums. Each declaration can
 |>
 ```
 
-Users install the newest published release from 1.2 on, and a build installs 1.4.0 from its archive. A version pin without an `"Archive"` takes the published release only while it is that version, and fails otherwise rather than install another one. A build into its own directory counts only the copies there.
+Users install the newest published release from 1.2 on, and a build installs 1.4.0 from its archive.
+
+A paclet built for each system has an archive for each. Name them by system ID, with `"All"` for any other system; a system without one is unsupported. A SHA-256 published beside an archive, as GitHub release files often have, is checked.
+
+```wl
+#| eval: false
+"Pin" -> <|"Version" -> "0.4.2", "Archive" -> <|
+    "MacOSX-ARM64" -> "https://github.com/demo/algebra/releases/download/v0.4.2/Demo__Algebra-MacOSX-ARM64-0.4.2.paclet",
+    "Linux-x86-64" -> "https://github.com/demo/algebra/releases/download/v0.4.2/Demo__Algebra-Linux-x86-64-0.4.2.paclet"
+|>|>
+``` A version pin without an `"Archive"` takes the published release only while it is that version, and fails otherwise rather than install another one. A build into its own directory counts only the copies there.
 
 The build also installs PacletPage's own dependencies, the parser its converter loads among them, pinned and into the same directory, before the consumer's. It skips the consumer's `WolframInstitute/PacletPage` entry, since the build runs it, so a consumer declares no build-only library.
 

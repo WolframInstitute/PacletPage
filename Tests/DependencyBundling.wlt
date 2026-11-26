@@ -204,9 +204,11 @@ VerificationTest[
 VerificationTest[
     With[{info = PacletDependencyInformation[File[DirectoryName[$TestFileName, 2]], "Output" -> "Association"]},
         {Keys[info], info["WolframInstitute/GitLink"]["Required"], info["WolframInstitute/GitLink"]["Version"],
-            info["Wolfram/Parser"]["Required"], info["Wolfram/Parser"]["Version"], KeyTake[info["Wolfram/Parser"]["Pin"], {"Git", "Path"}]}
+            info["Wolfram/Parser"]["Required"], info["Wolfram/Parser"]["Version"], KeyTake[info["Wolfram/Parser"]["Pin"], {"Git", "Path"}],
+            info["WolframInstitute/GitLink"]["Pin"]}
     ],
-    {{"WolframInstitute/GitLink", "Wolfram/Parser"}, False, "2.0+", True, "1.9.13+", <|"Git" -> "https://github.com/sw1sh/WolframParser", "Path" -> "Parser"|>},
+    {{"WolframInstitute/GitLink", "Wolfram/Parser"}, False, "2.0+", True, "1.9.13+", <|"Git" -> "https://github.com/sw1sh/WolframParser", "Path" -> "Parser"|>,
+        <|"Git" -> "https://github.com/WolframInstitute/GitLink", "Commit" -> "7482aef620549b61c3c1408b07908cfd6e2f5eb2", "Path" -> "GitLink"|>},
     TestID -> "PacletPage declares GitLink as optional and the converter's parser as required, pinned for builds"
 ]
 

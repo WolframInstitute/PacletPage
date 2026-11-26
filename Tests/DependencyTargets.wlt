@@ -293,6 +293,45 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], name = testUniqueName["TestSystemLib"], gh, repo, demo, arc, hash, owner, install, good, wrong, none, valid},
+        gh = "https://github.com/demo/lib/releases/download/v1.0.0/Lib-" <> # <> "-1.0.0.paclet" &;
+        repo = "https://resources.wolframcloud.com/PacletRepository/pacletsite/Paclets/Demo__Lib-1.0.0.paclet";
+        demo = "https://www.wolframcloud.com/obj/demo/DeployedResources/Paclet/Demo/Lib";
+        WithCleanup[
+            arc = CreatePacletArchive[testPaclet[root, "lib", <|"Name" -> name, "Version" -> "1.0.0"|>], root];
+            hash = FileHash[arc, "SHA256", "HexString"];
+            owner = Function[archives, PacletObject[<|"Name" -> "Example/SystemConsumer", "Version" -> "1.0",
+                "Dependencies" -> {<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> archives|>|>}|>]];
+            (* downloads come from the local archive; the published checksum is the text given *)
+            install = Function[{archives, sidecar, target}, Block[{
+                    dependencyDownloaded = Function[{u, file}, CopyFile[arc, file]; File[file]],
+                    dependencyGitText = Function[u, If[StringEndsQ[u, ".sha256"], sidecar, Missing["NotFound"]]]},
+                InstallPacletDependencies[owner[archives], name, "CheckReadiness" -> False, "TargetDirectory" -> target, "Pinned" -> True][name]]];
+            good = install[<|$SystemID -> gh[$SystemID], "Windows-x86-64" -> gh["Windows-x86-64"]|>, hash <> "  Lib.paclet\n", FileNameJoin[{root, "good"}]];
+            wrong = install[<|$SystemID -> gh[$SystemID]|>, StringRepeat["0", 64] <> "  Lib.paclet\n", FileNameJoin[{root, "wrong"}]];
+            none = install[<|"All" -> repo|>, Missing["NotFound"], FileNameJoin[{root, "none"}]];
+            valid = Function[e, dependencyEntryQ[e, owner[<||>]]];
+            {
+                MatchQ[good, _PacletObject] && good["Version"] === "1.0.0",
+                MatchQ[wrong, Failure["DependencyArchive", _]],
+                MatchQ[none, _PacletObject],
+                MatchQ[install[<|"NonExistent-OS-99" -> gh["NonExistent-OS-99"]|>, Missing["NotFound"], FileNameJoin[{root, "other"}]], Failure["UnsupportedSystem", _]],
+                dependencySupportedQ[<|"Name" -> name, "Archive" -> <|"NonExistent-OS-99" -> gh["x"]|>|>],
+                (* beside a resource: the publisher's own files, a GitHub release's and the Paclet Repository's *)
+                valid[<|"Name" -> name, "Version" -> "1.0.0", "Resource" -> demo, "Archive" -> <|$SystemID -> gh[$SystemID], "All" -> repo|>|>],
+                valid[<|"Name" -> name, "Version" -> "1.0.0", "Resource" -> demo, "Archive" -> <|$SystemID -> "https://example.org/Lib.paclet"|>|>],
+                valid[<|"Name" -> name, "Version" -> "1.0+", "Archive" -> <|$SystemID -> gh[$SystemID]|>|>],
+                valid[<|"Name" -> name, "Version" -> "1.0.0", "Archive" -> <||>|>]
+            },
+            Scan[PacletDirectoryUnload, FileNameJoin[{root, #}] & /@ {"good", "wrong", "none", "other"}];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, True, True, True, False, True, False, False, False},
+    TestID -> "Archive by system: a pin names an archive for each system, checked against its published SHA-256, and a system without one is unsupported"
+]
+
+VerificationTest[
     Module[{root = CreateDirectory[], consumer, target, calls = {}, result},
         WithCleanup[
             consumer = testPaclet[root, "consumer", <|"Name" -> "Demo/BuildToolConsumer", "Version" -> "1.0",

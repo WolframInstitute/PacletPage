@@ -140,8 +140,10 @@ dependencyRelease[owner_, entry_, checkUpstream_ : False] := Module[{name = entr
     ];
     release = Which[
         (* an archive at an https address is the exact release its entry names, read without a request *)
-        KeyExistsQ[entry, "Archive"] && dependencyHTTPQ[entry["Archive"]],
-            <|"Version" -> entry["Version"], "ArchiveURL" -> entry["Archive"]|>,
+        KeyExistsQ[entry, "Archive"] && (AssociationQ[entry["Archive"]] || dependencyHTTPQ[entry["Archive"]]),
+            With[{url = dependencyArchiveURL[entry["Archive"]]},
+                If[StringQ[url], <|"Version" -> entry["Version"], "ArchiveURL" -> url|>,
+                    Return[dependencyFailure["UnsupportedSystem", "`1` is unavailable on `2`.", name, $SystemID]]]],
         KeyExistsQ[entry, "Archive"],
             archive = dependencyArchivePath[owner, entry["Archive"]];
             If[FailureQ[archive], Return[archive]];
@@ -225,7 +227,8 @@ dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]},
         KeyExistsQ[release, "GitURL"] || KeyExistsQ[release, "GitArchive"],
             dependencyGitInstall[release, entry],
         KeyExistsQ[release, "ArchiveURL"],
-            If[$AllowInternet === False, dependencyOffline[], dependencyDownloadInstall[release["ArchiveURL"], name, release["Version"]]],
+            If[$AllowInternet === False, dependencyOffline[],
+                dependencyDownloadInstall[release["ArchiveURL"], name, release["Version"], release["ArchiveURL"] <> ".sha256"]],
         KeyExistsQ[release, "Archive"],
             dependencyInstallFile[release["Archive"], name, release["Version"], Lookup[release, "BundledGit", None]],
         True,
@@ -300,13 +303,28 @@ dependencyDownloaded[url_, file_] := (
         Function[result, MatchQ[result, Failure["DependencyDownload", _]] && ! TrueQ[400 <= Lookup[result["Response"], "StatusCode", 0] < 500]], 1, 2]
 )
 
-dependencyDownloadInstall[url_, name_, version_] := Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["paclet-"] <> ".paclet"}], download},
+dependencyDownloadInstall[url_, name_, version_, checksum_ : None] := Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["paclet-"] <> ".paclet"}], download, checked},
     WithCleanup[
         download = dependencyDownloaded[url, file];
-        If[FailureQ[download], download, dependencyInstallFile[download, name, version]],
+        If[FailureQ[download], Return[download, Module]];
+        checked = dependencyChecksum[checksum, file, name, version];
+        If[FailureQ[checked], checked, dependencyInstallFile[download, name, version]],
         If[FileExistsQ[file], DeleteFile[file]]
     ]
 ]
+
+(* A declared archive with a published SHA-256 beside it, <archive>.sha256 as sha256sum writes it,
+   must match it; without one, or with none reachable, the archive is taken as it is. *)
+dependencyChecksum[None, _, _, _] := Null;
+dependencyChecksum[sidecar_String, file_String, name_, version_] := With[{text = dependencyGitText[sidecar]},
+    With[{expected = If[StringQ[text], StringCases[text, RegularExpression["(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])"], 1], {}]},
+        Which[
+            expected === {}, Null,
+            ToLowerCase[First[expected]] === FileHash[file, "SHA256", "HexString"], Null,
+            True, dependencyFailure["DependencyArchive", "The archive of `1` `2` does not match its published SHA-256.", name, version]
+        ]
+    ]
+];
 
 (* ::Section:: *)
 (*A Git repository at a commit*)

@@ -3314,7 +3314,7 @@ stageBundledDependencies[head_Symbol, dir_String, stage_String, spec_] := Catch[
                         Message[head::bundledeps, dir, "Could not pack installed dependency " <> depName];
                         Throw[$Failed, "bundle"]];
                     AppendTo[bundled, FileNameTake[packed]],
-                KeyExistsQ[entry, "Archive"] && ! dependencyHTTPQ[entry["Archive"]],
+                StringQ[Lookup[entry, "Archive", None]] && ! dependencyHTTPQ[entry["Archive"]],
                     relArchive = dependencyArchivePath[owner, entry["Archive"]];
                     If[FailureQ[relArchive] || ! FileExistsQ[First[relArchive]],
                         Message[head::bundledeps, dir, "Missing archive for " <> depName];

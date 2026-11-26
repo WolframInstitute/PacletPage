@@ -59,13 +59,31 @@ dependencyEntryQ[entry_, owner_] := With[{
 (* An archive relative to the consumer is a source of its own. An archive at an https address is
    one exact release, so it comes with an exact version, and beside a published "Resource" it must
    be that publisher's file. *)
-dependencyArchiveEntryQ[entry_] := With[{archive = entry["Archive"]}, StringQ[archive] && archive =!= "" &&
-    If[dependencyHTTPQ[archive],
-        StringEndsQ[ToLowerCase[Last[Replace[URLParse[archive, "Path"], Except[{__String}] -> {""}]]], ".paclet"] &&
-            dependencyVersionQ[Lookup[entry, "Version", None]] &&
-            (! KeyExistsQ[entry, "Resource"] || dependencyPublisherURLQ[entry["Resource"], archive]),
-        ! KeyExistsQ[entry, "Resource"]]
+dependencyArchiveEntryQ[entry_] := With[{archive = entry["Archive"]},
+    Which[
+        (* a release built for each system: an archive address by $SystemID, or "All" for the rest *)
+        AssociationQ[archive],
+            archive =!= <||> && AllTrue[Keys[archive], StringQ] && AllTrue[Values[archive], dependencyArchiveURLQ[entry, #] &],
+        StringQ[archive] && archive =!= "" && dependencyHTTPQ[archive],
+            dependencyArchiveURLQ[entry, archive],
+        StringQ[archive] && archive =!= "",
+            ! KeyExistsQ[entry, "Resource"],
+        True, False]
 ]
+dependencyArchiveURLQ[entry_, url_] := dependencyHTTPQ[url] &&
+    StringEndsQ[ToLowerCase[Last[Replace[URLParse[url, "Path"], Except[{__String}] -> {""}]]], ".paclet"] &&
+    dependencyVersionQ[Lookup[entry, "Version", None]] &&
+    (! KeyExistsQ[entry, "Resource"] || dependencyPublisherURLQ[entry["Resource"], url] || dependencyDurableArchiveURLQ[url])
+
+(* an archive that stays at its address for its version, accepted beside a cloud resource: a file
+   attached to a release of a GitHub repository, or the Paclet Repository's paclet site *)
+dependencyDurableArchiveURLQ[url_] := StringQ[url] && StringMatchQ[url, RegularExpression[
+    "https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[^/?#]+/[^/?#]+\\.paclet|" <>
+    "https://resources\\.wolframcloud\\.com/PacletRepository/pacletsite/Paclets/[^/?#]+\\.paclet"]]
+
+(* the archive address an entry gives for this system: its own, the one for $SystemID, else "All"'s *)
+dependencyArchiveURL[archive_String] := archive;
+dependencyArchiveURL[archive_Association] := Lookup[archive, $SystemID, Lookup[archive, "All", None]];
 
 (* What a build installs instead: "Pin" -> <|...|> with keys among "Version", "Archive", "Git",
    "Commit" and "Path", laid over the entry in pinned mode and ignored otherwise. A pin that names a
@@ -128,7 +146,8 @@ dependencyInstallations[names_List] := If[Length[names] < 16, AssociationMap[Pac
     With[{byName = GroupBy[PacletFind[], #["Name"] &]}, AssociationThread[names, Lookup[byName, names, {}]]]
 ]
 
-dependencySupportedQ[entry_] := With[{systems = Lookup[entry, "Platforms", All]}, systems === All || MemberQ[systems, $SystemID]]
+dependencySupportedQ[entry_] := With[{systems = Lookup[entry, "Platforms", All], archive = Lookup[entry, "Archive", None]},
+    (systems === All || MemberQ[systems, $SystemID]) && (! AssociationQ[archive] || StringQ[dependencyArchiveURL[archive]])]
 
 (* A loaded context can outlive both an upgrade and an uninstall followed by a reinstall. *)
 If[! AssociationQ[$dependencyRestarts], $dependencyRestarts = <||>]
