@@ -332,6 +332,70 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], name = testUniqueName["TestCurlLib"], url = "https://github.com/demo/lib/releases/download/v1.0.0/Lib-1.0.0.paclet",
+            arc, hash, owner, kernelFails, install, viaCurl, wrong, bothFail, curlCalls = 0},
+        WithCleanup[
+            arc = CreatePacletArchive[testPaclet[root, "lib", <|"Name" -> name, "Version" -> "1.0.0"|>], root];
+            hash = FileHash[arc, "SHA256", "HexString"];
+            owner = PacletObject[<|"Name" -> "Example/CurlConsumer", "Version" -> "1.0",
+                "Dependencies" -> {<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> url|>|>}|>];
+            kernelFails = Failure["DependencyDownload", <|"MessageTemplate" -> "The archive download did not finish.", "Response" -> <||>|>];
+            (* the kernel reaches neither the archive nor its checksum; curl, as given, reaches both *)
+            install = Function[{curlFile, curlSidecar, target}, Block[{
+                    dependencyDownloaded = (kernelFails &),
+                    dependencyGitText = ($Failed &),
+                    dependencyCurlDownload = Function[{u, file}, curlCalls++; If[curlFile, CopyFile[arc, file]; File[file], $Failed]],
+                    dependencyCurlText = (curlSidecar &)},
+                InstallPacletDependencies[owner, name, "CheckReadiness" -> False, "TargetDirectory" -> target, "Pinned" -> True][name]]];
+            viaCurl = install[True, hash <> "  Lib-1.0.0.paclet\n", FileNameJoin[{root, "curl"}]];
+            wrong = install[True, StringRepeat["f", 64] <> "  Lib-1.0.0.paclet\n", FileNameJoin[{root, "wrong"}]];
+            bothFail = install[False, Missing["NotFound"], FileNameJoin[{root, "fail"}]];
+            {
+                MatchQ[viaCurl, _PacletObject] && viaCurl["Version"] === "1.0.0",
+                MatchQ[wrong, Failure["DependencyArchive", _]],
+                bothFail === kernelFails,
+                curlCalls,
+                (* a resource's archive, read from its description, gets no second try *)
+                Block[{dependencyDownloaded = (kernelFails &), dependencyCurlDownload = (Throw["Unexpected curl"] &)},
+                    dependencyDownloadInstall[url, name, "1.0.0"]] === kernelFails
+            },
+            Scan[PacletDirectoryUnload, FileNameJoin[{root, #}] & /@ {"curl", "wrong", "fail"}];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, True, True, 3, True},
+    TestID -> "Archive by curl: a declared archive the kernel cannot fetch, and its SHA-256, come through the system's curl and are checked"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], clients = {}, listener, drip, sent = 0, url, stalled, slow, time},
+        WithCleanup[
+            (* a local server that promises 1000 bytes and sends the first 100 at once; to the second
+               client, the drip sends the rest 100 at a time *)
+            listener = SocketListen[0, Function[event, If[StringContainsQ[event["Data"], "\r\n\r\n"],
+                AppendTo[clients, event["SourceSocket"]];
+                WriteString[event["SourceSocket"], "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n" <> StringRepeat["x", 100]]]]];
+            url = "http://127.0.0.1:" <> ToString[listener["Socket"]["DestinationPort"]] <> "/Lib.paclet";
+            Block[{$dependencyStallSeconds = 2},
+                {time, stalled} = AbsoluteTiming[dependencyDownloadAttempt[url, FileNameJoin[{root, "stalled"}]]];
+                drip = SessionSubmit[ScheduledTask[If[Length[clients] === 2 && sent < 9, sent++; WriteString[Last[clients], StringRepeat["x", 100]]], 0.5]];
+                slow = dependencyDownloadAttempt[url, FileNameJoin[{root, "slow"}]]];
+            {
+                MatchQ[stalled, Failure["DependencyDownload", KeyValuePattern["MessageParameters" -> {2}]]],
+                time < 15,
+                slow === File[FileNameJoin[{root, "slow"}]] && FileByteCount[First[slow]] === 1000
+            },
+            If[MatchQ[drip, _TaskObject], TaskRemove[drip]];
+            Scan[Close, clients];
+            DeleteObject[listener];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, True, True},
+    TestID -> "Archive download stall: a download that receives nothing for the stall time is given up, and a slow one that keeps receiving runs to its end"
+]
+
+VerificationTest[
     Module[{root = CreateDirectory[], consumer, target, calls = {}, result},
         WithCleanup[
             consumer = testPaclet[root, "consumer", <|"Name" -> "Demo/BuildToolConsumer", "Version" -> "1.0",

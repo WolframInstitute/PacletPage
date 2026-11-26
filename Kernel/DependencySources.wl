@@ -228,7 +228,7 @@ dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]},
             dependencyGitInstall[release, entry],
         KeyExistsQ[release, "ArchiveURL"],
             If[$AllowInternet === False, dependencyOffline[],
-                dependencyDownloadInstall[release["ArchiveURL"], name, release["Version"], release["ArchiveURL"] <> ".sha256"]],
+                dependencyDownloadInstall[release["ArchiveURL"], name, release["Version"], release["ArchiveURL"] <> ".sha256", True]],
         KeyExistsQ[release, "Archive"],
             dependencyInstallFile[release["Archive"], name, release["Version"], Lookup[release, "BundledGit", None]],
         True,
@@ -274,23 +274,36 @@ dependencyInstallFile[source_, name_, version_, git_: None] := Module[{p, result
         True, dependencyFailure["DependencyInstallFailed", "Could not install `1` `2`.", name, version]]
 ]
 
-(* TaskWait wakes on cancellation even if a stalled server never sends a progress event. *)
-dependencyDownloadAttempt[url_, file_] := Module[{response = <||>, task},
+(* seconds a download may go without receiving a byte before it is given up *)
+$dependencyStallSeconds = 60;
+
+(* TaskWait wakes on cancellation even if a stalled server never sends a progress event. A
+   download however slow runs to its end while bytes arrive; a watchdog gives it up once none
+   have arrived for $dependencyStallSeconds, as over a route that drops full-size packets. *)
+dependencyDownloadAttempt[url_, file_] := Module[{response = <||>, task, watchdog, received = -1, last = AbsoluteTime[], stalled = False},
     If[dependencyCancelledQ[], Return[dependencyCancelled[]]];
     WithCleanup[
         task = URLDownloadSubmit[url, file, TimeConstraint -> <|"Connecting" -> 30, "Reading" -> Infinity|>, ProgressReporting -> False,
             HandlerFunctions -> <|"TaskProgress" -> Function[event, With[{bytes = event["ByteCountDownloaded"], total = event["ByteCountTotal"]},
+                    If[bytes =!= received, received = bytes; last = AbsoluteTime[]];
                     $dependencyProgress["Downloading", If[NumberQ[bytes] && TrueQ[total > 0], bytes / total, None]]]],
                 "TaskFinished" -> Function[event, response = event]|>,
             HandlerFunctionsKeys -> {"StatusCode", "Failure", "ByteCountDownloaded", "ByteCountTotal"}];
-        If[MatchQ[task, _TaskObject], Block[{cancelDependencyDownload = Function[Null, If[task["TaskStatus"] =!= "Removed", TaskRemove[task]]]},
-            If[! dependencyCancelledQ[], TaskWait[task]]]];
+        If[MatchQ[task, _TaskObject],
+            watchdog = SessionSubmit[ScheduledTask[
+                If[AbsoluteTime[] - last > $dependencyStallSeconds && task["TaskStatus"] =!= "Removed", stalled = True; TaskRemove[task]],
+                Min[5, $dependencyStallSeconds]]];
+            Block[{cancelDependencyDownload = Function[Null, If[task["TaskStatus"] =!= "Removed", TaskRemove[task]]]},
+                If[! dependencyCancelledQ[], TaskWait[task]]]];
         Which[
             dependencyCancelledQ[], dependencyCancelled[],
+            stalled, Failure["DependencyDownload", <|"MessageTemplate" -> "The archive download received nothing for `1` seconds.",
+                "MessageParameters" -> {$dependencyStallSeconds}, "Response" -> response|>],
             FailureQ[Lookup[response, "Failure", None]] || ! TrueQ[200 <= Lookup[response, "StatusCode", 0] < 400] ||
                 (TrueQ[Lookup[response, "ByteCountTotal", 0] > 0] && response["ByteCountDownloaded"] =!= response["ByteCountTotal"]),
                 Failure["DependencyDownload", <|"MessageTemplate" -> "The archive download did not finish.", "Response" -> response|>],
             True, File[file]],
+        If[MatchQ[watchdog, _TaskObject], TaskRemove[watchdog]];
         If[MatchQ[task, _TaskObject] && task["TaskStatus"] =!= "Removed", TaskRemove[task]]
     ]
 ]
@@ -303,11 +316,14 @@ dependencyDownloaded[url_, file_] := (
         Function[result, MatchQ[result, Failure["DependencyDownload", _]] && ! TrueQ[400 <= Lookup[result["Response"], "StatusCode", 0] < 500]], 1, 2]
 )
 
-dependencyDownloadInstall[url_, name_, version_, checksum_ : None] := Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["paclet-"] <> ".paclet"}], download, checked},
+dependencyDownloadInstall[url_, name_, version_, checksum_ : None, curl_ : False] := Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["paclet-"] <> ".paclet"}], download, checked},
     WithCleanup[
         download = dependencyDownloaded[url, file];
+        (* a declared archive the kernel cannot fetch goes through the system's curl once more *)
+        If[FailureQ[download] && TrueQ[curl] && ! dependencyCancelledQ[],
+            download = Replace[dependencyCurlDownload[url, file], $Failed -> download]];
         If[FailureQ[download], Return[download, Module]];
-        checked = dependencyChecksum[checksum, file, name, version];
+        checked = dependencyChecksum[checksum, file, name, version, curl];
         If[FailureQ[checked], checked, dependencyInstallFile[download, name, version]],
         If[FileExistsQ[file], DeleteFile[file]]
     ]
@@ -315,8 +331,9 @@ dependencyDownloadInstall[url_, name_, version_, checksum_ : None] := Module[{fi
 
 (* A declared archive with a published SHA-256 beside it, <archive>.sha256 as sha256sum writes it,
    must match it; without one, or with none reachable, the archive is taken as it is. *)
-dependencyChecksum[None, _, _, _] := Null;
-dependencyChecksum[sidecar_String, file_String, name_, version_] := With[{text = dependencyGitText[sidecar]},
+dependencyChecksum[None, _, _, _, ___] := Null;
+dependencyChecksum[sidecar_String, file_String, name_, version_, curl_ : False] := With[
+    {text = Replace[dependencyGitText[sidecar], $Failed :> If[TrueQ[curl], dependencyCurlText[sidecar], $Failed]]},
     With[{expected = If[StringQ[text], StringCases[text, RegularExpression["(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])"], 1], {}]},
         Which[
             expected === {}, Null,
@@ -324,6 +341,32 @@ dependencyChecksum[sidecar_String, file_String, name_, version_] := With[{text =
             True, dependencyFailure["DependencyArchive", "The archive of `1` `2` does not match its published SHA-256.", name, version]
         ]
     ]
+];
+
+(* Some machines route the kernel's connections apart from other programs', as a per-app VPN does:
+   the kernel cannot reach a host that the system's curl reaches. A declared archive and its
+   published SHA-256 are then fetched once more with curl, and checked as any download is. *)
+$dependencyCurl := SelectFirst[Join[{"/usr/bin/curl", "/usr/local/bin/curl", "/opt/homebrew/bin/curl"},
+    If[StringQ[Environment["SystemRoot"]], {FileNameJoin[{Environment["SystemRoot"], "System32", "curl.exe"}]}, {}]], FileExistsQ, None];
+
+(* the archive written to file by curl, following redirects, trying twice more, and given up once
+   nothing has arrived for $dependencyStallSeconds: File[file], or $Failed; a cancellation stops it *)
+dependencyCurlDownload[url_String, file_String] := Module[{curl = $dependencyCurl, process},
+    If[curl === None, Return[$Failed]];
+    $dependencyProgress["Downloading", None];
+    process = StartProcess[{curl, "-fsSL", "--retry", "2", "--connect-timeout", "30", "--speed-limit", "1", "--speed-time", ToString[$dependencyStallSeconds], "-o", file, url}];
+    If[! MatchQ[process, _ProcessObject], Return[$Failed]];
+    While[ProcessStatus[process] === "Running",
+        If[dependencyCancelledQ[], KillProcess[process]; Return[dependencyCancelled[], Module]];
+        Pause[0.2]];
+    If[process["ExitCode"] === 0 && FileExistsQ[file], File[file], $Failed]
+];
+
+(* a small text by curl: its body, Missing["NotFound"] for an HTTP error (curl's exit code 22), or $Failed *)
+dependencyCurlText[url_String] := With[{curl = $dependencyCurl},
+    If[curl === None, $Failed,
+        With[{run = RunProcess[{curl, "-fsSL", "--retry", "2", "--connect-timeout", "30", "--max-time", "60", url}]},
+            Switch[If[AssociationQ[run], run["ExitCode"], None], 0, run["StandardOutput"], 22, Missing["NotFound"], _, $Failed]]]
 ];
 
 (* ::Section:: *)
