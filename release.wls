@@ -22,7 +22,8 @@ result = PublishPacletPage[dir, "PacletPage",
     "DryRun" -> MemberQ[Rest[$ScriptCommandLine], "--dry-run"],
     "Monitor" -> True,
     (* PACLETPAGE_PARALLEL=0 builds the pages in this kernel alone, on a machine others share *)
-    "BuildOptions" -> {"Parallel" -> Replace[Environment["PACLETPAGE_PARALLEL"], {"0" | "False" -> False, _ -> Automatic}]},
+    (* no example shows PacletPage's own version, so a new version alone converts no page again *)
+    "BuildOptions" -> {"Parallel" -> Replace[Environment["PACLETPAGE_PARALLEL"], {"0" | "False" -> False, _ -> Automatic}], "CacheVersion" -> False},
     "SiteOptions" -> {"FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}}, "VersionLabel" -> True, "Footer" -> True}
 ]
 If[ ! AssociationQ[result], Exit[1]]

@@ -1049,6 +1049,33 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], path = $ContextPath, fixture, cache, build, first, moved, second},
+        WithCleanup[
+            fixture = definitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n", "bar" -> "```wl\nbar[1]\n```\n"|>];
+            (* foo's helper reaches a value holding the paclet's directory, as a paclet's own root does *)
+            Export[fixture["Code"], StringRiffle[{
+                "BeginPackage[\"" <> fixture["Context"] <> "\"]", "foo::usage = \"foo[x]\";", "bar::usage = \"bar[x]\";", "Begin[\"`Private`\"]",
+                "$root = ParentDirectory[DirectoryName[$InputFileName]];", "foo[x_] := helper[x]", "helper[x_] := {x, FileNameJoin[{$root, \"data\"}], $root}",
+                "bar[x_] := 2 x", "End[]", "EndPackage[]"
+            }, "\n"], "Text"];
+            cache = FileNameJoin[{root, "cache"}];
+            build[dir_] := FileBaseName /@ BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False, "CacheDirectory" -> cache]["Converted"];
+            first = build[fixture["Directory"]];
+            PacletDirectoryUnload[fixture["Directory"]];
+            CreateDirectory[FileNameJoin[{root, "elsewhere", "deeper"}], CreateIntermediateDirectories -> True];
+            moved = CopyDirectory[fixture["Directory"], FileNameJoin[{root, "elsewhere", "deeper", FileNameTake[fixture["Directory"]]}]];
+            second = build[moved];
+            {Sort[first], second},
+            Scan[PacletDirectoryUnload, Select[{fixture["Directory"], moved}, StringQ]];
+            $ContextPath = Select[$ContextPath, MemberQ[path, #] &];
+            Scan[If[StringQ[#] && DirectoryQ[#], DeleteDirectory[#, DeleteContents -> True]] &, {fixture["Directory"], root}]
+        ]
+    ],
+    {{"bar", "foo"}, {}},
+    TestID -> "Build: the same sources at another path, with the same cache, convert nothing, though a definition a page reaches holds the paclet's directory"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{work = CreateDirectory[], in, out, run, result},
         in = FileNameJoin[{work, "in.wxf"}];
         out = FileNameJoin[{work, "out.wxf"}];

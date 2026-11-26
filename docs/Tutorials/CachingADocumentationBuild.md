@@ -180,9 +180,10 @@ FileBaseName /@ third["Evaluated"]
 
 The whole cache is one directory, `build/cache`, or the one given as `"CacheDirectory"`. A build server that saves and restores it between runs gets the same cached pages as a local build.
 
+- The keys are the same from any directory and on any machine. A definition that holds a path in the paclet's directory, a dependency's, the user base directory or the home directory, as a paclet's own root computed from `$InputFileName` does, is keyed by a stand-in for that directory. The same sources in another checkout, or in another lane of a build server, find the same pages.
 - With `"Monitor" -> True` the scan prints a line at each step and the build prints its progress, so a server that stops a silent build sees it working.
 - Where `WOLFRAM_CLOUD_USER` and `WOLFRAM_CLOUD_PASSWORD` are set on a server, the scanning kernel connects to the cloud as that account, since a dependency may reach the cloud as it loads.
-- The scan is done again only when the paclet's or a dependency's files change.
+- The scan is done again only when the paclet's or a dependency's files change, or when they are read from other directories.
 
 ## The whole code as the key
 

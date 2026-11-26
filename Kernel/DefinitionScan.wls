@@ -41,12 +41,13 @@ arguments = Replace[$CommandLine, {{___, "-script", _, rest___} :> {rest}, _ -> 
 input = Import[in, "WXF"];
 
 (* a System` or Global` symbol's definition as text, every symbol in it with its context, the names
-   a Module made, x$123, without their numbers, so that two loadings of the same code give the same
-   text; without its messages, since the kernel gives a symbol a message's text the first time the
-   message is issued, which depends on files and timing no paclet's code decides *)
+   a Module made, x$123, without their numbers, and the paths the scan knows by their stand-ins, so
+   that two loadings of the same code give the same text; without its messages, since the kernel
+   gives a symbol a message's text the first time the message is issued, which depends on files and
+   timing no paclet's code decides *)
 definitionText[name_String] := Replace[ToExpression[name, InputForm, Hold], Hold[s_] :>
     Block[{$ContextPath = {"System`"}, $Context = "DefinitionScan`"},
-        StringReplace[
+        pathFree @ StringReplace[
             ToString[Language`ExtendedDefinition[s, ExcludedContexts -> {}] /. HoldPattern[Messages -> _] :> Nothing, InputForm],
             RegularExpression["([A-Za-z][A-Za-z0-9]*)\\$[0-9]+"] -> "$1$"
         ]
@@ -76,7 +77,7 @@ pacletParts[name_String, unreadable_String] := With[{definition = pacletDefiniti
         {fingerprint[name <> " " <> unreadable], {}, {}, False},
         With[{code = definition /. HoldPattern[Messages -> _] :> Nothing},
             {
-                fingerprint[Block[{$ContextPath = {"System`"}, $Context = "DefinitionScan`"}, StringReplace[ToString[canonical[definition], InputForm], RegularExpression["([A-Za-z][A-Za-z0-9]*)\\$[0-9]+"] -> "$1$"]]],
+                fingerprint[Block[{$ContextPath = {"System`"}, $Context = "DefinitionScan`"}, pathFree @ StringReplace[ToString[canonical[definition], InputForm], RegularExpression["([A-Za-z][A-Za-z0-9]*)\\$[0-9]+"] -> "$1$"]]],
                 DeleteDuplicates @ Cases[code, s_Symbol /; AtomQ[Unevaluated[s]] :> Context[Unevaluated[s]] <> SymbolName[Unevaluated[s]], {0, Infinity}, Heads -> True],
                 DeleteDuplicates @ Cases[code, text_String /; StringFreeQ[text, WhitespaceCharacter] :> text, {0, Infinity}, Heads -> True],
                 MatchQ[definition, HoldComplete[{} | {Temporary}, Language`DefinitionList[] | Language`DefinitionList[_ -> {((Attributes -> {} | {Temporary}) | (_ -> {})) ...}]]]
@@ -107,6 +108,29 @@ pacletContexts[dir_String] := With[{paclet = pacletOf[dir]},
     ]
 ];
 declared = DeleteDuplicates[Catenate[pacletContexts /@ input["Directories"]]];
+
+(* The directories the paclets load from, and the user's own, each with the stand-in a definition's
+   text has for it, so that a definition holding a path inside one, as $root =
+   DirectoryName[$InputFileName] does, reads the same from any checkout and on any machine. A path
+   is replaced as InputForm writes it, where a separator, a quote or the text's end follows; a
+   longer one first, so that a directory inside another has its own stand-in. *)
+pathStandIn[dir_String] := With[{paclet = pacletOf[dir]}, "<" <> If[PacletObjectQ[paclet], paclet["Name"], "directory"] <> ">"];
+$pathRules = Catenate @ Map[
+    Function[place, With[{path = First[place], standIn = Last[place]},
+        Catenate @ Map[
+            {# ~~ next : ("/" | "\\" | "\"") :> standIn <> next, # ~~ EndOfString :> standIn} &,
+            DeleteDuplicates[{StringTake[ToString[path, InputForm], {2, -2}], path}]
+        ]
+    ]],
+    SortBy[
+        Select[DeleteDuplicatesBy[Join[
+            {ExpandFileName[#], pathStandIn[#]} & /@ Select[Join[input["Directories"], Lookup[input, "DependencyDirectories", {}]], StringQ[#] && DirectoryQ[#] &],
+            {{$UserBaseDirectory, "<$UserBaseDirectory>"}, {$HomeDirectory, "<$HomeDirectory>"}}
+        ], First], StringQ[First[#]] && StringLength[First[#]] > 1 &],
+        -StringLength[First[#]] &
+    ]
+];
+pathFree[text_String] := StringReplace[text, $pathRules];
 
 (* The paclets' contexts are those under a declared one that the loading makes; a definition a
    loading makes elsewhere is one of System` or Global` symbols. A snapshot has, by name, each
@@ -206,7 +230,7 @@ If[ ! loaded,
     temporaryQ[name_String] := StringMatchQ[ownName[name], RegularExpression["[A-Za-z][A-Za-z0-9]*\\$[0-9]+"]];
     definedQ[name_String] := ToExpression[name, InputForm, Function[s, OwnValues[s] =!= {} || DownValues[s] =!= {} || UpValues[s] =!= {} || SubValues[s] =!= {}, HoldAllComplete]];
     names = Select[all, ! temporaryQ[#] || definedQ[#] &];
-    unreadable = fingerprint[StringRiffle[# <> " " <> FileHash[#, "SHA256", "HexString"] & /@ read, "\n"]];
+    unreadable = fingerprint[StringRiffle[pathFree[#] <> " " <> FileHash[#, "SHA256", "HexString"] & /@ read, "\n"]];
     (* one symbol at a time, so that only its fingerprint and the names it uses are kept, with a
        line every 15 s *)
     done = 0; next = AbsoluteTime[] + 15;
