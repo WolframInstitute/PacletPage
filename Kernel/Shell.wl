@@ -555,11 +555,11 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
             XMLElement["div", {"class" -> "symbol-heading"}, {
                 XMLElement["h2", {}, {"Symbols"}],
                 XMLElement["span", {"class" -> "symbol-total"}, {count[Length[ids]]}],
-                XMLElement["button", {
+                If[indexable, XMLElement["button", {
                     "type" -> "button", "class" -> "symbol-index-toggle",
                     "aria-pressed" -> If[indexed, "true", "false"],
                     "aria-label" -> "Index by first letter", "title" -> "Index by first letter"
-                }, {"A\:2013Z"}]
+                }, {"A\:2013Z"}], Nothing]
             }],
             XMLElement["div", {"class" -> "symbol-browse"}, {
                 XMLElement["div", {"class" -> "symbol-letters", "role" -> "group", "aria-label" -> "First letter"}, letterButtons],

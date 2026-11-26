@@ -472,9 +472,9 @@ VerificationTest[
             StringContainsQ[auto["index.html"], "id=\"themeToggle\""],
             StringContainsQ[auto["index.html"], "fallback = 'auto'"] && StringContainsQ[auto["page.html"], "fallback = 'auto'"],
             StringContainsQ[dark["index.html"], "fallback = 'dark'"] && StringContainsQ[dark["page.html"], "fallback = 'dark'"],
-            StringFreeQ[off["index.html"], {"id=\"themeToggle\"", "ppApplyTheme"}] && StringFreeQ[off["page.html"], "ppApplyTheme"],
+            StringFreeQ[off["index.html"], {"id=\"themeToggle\"", "fallback = '"}] && StringFreeQ[off["page.html"], "fallback = '"],
             (* the head script runs before the stylesheet, so the first paint has the theme *)
-            Less @@ (First[First[StringPosition[auto["index.html"], #]]] & /@ {"ppApplyTheme", "<style>"}),
+            Less @@ (First[First[StringPosition[auto["index.html"], #]]] & /@ {"fallback = '", "<style>"}),
             StringContainsQ[auto["index.html"], "--pp-dark-active-bg: #481d1b; --pp-dark-active-fg: #e96459;"],
             StringContainsQ[auto["page.html"], "html[data-theme=\"dark\"] #notebook-embed"],
             StringFreeQ[auto["index.html"] <> auto["page.html"], "`head`"]
@@ -514,9 +514,9 @@ VerificationTest[
             {rail[html[catalog, {"SymbolIndex" -> True}]], StringContainsQ[html[catalog, {"SymbolIndex" -> True}], "<template id=\"symbol-rest\">"],
                 StringContainsQ[html[catalog, {"SymbolIndex" -> True}], "class=\"symbol-index-toggle\" aria-pressed=\"true\""]},
             (* False, and a rail of 24 symbols: no index and no button *)
-            {StringFreeQ[rail[html[catalog, {"SymbolIndex" -> False}]], "indexable"], StringFreeQ[html[catalog, {"SymbolIndex" -> False}], "symbol-index-toggle"],
+            {StringFreeQ[rail[html[catalog, {"SymbolIndex" -> False}]], "indexable"], StringFreeQ[html[catalog, {"SymbolIndex" -> False}], "class=\"symbol-index-toggle\""],
                 StringCount[html[catalog, {"SymbolIndex" -> False}], "class=\"sym\""]},
-            {StringFreeQ[rail[html[small, {}]], "indexable"], StringFreeQ[html[small, {}], "symbol-index-toggle"]},
+            {StringFreeQ[rail[html[small, {}]], "indexable"], StringFreeQ[html[small, {}], "class=\"symbol-index-toggle\""]},
             (* the reader's choice, kept per site, applies before the rail paints *)
             StringContainsQ[html[catalog, {}], "localStorage.getItem('pp-symbol-index:' + location.pathname)"]
         }
