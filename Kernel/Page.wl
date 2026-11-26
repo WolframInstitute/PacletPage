@@ -212,6 +212,12 @@ $sourceFolder = <|"guide" -> "Guides", "ref" -> "Symbols", "tutorial" -> "Tutori
 pageSourceSpec[catalog_Association, id_String, sourceOpt_] := Module[
     {kind = pageKind[id], name = pageName[id], folder, dir, builtFile, candidates, hit},
     folder = Lookup[$sourceFolder, kind, ""];
+    (* a reference page other than a symbol's has the folder of its kind, Formats and so on, and a
+       file named by the last part of its id *)
+    If[ otherReferencePageQ[id],
+        folder = Replace[First[Keys[Select[$referenceDirectories, # === referenceKind[id] &]], None], None -> ""];
+        name = Last[StringSplit[name, "/"]]
+    ];
     dir = Lookup[catalog, "Directory", None];
     builtFile = Lookup[catalog["Pages"][id], "File", None];
     candidates = DeleteCases[Join[
@@ -330,7 +336,7 @@ pageDefaultHome[catalog_Association] := Module[{pages = catalog["Pages"], root =
         Join[
             SortBy[Select[Keys[pages], StringStartsQ[#, "guide/"] &], guideKey[pages[#]] &],
             SortBy[Select[Keys[pages], StringStartsQ[#, "tutorial/"] &], tutorialKey[pages[#]] &],
-            SortBy[Select[Keys[pages], StringStartsQ[#, "ref/"] &], symbolKey[pages[#]] &]
+            SortBy[Select[Keys[pages], symbolPageQ], symbolKey[pages[#]] &]
         ],
         StringQ[#] && KeyExistsQ[pages, #] &,
         None
@@ -342,7 +348,7 @@ pageDefaultHome[catalog_Association] := Module[{pages = catalog["Pages"], root =
 pageResolveID[_, homeID_, Automatic] := homeID;
 pageResolveID[catalog_Association, _, uri_String /; StringStartsQ[uri, "paclet:"]] :=
     Replace[{uriPageID[catalog["Name"], uri]}, {{id_String} :> id, _ -> None}];
-pageResolveID[_, _, id_String /; StringMatchQ[id, ("guide" | "ref" | "tutorial") ~~ "/" ~~ Except["/"] ..]] := id;
+pageResolveID[_, _, id_String /; StringMatchQ[id, ("guide" | "ref" | "tutorial") ~~ "/" ~~ (Except["/"] ..) ~~ (("/" ~~ (Except["/"] ..)) ...)]] := id;
 pageResolveID[catalog_Association, _, name_String] := SelectFirst[
     {"ref/" <> name, "guide/" <> name, "tutorial/" <> name},
     KeyExistsQ[catalog["Pages"], #] &,

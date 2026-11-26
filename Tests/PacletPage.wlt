@@ -100,12 +100,13 @@ VerificationTest[
             "<a href=\"https://r.example/D/ref/Foo.html\">Foo again</a>",
             "<a href=\"https://r.example/D/tutorial/Intro.html\">Intro &amp; More</a>",
             "<a href=\"https://other.example/ref/Plus.html\">Plus</a>",
-            "<a href=\"https://r.example/D/ref/Foo.nb\">notebook</a>"
+            "<a href=\"https://r.example/D/ref/Foo.nb\">notebook</a>",
+            "<a href=\"https://r.example/D/ref/format/TTE.html\">TTE</a>"
         ],
         "https://r.example/D/"
     ],
-    {{"guide", "Main", "Main Guide"}, {"ref", "Foo", "Foo"}, {"ref", "$Bar", "$Bar"}, {"tutorial", "Intro", "Intro & More"}},
-    TestID -> "Catalog: the documentation links of a page, once each, $ names decoded"
+    {{"guide", "Main", "Main Guide"}, {"ref", "Foo", "Foo"}, {"ref", "$Bar", "$Bar"}, {"tutorial", "Intro", "Intro & More"}, {"ref", "format/TTE", "TTE"}},
+    TestID -> "Catalog: the documentation links of a page, once each, $ names decoded, a format page's of more parts"
 ]
 
 VerificationTest[
@@ -121,8 +122,9 @@ VerificationTest[
 ]
 
 VerificationTest[
-    {uriPageID["P/Q", "paclet:P/Q/ref/Foo#anchor"], uriPageID["P/Q", "paclet:P/Q/tutorial/$Var"], uriPageID["P/Q", "paclet:ref/Plus"], uriPageID["P/Q", "paclet:P/QR/ref/Foo"]},
-    {"ref/Foo", "tutorial/$Var"},
+    {uriPageID["P/Q", "paclet:P/Q/ref/Foo#anchor"], uriPageID["P/Q", "paclet:P/Q/tutorial/$Var"], uriPageID["P/Q", "paclet:ref/Plus"], uriPageID["P/Q", "paclet:P/QR/ref/Foo"],
+        uriPageID["P/Q", "paclet:P/Q/ref/format/TTE"], uriPageID["P/Q", "paclet:P/Q/ref/message/Foo/bad#x"]},
+    {"ref/Foo", "tutorial/$Var", "ref/format/TTE", "ref/message/Foo/bad"},
     TestID -> "Catalog: paclet: URIs of the paclet's own pages"
 ]
 
@@ -170,15 +172,21 @@ VerificationTest[
             FileNameJoin[Prepend[#, dir]] & /@ {
                 {"Documentation", "English", "Guides", "G.nb"},
                 {"Documentation", "English", "ReferencePages", "Symbols", "$S.nb"},
-                {"Documentation", "English", "Tutorials", "T.nb"}
+                {"Documentation", "English", "Tutorials", "T.nb"},
+                {"Documentation", "English", "ReferencePages", "Formats", "TTE.nb"},
+                {"Documentation", "English", "ReferencePages", "Services", "Svc.nb"}
             }
         ];
+        (* a message's page is named by its tag alone; its URI names its symbol too *)
+        CreateDirectory[FileNameJoin[{dir, "Documentation", "English", "ReferencePages", "Messages"}]];
+        Put[Notebook[{}, TaggingRules -> {"Metadata" -> {"uri" -> "Pub/Name/ref/message/Foo/bad"}}],
+            FileNameJoin[{dir, "Documentation", "English", "ReferencePages", "Messages", "bad.nb"}]];
         ids = Sort[Keys[localDocumentation[dir]]];
         DeleteDirectory[dir, DeleteContents -> True];
         ids
     ],
-    {"guide/G", "ref/$S", "tutorial/T"},
-    TestID -> "Catalog: the pages of a built paclet's documentation"
+    {"guide/G", "ref/format/TTE", "ref/message/Foo/bad", "ref/service/Svc", "ref/$S", "tutorial/T"},
+    TestID -> "Catalog: the pages of a built paclet's documentation, the formats, services and messages among them"
 ]
 
 
@@ -529,6 +537,32 @@ VerificationTest[
         True
     },
     TestID -> "Site: \"SymbolIndex\" makes the A-Z index optional, off until the reader turns it on by default, on with True, none with False"
+]
+
+VerificationTest[
+    Module[{catalog, html, expr, rail},
+        catalog = MapAt[Join[#, <|
+            "ref/format/TTE" -> fixturePage["ref", "format/TTE", "TTE", "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/ref/format/TTE.nb"],
+            "ref/service/Zed" -> fixturePage["ref", "service/Zed", "Zed", "https://c.example/obj/u/DeployedResources/Paclet/Pub/Name/Documentation/ref/service/Zed.nb"]|>] &,
+            cloudCatalog, Key["Pages"]];
+        html = PacletPageFiles[catalog]["index.html"];
+        rail = First[StringCases[html, "<nav id=\"side-right\"" ~~ Shortest[r___] ~~ "</nav>" :> r]];
+        expr = shellXML[catalog, <|"Mode" -> "Expression", "Name" -> "Pub/Name", "Prefix" -> "pp-", "Title" -> "Cloud Fixture",
+            "Subtitle" -> "", "Resource" -> "", "HomeID" -> "guide/Name", "ShowRootGuide" -> True, "StripTitleNumbers" -> True,
+            "SymbolsRail" -> True, "Header" -> True, "Footer" -> False, "ShowFilter" -> True, "Filter" -> "",
+            "Current" -> "ref/format/TTE", "ActiveTitle" -> "TTE", "Notebook" -> Notebook[{}]|>];
+        {
+            StringFreeQ[rail, {"data-id=\"ref/format/TTE\"", "data-id=\"ref/service/Zed\""}] && StringContainsQ[rail, "data-id=\"ref/$Var\""],
+            StringContainsQ[html, ">Formats</div>"] && StringContainsQ[html, ">Services</div>"],
+            StringContainsQ[html, "class=\"ref\" data-id=\"ref/format/TTE\""] || StringContainsQ[html, "data-id=\"ref/format/TTE\""],
+            Cases[expr, XMLElement["div", {___, "class" -> "pp-nav-label", ___}, {label_String}] :> label, Infinity],
+            FirstCase[expr, XMLElement["span", {___, "class" -> "pp-meta", ___}, {m_String}] :> m, None, Infinity],
+            {symbolPageQ["ref/F"], symbolPageQ["ref/format/TTE"], otherReferencePageQ["ref/format/TTE"], referenceKind["ref/message/Foo/bad"], referenceKindLabel["format"], referenceKindLabel["widget"]},
+            pageResolveID[catalog, "guide/Name", "ref/format/TTE"]
+        }
+    ],
+    {True, True, True, {"Formats", "Services", "Symbols"}, "1 guide \[CenterDot] 1 symbol", {True, False, True, "message", "Formats", "Widgets"}, "ref/format/TTE"},
+    TestID -> "Shell: a format's or a service's page is listed under its kind in the left rail, not among the symbols"
 ]
 
 VerificationTest[

@@ -8,12 +8,29 @@
      named by the page's data-nb-uri attribute;
    - a paclet resource the publisher deployed to a cloud account, .../DeployedResources/Paclet/<Pub>/<Name>:
      each page at .../Documentation/<kind>/<Page>.html, beside its notebook <Page>.nb.
-   kind is guide, ref or tutorial; a page's id in the site is <kind>/<Page>. Page names keep any
+   kind is guide, ref or tutorial; a page's id in the site is <kind>/<Page>, where a reference page
+   other than a symbol's has a Page of its kind and name, such as format/TTE. Page names keep any
    "$" they have: the pages of $-named symbols are pages like any other. *)
 
 $repositoryBase = "https://resources.wolframcloud.com/PacletRepository/resources/";
 
 $pageKinds = {"guide", "ref", "tutorial"};
+
+(* A symbol's page id is ref/<Name>. The other reference pages a template makes are ref/<kind>/<Name>,
+   as their URIs end and as the cloud publishes them: a format's ref/format/<Name>, a service's
+   ref/service/<Name>, and so on; a message's is ref/message/<Symbol>/<tag>. *)
+symbolPageQ[id_String] := StringMatchQ[id, "ref/" ~~ Except["/"] ..];
+symbolPageQ[_] := False;
+otherReferencePageQ[id_String] := StringStartsQ[id, "ref/"] && ! symbolPageQ[id];
+otherReferencePageQ[_] := False;
+referenceKind[id_String] := First[StringSplit[StringDrop[id, 4], "/", 2]];
+
+(* the reference directories under Documentation/English/ReferencePages besides Symbols, by the kind
+   their pages' ids name, and the heading the rail lists each kind under *)
+$referenceDirectories = <|"Formats" -> "format", "Services" -> "service", "Devices" -> "device",
+    "Interpreters" -> "interpreter", "Entities" -> "entity", "Characters" -> "character",
+    "Messages" -> "message", "Programs" -> "program"|>;
+referenceKindLabel[kind_String] := Replace[First[Keys[Select[$referenceDirectories, # === kind &]], None], None :> Capitalize[kind] <> "s"];
 
 pacletNameQ[name_String] := StringMatchQ[name,
     RegularExpression["[A-Za-z0-9_-]+/[A-Za-z0-9_-]+"]];
@@ -248,7 +265,7 @@ docLinks[html_String, docBase_String] := DeleteDuplicatesBy[
         Function[fields, {fields[[1]], URLDecode[fields[[2]]], linkTitle[fields[[3]]]}],
         StringSplit[#, $fieldSeparator, All] & /@ StringCases[html,
             RegularExpression["(?s)<a\\s[^>]*?href=\"" <> regexEscape[docBase] <>
-                "(guide|ref|tutorial)/([^\"/?#]+)\\.html\"[^>]*>(.*?)</a>"] ->
+                "(guide|ref|tutorial)/([^\"?#]+?)\\.html\"[^>]*>(.*?)</a>"] ->
                 "$1" <> $fieldSeparator <> "$2" <> $fieldSeparator <> "$3"]
     ],
     Take[#, 2] &
@@ -272,7 +289,7 @@ ruleValue[_, _List, default_] := default;
 uriPageID[name_String, uri_String] := Replace[
     StringCases[StringReplace[uri, "#" ~~ ___ ~~ EndOfString -> ""],
         StartOfString ~~ "paclet:" ~~ name ~~ "/" ~~ kind : ("guide" | "ref" | "tutorial") ~~ "/" ~~
-            page : (Except["/"] ..) ~~ EndOfString :> kind <> "/" <> page],
+            page : ((Except["/"] ..) ~~ (("/" ~~ (Except["/"] ..)) ...)) ~~ EndOfString :> kind <> "/" <> page],
     {{id_String} :> id, _ -> Nothing}
 ];
 
@@ -336,8 +353,18 @@ localDocumentation[dir_String] := Module[{root},
     Association @ Join[
         Map[("guide/" <> FileBaseName[#]) -> # &, FileNames["*.nb", FileNameJoin[{root, "Guides"}]]],
         Map[("ref/" <> FileBaseName[#]) -> # &, FileNames["*.nb", FileNameJoin[{root, "ReferencePages", "Symbols"}]]],
+        Catenate[KeyValueMap[Function[{folder, kind},
+            Map[notebookPageID[#, "ref/" <> kind <> "/" <> FileBaseName[#]] -> # &, FileNames["*.nb", FileNameJoin[{root, "ReferencePages", folder}]]]],
+            $referenceDirectories]],
         Map[("tutorial/" <> FileBaseName[#]) -> # &, FileNames["*.nb", FileNameJoin[{root, "Tutorials"}]]]
     ]
+];
+
+(* the id a reference page's notebook names in its URI, with the paclet's name taken off, else the
+   one its directory and its file give *)
+notebookPageID[file_String, fallback_String] := With[
+    {uri = ruleValue[FirstCase[localNotebook[file], (TaggingRules -> rules_) :> rules, {}, {1}], {"Metadata", "uri"}, None]},
+    If[StringQ[uri] && StringContainsQ[uri, "/ref/"], "ref/" <> Last[StringSplit[uri, "/ref/", 2]], fallback]
 ];
 
 localDocumentation[_] := <||>;

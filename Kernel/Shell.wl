@@ -372,7 +372,7 @@ leftRailXML[catalog_Association, cfg_Association] := Module[
         current = Lookup[cfg, "Current", None],
         includeSymbols = TrueQ[Lookup[cfg, "IncludeSymbols", False]],
         guidesHeading = TrueQ[Lookup[cfg, "GuidesHeading", False]],
-        definitions, shown, tree, reached, others, tutorials, tuts, apps, syms, out = {}, listSection, rootItems},
+        definitions, shown, tree, reached, others, tutorials, tuts, apps, references, referenceSections, syms, out = {}, listSection, rootItems},
     definitions = Select[Keys[pages], StringStartsQ[#, "resource/"] &];
     tree = If[StringQ[homeID] && StringStartsQ[homeID, "guide/"] && KeyExistsQ[pages, homeID], guideTree[pages, homeID, {}], None];
     reached = If[AssociationQ[tree], treeIDs[tree], {}];
@@ -435,8 +435,16 @@ leftRailXML[catalog_Association, cfg_Association] := Module[
         AppendTo[out, XMLElement["div", {"class" -> pfx <> "nav-sep"}, {}]]
     ];
     out = Join[out, listSection[tuts, "Tutorials", "tut"], listSection[apps, "Applications", "app"]];
+    (* the reference pages other than symbols, a format's, a service's and so on, under a heading
+       for their kind, after the tutorials *)
+    references = GroupBy[SortBy[Select[Keys[pages], otherReferencePageQ], ToLowerCase[shown[#]["Title"]] &], referenceKind];
+    referenceSections = Catenate[KeyValueMap[listSection[#2, referenceKindLabel[#1], "ref"] &, KeySortBy[references, referenceKindLabel]]];
+    If[ referenceSections =!= {} && tuts === {} && apps === {} && (mode === "HTML" || out =!= {}),
+        AppendTo[out, XMLElement["div", {"class" -> pfx <> "nav-sep"}, {}]]
+    ];
+    out = Join[out, referenceSections];
     If[ includeSymbols,
-        syms = Select[SortBy[Select[Keys[shown], StringStartsQ[#, "ref/"] &], symbolKey[shown[#]] &], pageMatchesFilterQ[shown[#], filter] &];
+        syms = Select[SortBy[Select[Keys[shown], symbolPageQ], symbolKey[shown[#]] &], pageMatchesFilterQ[shown[#], filter] &];
         If[ syms =!= {},
             If[out =!= {}, AppendTo[out, XMLElement["div", {"class" -> pfx <> "nav-sep"}, {}]]];
             out = Join[out, {
@@ -460,7 +468,7 @@ symbolsRailXML[catalog_Association, cfg_Association] := Module[
         filter = Replace[Lookup[cfg, "Filter", ""], Except[_String] -> ""],
         current = Lookup[cfg, "Current", None], syms},
     syms = Select[
-        SortBy[Select[Keys[pages], StringStartsQ[#, "ref/"] &], symbolKey[pages[#]] &],
+        SortBy[Select[Keys[pages], symbolPageQ], symbolKey[pages[#]] &],
         pageMatchesFilterQ[pages[#], filter] &
     ];
     If[ mode === "Expression" && syms === {}, Return[{}, Module]];
@@ -507,7 +515,7 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
         ids, indexable, indexed, letters, buckets, initial, group, batch, batchSize = 45,
         positions, label, remaining, count, initialOf, rowXML, rowsXML, buttonXML, optionXML,
         symbolCountText, moreText, ulEl, remainingEl, letterButtons, letterOptions, railEl, railClass},
-    ids = SortBy[Select[Keys[pages], StringStartsQ[#, "ref/"] &], symbolKey[pages[#]] &];
+    ids = SortBy[Select[Keys[pages], symbolPageQ], symbolKey[pages[#]] &];
     indexable = enabled && setting =!= False && Length[ids] > 24;
     indexed = indexable && TrueQ[setting];
     initialOf[id_String] := Replace[ToUpperCase[StringTake[StringDrop[id, 4], UpTo[1]]], "" -> "#"];
@@ -649,7 +657,7 @@ headerXML[catalog_Association, cfg_Association, layoutEl_] := Module[
         (* Expression mode *)
         nGuides = Count[Keys[pages], _?(StringStartsQ[#, "guide/"] &)];
         nTuts = Count[Keys[pages], _?(StringStartsQ[#, "tutorial/"] &)];
-        nSyms = Count[Keys[pages], _?(StringStartsQ[#, "ref/"] &)];
+        nSyms = Count[Keys[pages], _?symbolPageQ];
         summary = StringRiffle[DeleteCases[{
             If[nGuides > 0, ToString[nGuides] <> If[nGuides === 1, " guide", " guides"], ""],
             If[nTuts > 0, ToString[nTuts] <> If[nTuts === 1, " tech note", " tech notes"], ""],

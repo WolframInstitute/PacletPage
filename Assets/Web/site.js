@@ -60,7 +60,8 @@
     var s = href.split('#')[0].split('?')[0];
     for (var i = 0; i < C.routes.length; i++) {
       if (s.indexOf(C.routes[i]) !== 0) continue;
-      var m = s.slice(C.routes[i].length).match(/^(guide|ref|tutorial)\/([^\/]+?)(?:\.(?:html|nb))?$/);
+      // a reference page other than a symbol's has an id of more parts, such as ref/format/TTE
+      var m = s.slice(C.routes[i].length).match(/^(guide|ref|tutorial)\/([^?#]+?)(?:\.(?:html|nb))?$/);
       if (!m) continue;
       var id = m[1] + '/' + safeDecode(m[2]);
       if (KNOWN[id]) return id;

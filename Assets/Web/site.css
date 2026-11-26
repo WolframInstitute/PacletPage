@@ -177,6 +177,8 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
 #side a.tut { color: var(--pp-link); }
 /* worked applications, kept apart from the tutorials */
 #side a.app { color: var(--pp-app); }
+/* a reference page other than a symbol's, a format's or a service's, listed under its kind */
+#side a.ref { color: var(--pp-link); }
 #side a.app.active, #side a.tut.active { color: var(--pp-active-fg); }
 #side a.tut.stub, #side a.app.stub { color: var(--pp-stub); font-style: italic; }
 #side a.tut.stub:hover, #side a.app.stub:hover { color: var(--pp-stub-hover); }
