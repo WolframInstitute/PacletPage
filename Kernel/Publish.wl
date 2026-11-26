@@ -2182,14 +2182,21 @@ staleDocumentation[relatives_List, written_List] := Select[relatives,
 (* The copy-to-clipboard form of a documented symbol on the resource page. The stock boxes paste
    PacletSymbol[<the resource's URL>, symbol], which a kernel resolves by looking the URL up as a
    paclet name and never finding it, so every fresh session downloads the resource again. These
-   paste a form that names the version the code was copied from: where that version alone is
-   installed the paclet is found by name, and otherwise every installed version is uninstalled and
-   that one installed, from its published archive of that version or else from its resource, which
-   holds the newest. A copy loaded from a directory is not installed, and stays.
+   paste a form that installs the latest version where the paclet is not installed, from the
+   published archive of the latest or else from the resource, which holds the newest, and finds it
+   by name after; the form names no version, so a page is the same from one release to the next.
+   With "VersionPinned" -> True the form names the version the code was copied from: where that
+   version alone is installed the paclet is found by name, and otherwise every installed version
+   is uninstalled and that one installed, from its published archive of that version or else from
+   its resource. A copy loaded from a directory is not installed, and stays.
    The stock boxes are kept per id, so this is a rule placed before
    them, for the ids of this resource: its short URL or its deployed location. The rules here hold
    all they test, so a parallel kernel that transforms pages takes them as they are. *)
 
+installForm[name_String, None, archive_String, _] := With[{n = name, a = archive},
+    HoldComplete[If[PacletFind[n] === {}, PacletInstall[a], n]]];
+installForm[name_String, None, None, resource_String] := With[{n = name, r = resource},
+    HoldComplete[If[PacletFind[n] === {}, PacletInstall[ResourceObject[r]], n]]];
 installForm[name_String, version_String, archive_String, _] := With[{n = name, v = version, a = archive},
     HoldComplete[If[Through[PacletFind[n]["Version"]] === {v}, n, PacletUninstall[n]; PacletInstall[a]]]];
 installForm[name_String, version_String, None, resource_String] := With[{n = name, v = version, r = resource},
@@ -2260,7 +2267,9 @@ scrapeErrors[notebook_NotebookObject] := DeleteCases[
 ];
 
 (* the archive of one version, as publishArchive names it *)
+(* the published archive of a version, or with None the latest, as publishArchive names them *)
 archiveURL[dirName_String, name_String, version_String] := First[CloudObject[StringTrim[dirName, "/"] <> "/" <> StringReplace[name, "/" -> "__"] <> "-" <> version <> ".paclet"]];
+archiveURL[dirName_String, name_String, None] := First[CloudObject[StringTrim[dirName, "/"] <> "/" <> StringReplace[name, "/" -> "__"] <> ".paclet"]];
 archiveURL[_, _, _] := None;
 
 (* the symbols a built paclet's PacletInfo declares *)
@@ -3423,7 +3432,7 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
     With[{result = <|"Archive" -> built["Archive"], "Pages" -> Length[pages], "Load" -> load, "DeclaredSymbols" -> declared, "Symbols" -> archiveSymbols[FileNameJoin[{buildDir, prefix}]], "ArchiveSize" -> Quantity[FileByteCount[built["Archive"]], "Bytes"],
           "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel, "Missing" -> missing, "Flagged" -> flagged|>|>},
         Put[
-            <|"Archive" -> FileNameTake[built["Archive"]], "ArchiveHash" -> FileHash[built["Archive"], "SHA256", "HexString"], "Source" -> sources, "Result" -> result|>,
+            <|"Archive" -> FileNameTake[built["Archive"]], "ArchiveHash" -> FileHash[built["Archive"], "SHA256", "HexString"], "Source" -> sources, "Builder" -> builderKey[], "Result" -> result|>,
             FileNameJoin[{buildDir, "archive.wl"}]
         ];
         result
@@ -3435,15 +3444,26 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
    made, a hash of the archive, and a hash of the sources: every file of the paclet but build/,
    hidden files and the files left out, the authoring notebooks, and the options that change the
    archive. *)
-builtArchive[head_Symbol, dir_String, name_String, docSource_, pageOptions_Association] := Module[
+builtArchive[head_Symbol, dir_String, name_String, docSource_, pageOptions_Association] := Replace[
+    recordedArchive[dir, docSource, pageOptions, All],
+    None :> (Message[head::nobuild, dir]; $Failed)
+];
+
+(* the build's result for the archive build/archive.wl records, when the archive is there as
+   recorded and was built from the present sources, and, unless builder is All, by the builder
+   given; else None *)
+recordedArchive[dir_String, docSource_, pageOptions_Association, builder_] := Module[
     {buildDir = FileNameJoin[{dir, "build"}], stamp, archive},
     stamp = If[FileExistsQ[FileNameJoin[{buildDir, "archive.wl"}]], Get[FileNameJoin[{buildDir, "archive.wl"}]], None];
     archive = If[AssociationQ[stamp] && StringQ[stamp["Archive"]], FileNameJoin[{buildDir, stamp["Archive"]}], None];
     If[ ! StringQ[archive] || ! FileExistsQ[archive] || FileHash[archive, "SHA256", "HexString"] =!= stamp["ArchiveHash"] ||
-            stamp["Source"] =!= sourceHash[dir, docSource, pageOptions],
-        Message[head::nobuild, dir]; Return[$Failed, Module]];
+            (builder =!= All && Lookup[stamp, "Builder", None] =!= builder) || stamp["Source"] =!= sourceHash[dir, docSource, pageOptions],
+        Return[None, Module]];
     Append[stamp["Result"], "Archive" -> archive]
 ];
+
+(* what builds an archive besides its sources: this PacletPage's code and the Wolfram version *)
+builderKey[] := builderKey[] = digest[{codeHash[ParentDirectory[$packageDirectory]], $VersionNumber, $ReleaseNumber}];
 
 sourceHash[dir_String, docSource_, pageOptions_Association] := With[
     {excludedQ = Function[path, AnyTrue[Flatten[{Lookup[pageOptions, "Exclude", {}]}], StringMatchQ[path, #] &]]},
@@ -3617,6 +3637,7 @@ Options[DeployPacletResource] = {
     "MaxFailures" -> 0,
     "SourceArchive" -> None,
     "BundleDependencies" -> False,
+    "VersionPinned" -> False,
     Permissions -> "Public"
 };
 
@@ -3719,9 +3740,15 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
     ];
     built = With[
         {pageOptions = <|"Incremental" -> OptionValue["Incremental"], "Parallel" -> OptionValue["Parallel"], "TimeConstraint" -> OptionValue["TimeConstraint"], "Exclude" -> OptionValue["Exclude"], "ArchiveCheck" -> OptionValue["ArchiveCheck"], "Symbols" -> OptionValue["Symbols"], "MaxFailures" -> OptionValue["MaxFailures"], "BundleDependencies" -> OptionValue["BundleDependencies"]|>},
-        If[ TrueQ[OptionValue["Build"]],
-            freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], loadCheckOf[OptionValue["LoadCheck"], OptionValue["EvaluationKernel"], dir], pageOptions],
-            builtArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], pageOptions]
+        Switch[ OptionValue["Build"],
+            True, freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], loadCheckOf[OptionValue["LoadCheck"], OptionValue["EvaluationKernel"], dir], pageOptions],
+            (* the archive an earlier run built from the same sources with the same builder, as a
+               release's gate does, else a new one *)
+            Automatic, Replace[recordedArchive[dir, OptionValue["DocumentationSource"], pageOptions, builderKey[]], {
+                None :> freshArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], loadCheckOf[OptionValue["LoadCheck"], OptionValue["EvaluationKernel"], dir], pageOptions],
+                recorded_ :> (monitor["archive: the one build/archive.wl records, built from the same sources"]; recorded)
+            }],
+            _, builtArchive[DeployPacletResource, dir, name, OptionValue["DocumentationSource"], pageOptions]
         ]
     ];
     If[ built === $Failed, Throw[$Failed, "deploy"]];
@@ -3738,7 +3765,8 @@ DeployPacletResource[dir_String, opts : OptionsPattern[]] := Block[{$deployMonit
        offline dry run stops before it. *)
     hero = heroImage[OptionValue["HeroImage"], definition];
     (* the symbols' copied form and the declared symbols, in this kernel and the parallel ones *)
-    symbolRules = If[ offline, {}, symbolBoxRules[name, installForm[name, paclet["Version"], archiveURL[OptionValue["Archive"], name, paclet["Version"]], If[MatchQ[target, _CloudObject], First[target], None]]]];
+    symbolRules = If[ offline, {}, With[{version = If[TrueQ[OptionValue["VersionPinned"]], paclet["Version"], None]},
+        symbolBoxRules[name, installForm[name, version, archiveURL[OptionValue["Archive"], name, version], If[MatchQ[target, _CloudObject], First[target], None]]]]];
     pinned = pinRules[name, built["Symbols"]];
     {resource, location, deployed} = Replace[
         If[ offline, {None, None, None}, UsingFrontEnd @ Internal`InheritedBlock[

@@ -1833,6 +1833,30 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], archive, stamp, result},
+        CreateDirectory[FileNameJoin[{dir, "build"}]];
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/Sym\", \"Version\" -> \"1.0.0\"|>]", "Text"];
+        archive = FileNameJoin[{dir, "build", "Pub__Sym-1.0.0.paclet"}];
+        Export[archive, "not really an archive", "Text"];
+        stamp[builder_] := Put[<|"Archive" -> FileNameTake[archive], "ArchiveHash" -> FileHash[archive, "SHA256", "HexString"], "Source" -> sourceHash[dir, Automatic, <||>],
+            "Builder" -> builder, "Result" -> <|"Pages" -> 3|>|>, FileNameJoin[{dir, "build", "archive.wl"}]];
+        stamp[builderKey[]];
+        result = {recordedArchive[dir, Automatic, <||>, builderKey[]]};
+        (* another builder's archive, or one recorded before builders were *)
+        stamp["another PacletPage"];
+        AppendTo[result, recordedArchive[dir, Automatic, <||>, builderKey[]]];
+        AppendTo[result, recordedArchive[dir, Automatic, <||>, All]];
+        stamp[builderKey[]];
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/Sym\", \"Version\" -> \"1.0.1\"|>]", "Text"];
+        AppendTo[result, recordedArchive[dir, Automatic, <||>, builderKey[]]];
+        DeleteDirectory[dir, DeleteContents -> True];
+        {result[[1]]["Pages"], result[[2]], result[[3]]["Pages"], result[[4]], StringQ[builderKey[]], Lookup[Options[DeployPacletResource], "Build"]}
+    ],
+    {3, None, 3, None, True, True},
+    TestID -> "Archive: with \"Build\" -> Automatic a deploy takes the recorded archive only from the same sources and the same builder"
+]
+
+VerificationTest[
     Module[{section = guideTreeSection[
             {<|"URL" -> "https://c.example/D/guide/Main.html", "Title" -> "Main"|>, <|"URL" -> "https://c.example/D/guide/A.html", "Title" -> "Area A"|>,
              <|"URL" -> "https://c.example/D/guide/B.html", "Title" -> "Area B"|>, <|"URL" -> "https://c.example/D/guide/Lone.html", "Title" -> "Lone"|>},
@@ -3486,7 +3510,20 @@ VerificationTest[
         HoldComplete[PacletSymbol[If[Through[PacletFind["Pub/Sym"]["Version"]] === {"1.2.3"}, "Pub/Sym", PacletUninstall["Pub/Sym"]; PacletInstall["https://c.example/obj/u/Paclets/Pub__Sym-1.2.3.paclet"]], "PubSym`g"]],
         HoldComplete[PacletSymbol["https://c.example/obj/u/DeployedResources/Paclet/Other/X", "X`h"]]
     },
-    TestID -> "Publish: a symbol on the resource page copies as code that installs the version it was copied from, from that version's archive, in place of any other"
+    TestID -> "Publish: with \"VersionPinned\" -> True, a symbol on the resource page copies as code that installs the version it was copied from, from that version's archive, in place of any other"
+]
+
+VerificationTest[
+    Needs["PacletResource`"];
+    Internal`InheritedBlock[{PacletResource`Private`fancyPacletSymbolBoxes},
+        installSymbolBoxes["Pub/Sym", installForm["Pub/Sym", None, archiveURL["https://c.example/obj/u/Paclets", "Pub/Sym", None], "https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]];
+        Cases[
+            {PacletResource`Private`fancyPacletSymbolBoxes[HoldComplete["https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"], "Pub/Sym", "PubSym`f"]},
+            InterpretationBox[_, interpretation_, ___] :> HoldComplete[interpretation]
+        ]
+    ],
+    {HoldComplete[PacletSymbol[If[PacletFind["Pub/Sym"] === {}, PacletInstall["https://c.example/obj/u/Paclets/Pub__Sym.paclet"], "Pub/Sym"], "PubSym`f"]]},
+    TestID -> "Publish: a symbol on the resource page copies as code that names no version: it installs the latest archive where the paclet is not installed, and finds it by name after"
 ]
 
 VerificationTest[
@@ -3495,6 +3532,20 @@ VerificationTest[
     {HoldComplete[If[Through[PacletFind["Pub/Sym"]["Version"]] === {"1.2.3"}, "Pub/Sym", PacletUninstall["Pub/Sym"];
         PacletInstall[ResourceObject["https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]]]], None, None},
     TestID -> "Publish: without a published archive, the copied code installs the paclet from its resource"
+]
+
+VerificationTest[
+    {installForm["Pub/Sym", None, None, "https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"], installForm["Pub/Sym", None, None, None],
+        archiveURL["https://c.example/obj/u/Paclets/", "Pub/Sym", None], archiveURL[None, "Pub/Sym", None]},
+    {HoldComplete[If[PacletFind["Pub/Sym"] === {}, PacletInstall[ResourceObject["https://c.example/obj/u/DeployedResources/Paclet/Pub/Sym"]], "Pub/Sym"]], None,
+        "https://c.example/obj/u/Paclets/Pub__Sym.paclet", None},
+    TestID -> "Publish: the copied code that names no version installs from the resource without a published archive, and from the latest archive with one"
+]
+
+VerificationTest[
+    Lookup[Options[DeployPacletResource], "VersionPinned"],
+    False,
+    TestID -> "Publish: copied code names no version unless \"VersionPinned\" -> True"
 ]
 
 VerificationTest[

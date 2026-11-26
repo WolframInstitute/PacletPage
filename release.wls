@@ -24,6 +24,8 @@ result = PublishPacletPage[dir, "PacletPage",
     (* PACLETPAGE_PARALLEL=0 builds the pages in this kernel alone, on a machine others share *)
     (* no example shows PacletPage's own version, so a new version alone converts no page again *)
     "BuildOptions" -> {"Parallel" -> Replace[Environment["PACLETPAGE_PARALLEL"], {"0" | "False" -> False, _ -> Automatic}], "CacheVersion" -> False},
+    (* the release takes the archive its gate built from the same commit, in the same tree *)
+    "ResourceOptions" -> {"Build" -> Automatic},
     "SiteOptions" -> {"FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}}, "VersionLabel" -> True, "Footer" -> True}
 ]
 If[ ! AssociationQ[result], Exit[1]]
