@@ -1076,6 +1076,68 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], path = $ContextPath, d = "Dx" <> IntegerString[RandomInteger[10^12], 36], c = "Cx" <> IntegerString[RandomInteger[10^12], 36],
+            dep, pinned, newer, consumer, cache, build, first, second, after},
+        WithCleanup[
+            (* two copies of a dependency the consumer declares: one installed for the build into its
+               dependency directory, pinned, and a newer one loaded from elsewhere, as one installed would be *)
+            dep[sub_, version_, body_] := With[{dd = FileNameJoin[{root, sub, "Pub__" <> d <> "-" <> version}]},
+                CreateDirectory[FileNameJoin[{dd, "Kernel"}], CreateIntermediateDirectories -> True];
+                Export[FileNameJoin[{dd, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/" <> d <> "\", \"Version\" -> \"" <> version <> "\", \"PrimaryContext\" -> \"" <> d <>
+                    "`\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"" <> d <> "`\"}}|>]", "Text"];
+                Export[FileNameJoin[{dd, "Kernel", d <> ".wl"}], StringRiffle[{"BeginPackage[\"" <> d <> "`\"]", "f::usage = \"f[x]\";", "Begin[\"`Private`\"]",
+                    "f[x_] := " <> body, "End[]", "EndPackage[]"}, "\n"], "Text"];
+                dd
+            ];
+            pinned = dep["deps", "1.0", "x + 1"];
+            newer = dep["newer", "2.0", "x + 2"];
+            PacletDirectoryLoad[FileNameJoin[{root, "deps"}]];
+            consumer = FileNameJoin[{root, "consumer"}];
+            CreateDirectory[FileNameJoin[{consumer, "Kernel"}], CreateIntermediateDirectories -> True];
+            CreateDirectory[FileNameJoin[{consumer, "docs", "Symbols"}], CreateIntermediateDirectories -> True];
+            Export[FileNameJoin[{consumer, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/" <> c <> "\", \"Version\" -> \"1.0.0\", \"PrimaryContext\" -> \"" <> c <>
+                "`\", \"Dependencies\" -> {\"Pub/" <> d <> "\"}, \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"" <> c <> "`\"}}|>]", "Text"];
+            Export[FileNameJoin[{consumer, "Kernel", c <> ".wl"}], StringRiffle[{"BeginPackage[\"" <> c <> "`\", {\"" <> d <> "`\"}]", "foo::usage = \"foo[x]\";",
+                "Begin[\"`Private`\"]", "foo[x_] := f[x]", "End[]", "EndPackage[]"}, "\n"], "Text"];
+            Export[FileNameJoin[{consumer, "docs", "Symbols", "foo.md"}], "---\nTemplate: Symbol\nURI: Pub/" <> c <> "/ref/foo\n---\n\n```wl\nfoo[1]\n```\n", "Text"];
+            cache = FileNameJoin[{root, "cache"}];
+            build[] := Block[{$pinnedTargets = {ExpandFileName[FileNameJoin[{root, "deps"}]]}},
+                FileBaseName /@ BuildPacletDocumentation[consumer, "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False, "CacheDirectory" -> cache]["Converted"]];
+            first = build[];
+            PacletDirectoryLoad[newer];
+            second = build[];
+            after = Sort[Through[PacletFind["Pub/" <> d]["Version"]]];
+            {first, second, after},
+            Scan[PacletDirectoryUnload, {FileNameJoin[{root, "deps"}], newer, consumer}];
+            $ContextPath = Select[$ContextPath, MemberQ[path, #] &];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {{"foo"}, {}, {"1.0", "2.0"}},
+    TestID -> "Build: a newer copy of a declared dependency found elsewhere is set aside for the pinned copy, in the build's kernel and its scan, and found again after"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], copy, loaded, unloaded},
+        WithCleanup[
+            copy[sub_] := With[{dd = FileNameJoin[{root, sub, "Pub__Lib-1.0"}]},
+                CreateDirectory[dd, CreateIntermediateDirectories -> True];
+                Export[FileNameJoin[{dd, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/Lib\", \"Version\" -> \"1.0\"|>]", "Text"];
+                DirectoryName[dd]
+            ];
+            loaded = copy["loaded"]; unloaded = copy["unloaded"];
+            PacletDirectoryLoad[loaded];
+            Block[{$pinnedTargets = ExpandFileName /@ {loaded, unloaded}},
+                FileNameTake[#, -2] & /@ Rest[Most[buildCopies[FileNameJoin[{root, "consumer"}], {}]]]],
+            PacletDirectoryUnload[loaded];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {FileNameJoin[{"loaded", "Pub__Lib-1.0"}]},
+    TestID -> "Build: the copies a build uses include the pinned ones in a dependency directory still loaded"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{work = CreateDirectory[], in, out, run, result},
         in = FileNameJoin[{work, "in.wxf"}];
         out = FileNameJoin[{work, "out.wxf"}];

@@ -169,6 +169,23 @@ before = snapshot[];
 progress[IntegerString[Length[before]], " System` and Global` definitions hashed"];
 contextsBefore = AssociationThread[Contexts[] -> True];
 Scan[PacletDirectoryLoad, input["Directories"]];
+(* The copies the build uses, "Preferred", and no other copy of their names, as in the build's own
+   kernel (PacletPage's $setAsideCopies, which this script has its own copy of, so that nothing of
+   PacletPage's contexts exists here before the loading): a newer copy installed elsewhere is set
+   aside for this kernel's session, in PacletManager's transient list of disabled paclets, which it
+   never saves, with a line. *)
+setAsideCopies[locations_List] := Module[{kept, others},
+    kept = Select[PacletObject[File[#]] & /@ Select[locations, StringQ[#] && DirectoryQ[#] &], PacletObjectQ];
+    others = DeleteDuplicates @ Catenate @ Map[
+        Function[p, Select[PacletFind[p["Name"]], ExpandFileName[#["Location"]] =!= ExpandFileName[p["Location"]] &]], kept];
+    If[ others === {} || ! ListQ["DisabledTransient" /. PacletManager`Package`$managerData], Return[{}, Module]];
+    PacletManager`Package`updateManagerData["DisabledTransient" ->
+        Union["DisabledTransient" /. PacletManager`Package`$managerData, PacletManager`Package`PgetKey /@ others]];
+    PacletManager`Manager`Private`rebuildPathMap[];
+    PacletManager`Manager`Private`clearLibraryCache[];
+    others
+];
+Scan[progress[#["Name"], " ", #["Version"], " at ", #["Location"], " set aside for the copy the build uses"] &, setAsideCopies[Lookup[input, "Preferred", {}]]];
 
 read = {};
 (* an event holds what Get was given, a file or a context, which FindFile resolves as Get does *)

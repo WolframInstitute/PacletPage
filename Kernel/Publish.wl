@@ -196,6 +196,58 @@ withoutLanguageData[expr_] := (
     ]
 );
 
+(* === the copies a build uses ===
+   A build uses the copy of the paclet it documents, the copies of its dependencies installed for a
+   build into a dependency directory, pinned, those given in "Dependencies" as directories, and the
+   running PacletPage. A newer copy of one of them installed in the user paclet repository, or
+   loaded from elsewhere, would otherwise be what its context loads and what its name finds, in the
+   building kernel and in the kernels it starts, and the pages' keys and outputs would follow it.
+   In each such kernel the other copies of their names are set aside for the session: PacletManager
+   keeps a transient list of disabled paclets that it never saves, and makes its maps of contexts
+   and libraries again. $setAsideCopies runs in any kernel, its names in full; it gives each copy set
+   aside, or $Failed where PacletManager has no such list. The scan reports a copy that still
+   outranks one the build uses. *)
+$setAsideCopies = Function[locations, Module[{kept, others},
+    kept = Select[PacletObject[File[#]] & /@ Select[locations, StringQ[#] && DirectoryQ[#] &], PacletObjectQ];
+    others = DeleteDuplicates @ Catenate @ Map[
+        Function[p, Select[PacletFind[p["Name"]], ExpandFileName[#["Location"]] =!= ExpandFileName[p["Location"]] &]], kept];
+    Which[
+        others === {}, {},
+        ! ListQ["DisabledTransient" /. PacletManager`Package`$managerData], $Failed,
+        True,
+            PacletManager`Package`updateManagerData["DisabledTransient" ->
+                Union["DisabledTransient" /. PacletManager`Package`$managerData, PacletManager`Package`PgetKey /@ others]];
+            PacletManager`Manager`Private`rebuildPathMap[];
+            PacletManager`Manager`Private`clearLibraryCache[];
+            <|"Name" -> #["Name"], "Version" -> #["Version"], "Location" -> #["Location"], "Key" -> PacletManager`Package`PgetKey[#]|> & /@ others
+    ]
+]];
+
+(* the copies set aside brought back, at the end of the build that set them aside *)
+restoreCopies[aside : {__Association}] := (
+    PacletManager`Package`updateManagerData["DisabledTransient" ->
+        Complement["DisabledTransient" /. PacletManager`Package`$managerData, Lookup[aside, "Key"]]];
+    PacletManager`Manager`Private`rebuildPathMap[];
+    PacletManager`Manager`Private`clearLibraryCache[];
+);
+restoreCopies[_] := Null;
+
+(* the dependency directories this session's builds installed into, pinned *)
+$pinnedTargets = {};
+
+(* the copies a build of dir uses: the paclet's own, the pinned copies in a dependency directory
+   still loaded, the dependencies given as directories, and the running PacletPage *)
+buildCopies[dir_String, dependencies_] := DeleteDuplicates @ Join[
+    {dir},
+    Catenate @ Map[
+        Function[target, Select[FileNames[All, target], DirectoryQ[#] && ! StringStartsQ[FileNameTake[#], "."] &&
+            AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, Function[file, FileExistsQ[FileNameJoin[{#, file}]]]] &]],
+        Select[$pinnedTargets, DirectoryQ[#] && MemberQ[ExpandFileName /@ Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}], StringQ], ExpandFileName[#]] &]
+    ],
+    Select[Replace[dependencies, Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &],
+    Select[{ParentDirectory[$packageDirectory]}, AnyTrue[{"PacletInfo.wl", "PacletInfo.m"}, Function[file, FileExistsQ[FileNameJoin[{#, file}]]]] &]
+];
+
 (* the paclet directories this kernel has loaded *)
 pacletDirectories[] := DeleteDuplicates @ Join[
     Select[Replace[PacletDirectoryLoad[], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &],
@@ -399,7 +451,8 @@ scanPaclet[dir_String, context_String, closure_List, opts_Association] := With[{
         digest[{codeHash[Prepend[closure, dir], {}, True], {StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} & /@ pacletFiles[dir],
             Function[d, {FileNameTake[#], FileHash[#, "SHA256"]} & /@ pacletFiles[d]] /@ closure, opts["Excluded"], dirs, context, $VersionNumber, $ReleaseNumber, FileHash[$definitionScan, "SHA256"]}],
         opts["Cache"], opts["Work"], opts["Monitor"], DeleteDuplicates[Select[pacletContext /@ closure, StringQ]],
-        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"], "Files" -> AssociationMap[pacletFiles, Prepend[closure, dir]]|>
+        <|"DependencyDirectories" -> Select[closure, StringQ[pacletContext[#]] &], "Excluded" -> opts["Excluded"], "Files" -> AssociationMap[pacletFiles, Prepend[closure, dir]],
+          "Preferred" -> Lookup[opts, "Preferred", {}]|>
     ]
 ];
 
@@ -413,17 +466,20 @@ Options[PacletDefinitionScan] = {"Dependencies" -> Automatic, "CacheDirectory" -
 Options[PacletPageDependencies] = Join[Options[PacletDefinitionScan], {"CacheVersion" -> True, "Converter" -> Automatic}];
 
 (* the scan, with what it was made of: {scan, closure, excluded}, or $Failed after a message *)
-readerScan[head_, dir_String, options_List] := Module[{paclet, context, closure, cache, work, scan, excluded},
+readerScan[head_, dir_String, options_List] := Module[{paclet, context, closure, cache, work, scan, excluded, preferred, aside},
     paclet = If[FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] || FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]], PacletObject[File[dir]], None];
     context = If[PacletObjectQ[paclet], paclet["PrimaryContext"], None];
     If[ ! StringQ[context], With[{h = head}, Message[MessageName[h, "dir"], dir]]; Return[$Failed, Module]];
     PacletDirectoryLoad[dir];
     excluded = Flatten[{OptionValue[head, options, "CacheExcludedFiles"]}];
-    closure = dependencyClosure[dir, OptionValue[head, options, "Dependencies"]];
+    (* the copies a build would use, while the closure is found *)
+    preferred = buildCopies[dir, OptionValue[head, options, "Dependencies"]];
+    aside = $setAsideCopies[preferred];
+    closure = WithCleanup[dependencyClosure[dir, OptionValue[head, options, "Dependencies"]], restoreCopies[aside]];
     cache = Replace[OptionValue[head, options, "CacheDirectory"], Automatic -> FileNameJoin[{dir, "build", "cache"}]];
     If[ ! DirectoryQ[cache], CreateDirectory[cache, CreateIntermediateDirectories -> True]];
     work = CreateDirectory[];
-    scan = scanPaclet[dir, context, closure, <|"Excluded" -> excluded, "Cache" -> cache, "Work" -> work, "Monitor" -> TrueQ[OptionValue[head, options, "Monitor"]]|>];
+    scan = scanPaclet[dir, context, closure, <|"Excluded" -> excluded, "Cache" -> cache, "Work" -> work, "Monitor" -> TrueQ[OptionValue[head, options, "Monitor"]], "Preferred" -> preferred|>];
     DeleteDirectory[work, DeleteContents -> True];
     If[ FailureQ[scan], With[{h = head}, Message[MessageName[h, "scan"], scan["Message"]]]; Return[$Failed, Module]];
     {scan, closure, excluded}
@@ -944,11 +1000,13 @@ matchGeneralMessages[_] := Null;
    restarts after a crash keeps the distributed definitions, and nothing else *)
 workerFunction[setup_Association] := With[
     {dirs = setup["Directories"], context = setup["Context"], load = setup["Load"], limit = setup["TimeConstraint"], monitor = setup["Monitor"],
-     off = Lookup[setup, "Off", None], prepare = Lookup[setup, "Prepare", Function[Null, Null]]},
+     off = Lookup[setup, "Off", None], prepare = Lookup[setup, "Prepare", Function[Null, Null]],
+     preferred = Lookup[setup, "Preferred", {}], setAside = Lookup[setup, "SetAside", Function[Null, {}]]},
     Function[task,
         If[ ! TrueQ[$workerReady],
             matchGeneralMessages[off];
             Scan[PacletDirectoryLoad, dirs];
+            setAside[preferred];
             If[ StringQ[context], Needs[context]];
             $workerConverter = ReleaseHold[load];
             If[ Head[$workerConverter] === Symbol, prepare[With[{s = $workerConverter}, Context[s]]]];
@@ -1113,6 +1171,8 @@ installBuildDependencies[head_Symbol, dir_String, spec_, directory_ : Automatic]
     If[target === $Failed,
         Message[head::installdeps, dir, "Invalid DependencyDirectory specification: " <> ToString[directory, InputForm]];
         Return[$Failed]];
+    (* its copies are the ones a build uses, whatever else is installed *)
+    If[StringQ[target], $pinnedTargets = DeleteDuplicates[Append[$pinnedTargets, ExpandFileName[target]]]];
     owner = PacletObject[File[dir]];
     manifest = dependencyManifest[owner];
     If[FailureQ[manifest], Message[head::installdeps, dir, manifest]; Return[$Failed]];
@@ -1139,13 +1199,14 @@ installBuildDependencies[head_Symbol, dir_String, spec_, directory_ : Automatic]
 
 (* a build, as a deploy, keeps the kernel's asynchronous site update and information refresh from
    starting while it runs (see $sitesRefreshed) *)
-BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Block[{$programHashes = <||>,
-    ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &}, buildPacletDocumentation[dir, opts]];
+BuildPacletDocumentation[dir_String, opts : OptionsPattern[]] := Block[{$programHashes = <||>, $setAside = {},
+    ResourceSystemClient`$AsyncronousResourceInformationUpdates = False, PacletManager`Services`Private`doWeeklyUpdate = Null &},
+    WithCleanup[buildPacletDocumentation[dir, opts], restoreCopies[$setAside]]];
 buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentation]] := Module[
     {
         paclet, source, target, spec, converterID, cache, pagesDir, workDir, manifestFile, evaluated, codes, keyed, internals, examplesFile, examples, store, cacheSymbol, useCache, separator,
         all, files, metas, guides, definitionSource, tasks, misses, kernelsBefore, kernels, setup, results, outcomes,
-        ok, failed, pruned, pageFiles, skipped, unevaluated, flagged, kernelPIDs
+        ok, failed, pruned, pageFiles, skipped, unevaluated, flagged, kernelPIDs, preferred
     },
     If[ ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.wl"}]] && ! FileExistsQ[FileNameJoin[{dir, "PacletInfo.m"}]],
         Message[BuildPacletDocumentation::dir, dir]; Return[$Failed, Module]];
@@ -1164,6 +1225,11 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     (* the paclet itself, and the dependencies given as directories, for the examples *)
     PacletDirectoryLoad[dir];
     Scan[PacletDirectoryLoad, Select[Replace[OptionValue["Dependencies"], Except[_List] -> {}], StringQ[#] && DirectoryQ[#] &]];
+    (* the copies this build uses, and no other copy of their names, before anything loads them *)
+    preferred = buildCopies[dir, OptionValue["Dependencies"]];
+    $setAside = Replace[$setAsideCopies[preferred], Except[_List] -> {}];
+    If[ TrueQ[OptionValue["Monitor"]],
+        Scan[Print["dependencies: ", #["Name"], " ", #["Version"], " at ", #["Location"], " set aside for the copy this build uses"] &, $setAside]];
     paclet = PacletObject[File[dir]];
     (* a paclet whose examples run on another kernel loads there, and need not load here *)
     If[ StringQ[paclet["PrimaryContext"]] && OptionValue["EvaluationKernel"] === None, Needs[paclet["PrimaryContext"]]];
@@ -1233,7 +1299,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     keyed = pageCodes[OptionValue["CacheKey"], dir, paclet, tasks, <|
         "Dependencies" -> OptionValue["Dependencies"], "Excluded" -> Flatten[{OptionValue["CacheExcludedFiles"]}],
         "Versioned" -> OptionValue["CacheVersion"], "Converter" -> converterID, "EvaluationKernel" -> OptionValue["EvaluationKernel"],
-        "Cache" -> cache, "Work" -> workDir, "Monitor" -> TrueQ[OptionValue["Monitor"]]
+        "Cache" -> cache, "Work" -> workDir, "Monitor" -> TrueQ[OptionValue["Monitor"]], "Preferred" -> preferred
     |>];
     codes = keyed["Codes"];
     If[ TrueQ[OptionValue["Monitor"]] && keyed["Keys"] =!= None, Print["definitions: ", Length[codes], " pages keyed"]];
@@ -1289,6 +1355,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     kernelPIDs = If[kernels === {}, {}, kernelProcessIDs[Complement[Kernels[], kernelsBefore]]];
     setup = <|
         "Directories" -> DeleteDuplicates[Append[pacletDirectories[], dir]], "Load" -> spec["Load"], "Prepare" -> $parserPreparation,
+        "Preferred" -> preferred, "SetAside" -> $setAsideCopies,
         "Context" -> If[OptionValue["EvaluationKernel"] === None, paclet["PrimaryContext"], None],
         "TimeConstraint" -> OptionValue["TimeConstraint"], "Monitor" -> TrueQ[OptionValue["Monitor"]]
     |>;
