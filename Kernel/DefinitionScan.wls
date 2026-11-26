@@ -185,7 +185,8 @@ setAsideCopies[locations_List] := Module[{kept, others},
     PacletManager`Manager`Private`clearLibraryCache[];
     others
 ];
-Scan[progress[#["Name"], " ", #["Version"], " at ", #["Location"], " set aside for the copy the build uses"] &, setAsideCopies[Lookup[input, "Preferred", {}]]];
+KeyValueMap[progress[#1, ": ", IntegerString[Length[#2]], If[Length[#2] === 1, " other copy", " other copies"], " set aside for the copy the build uses, versions ",
+    StringRiffle[#["Version"] & /@ #2, ", "]] &, GroupBy[setAsideCopies[Lookup[input, "Preferred", {}]], #["Name"] &]];
 
 read = {};
 (* an event holds what Get was given, a file or a context, which FindFile resolves as Get does *)

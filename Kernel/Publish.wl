@@ -181,6 +181,30 @@ fileKey[file_String, versioned_] := If[ TrueQ[versioned] || ! StringStartsQ[File
     Hash[StringDelete[ByteArrayToString[ReadByteArray[file], "UTF-8"], RegularExpression["\"Version\"\\s*->\\s*\"[^\"]*\"\\s*,?"]], "SHA256"]
 ];
 
+(* A PacletInfo's part of every page's key: all of it but its "Dependencies", and its "Version"
+   where versioned is False. A declaration says what the paclet needs, not what its code does: a
+   dependency's code is keyed through the definitions the scan loads, so moving a "Pin" or a
+   minimum keys no page again. A page whose code reads the declaration as it runs has it in its own
+   key (declarationReaders). A PacletInfo that is no PacletObject[<|...|>] is keyed whole. *)
+pacletInfoKey[file_String, versioned_] := Replace[
+    FirstCase[Import[file, "HeldExpressions"], HoldComplete[PacletObject[info_Association]] :> info, None],
+    {info_Association :> digest[KeyDrop[info, If[TrueQ[versioned], {"Dependencies"}, {"Dependencies", "Version"}]]], _ :> fileKey[file, versioned]}
+];
+pacletDeclaration[dir_String] := Replace[
+    FirstCase[Import[#, "HeldExpressions"] & /@ Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
+        HoldComplete[PacletObject[info_Association]] :> Lookup[info, "Dependencies", None], None, Infinity],
+    declaration : Except[None] :> digest[declaration]
+];
+
+(* The functions that read a paclet's declared dependencies as they run, and so give what the
+   declaration says; a page whose names reach one has the declaration in its key *)
+$declarationReaders = "WolframInstitute`PacletPage`" <> # & /@ {"PacletDependencyInformation", "PacletDependencyDialog", "PacletDependencyReport",
+    "InstallPacletDependencies", "UpdatePacletDependencies", "UninstallPacletDependencies"};
+declarationReaders[scan_Association, dir_String] := With[{targets = Select[$declarationReaders, KeyExistsQ[scan["Symbols"], #] &]},
+    If[ targets === {}, <||>,
+        <|"Readers" -> AssociationThread[VertexInComponent[scanGraph[scan], targets] -> True], "Declaration" -> pacletDeclaration[dir]|>]
+];
+
 (* PacletResource's search index data skeletonizes each page, and DocumentationSearch asks
    WolframLanguageData about every page that is not one of System's symbols, a paclet's own among
    them, which have no entries. While that service fails, the unevaluated query is what it caches,
@@ -222,6 +246,15 @@ $setAsideCopies = Function[locations, Module[{kept, others},
             <|"Name" -> #["Name"], "Version" -> #["Version"], "Location" -> #["Location"], "Key" -> PacletManager`Package`PgetKey[#]|> & /@ others
     ]
 ]];
+
+(* a line for each name whose other copies are set aside: their versions, or the one's location *)
+setAsideLines[aside_List] := KeyValueMap[
+    Function[{name, copies}, If[ Length[copies] === 1,
+        name <> " " <> copies[[1, "Version"]] <> " at " <> copies[[1, "Location"]] <> " set aside for the copy this build uses",
+        name <> ": " <> IntegerString[Length[copies]] <> " other copies set aside for the copy this build uses, versions " <>
+            StringRiffle[Lookup[copies, "Version"], ", "]]],
+    GroupBy[aside, #["Name"] &]
+];
 
 (* the copies set aside brought back, at the end of the build that set them aside *)
 restoreCopies[aside : {__Association}] := (
@@ -367,7 +400,7 @@ runScan[arguments_List, monitored_, deadline_] := Module[{kernel = kernelExecuta
 sharedCode[dir_String, scan_Association, dependencies_List, excluded_List, versioned_, converterID_] := With[
     {read = AssociationThread[ExpandFileName /@ Join[scan["Read"], Lookup[scan, "Attached", {}]] -> True], unloaded = Lookup[scan, "Unloaded", {}]},
     digest[{
-        fileKey[#, versioned] & /@ Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
+        pacletInfoKey[#, versioned] & /@ Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
         unreadFiles[dir, read, excluded],
         scan["Foreign"],
         (* a dependency's definitions, and what no definition shows of it, are in the cones that
@@ -427,7 +460,10 @@ definitionKeys[scan_Association, shared_String] := <|
 
 (* the code names reach: the shared part and the digests of the cones of the paclet's symbols
    they name, a name in full or by its own name, unless that is a System` symbol's *)
-namesCode[keys_Association, names_List, shared_String : "Shared"] := digest[{keys[shared], Union @ Lookup[keys["Cones"], namedSymbols[keys, names]]}];
+namesCode[keys_Association, names_List, shared_String : "Shared"] := With[{named = namedSymbols[keys, names]},
+    digest[Join[{keys[shared], Union @ Lookup[keys["Cones"], named]},
+        If[ AssociationQ[Lookup[keys, "Readers", None]] && AnyTrue[named, KeyExistsQ[keys["Readers"], #] &], {keys["Declaration"]}, {}]]]
+];
 (* the paclet's symbols that names name *)
 namedSymbols[keys_Association, names_List] := DeleteDuplicates @ Catenate @ Map[
     Which[
@@ -506,6 +542,7 @@ PacletPageDependencies[dir_String, file_String, opts : OptionsPattern[]] := Modu
     If[ result === $Failed, Return[$Failed, Module]];
     scan = First[result];
     keys = definitionKeys[scan, sharedCode[dir, scan, result[[2]], result[[3]], OptionValue["CacheVersion"], converterKey[converterSpec[OptionValue["Converter"]]]]];
+    keys = Join[keys, declarationReaders[scan, dir]];
     named = Sort[namedSymbols[keys, pageTextNames[file]]];
     graph = scanGraph[scan];
     <|
@@ -542,6 +579,7 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
        converter does not: its code has the shared part without the converter, so that another
        converter converts every page again and evaluates none of its examples again. *)
     keys["ExampleShared"] = sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], None];
+    keys = Join[keys, declarationReaders[scan, dir]];
     <|"Codes" -> Association[#Page -> pageCode[keys, #File] & /@ tasks], "Keys" -> keys|>
 ];
 
@@ -1228,8 +1266,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     (* the copies this build uses, and no other copy of their names, before anything loads them *)
     preferred = buildCopies[dir, OptionValue["Dependencies"]];
     $setAside = Replace[$setAsideCopies[preferred], Except[_List] -> {}];
-    If[ TrueQ[OptionValue["Monitor"]],
-        Scan[Print["dependencies: ", #["Name"], " ", #["Version"], " at ", #["Location"], " set aside for the copy this build uses"] &, $setAside]];
+    If[ TrueQ[OptionValue["Monitor"]], Scan[Print["dependencies: ", #] &, setAsideLines[$setAside]]];
     paclet = PacletObject[File[dir]];
     (* a paclet whose examples run on another kernel loads there, and need not load here *)
     If[ StringQ[paclet["PrimaryContext"]] && OptionValue["EvaluationKernel"] === None, Needs[paclet["PrimaryContext"]]];

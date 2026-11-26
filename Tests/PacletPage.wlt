@@ -1138,6 +1138,36 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], path = $ContextPath, name = "Fx" <> IntegerString[RandomInteger[10^12], 36], dir, info, build, runs = {}},
+        WithCleanup[
+            dir = FileNameJoin[{root, "consumer"}];
+            CreateDirectory[FileNameJoin[{dir, "Kernel"}], CreateIntermediateDirectories -> True];
+            CreateDirectory[FileNameJoin[{dir, "docs", "Symbols"}], CreateIntermediateDirectories -> True];
+            (* a consumer that declares PacletPage with a minimum and a build's pin *)
+            info[minimum_, pin_] := Export[FileNameJoin[{dir, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/" <> name <> "\", \"Version\" -> \"1.0.0\", \"PrimaryContext\" -> \"" <> name <>
+                "`\", \"Dependencies\" -> {<|\"Name\" -> \"WolframInstitute/PacletPage\", \"Version\" -> \"" <> minimum <> "\", \"Pin\" -> <|\"Version\" -> \"" <> pin <>
+                "\"|>|>}, \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"" <> name <> "`\"}}|>]", "Text"];
+            (* foo uses nothing of the declaration; setup reads it as it runs *)
+            Export[FileNameJoin[{dir, "Kernel", name <> ".wl"}], StringRiffle[{"BeginPackage[\"" <> name <> "`\"]", "foo::usage = \"foo[x]\";", "setup::usage = \"setup[]\";",
+                "Begin[\"`Private`\"]", "foo[x_] := x + 1",
+                "setup[] := WolframInstitute`PacletPage`PacletDependencyInformation[\"Pub/" <> name <> "\", \"Output\" -> \"Association\"]", "End[]", "EndPackage[]"}, "\n"], "Text"];
+            Scan[Export[FileNameJoin[{dir, "docs", "Symbols", # <> ".md"}], "---\nTemplate: Symbol\nURI: Pub/" <> name <> "/ref/" <> # <> "\n---\n\n```wl\n" <> # <> "[]\n```\n", "Text"] &, {"foo", "setup"}];
+            build[] := AppendTo[runs, Sort[FileBaseName /@ BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False]["Converted"]]];
+            info["0.3+", "0.3.98"]; build[];
+            info["0.3+", "0.3.99"]; build[];
+            info["0.4+", "0.3.99"]; build[];
+            runs,
+            PacletDirectoryUnload[dir];
+            $ContextPath = Select[$ContextPath, MemberQ[path, #] &];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    (* setup's output, PacletDependencyInformation's, shows the pin and the minimum *)
+    {{"foo", "setup"}, {"setup"}, {"setup"}},
+    TestID -> "Build: moving a dependency's pin or minimum converts again only the pages whose code reads the declaration"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{work = CreateDirectory[], in, out, run, result},
         in = FileNameJoin[{work, "in.wxf"}];
         out = FileNameJoin[{work, "out.wxf"}];

@@ -142,7 +142,9 @@ The page of `Wave` reaches `Wave` alone, so the change to `Wave` converted it an
 PacletPageDependencies[dir, FileNameJoin[{dir, "docs", "Symbols", "Wave.md"}]]["Reached"]
 ```
 
-The code holds the digests of the named symbols' cones and what every page shares: the paclet's `PacletInfo.wl`, the converter, the files the loading did not read and no code names, and the definitions of ``System` `` symbols that the paclet's own loading changed.
+The code holds the digests of the named symbols' cones and what every page shares: the paclet's `PacletInfo.wl` but its `"Dependencies"`, the converter, the files the loading did not read and no code names, and the definitions of ``System` `` symbols that the paclet's own loading changed.
+
+The declared dependencies are a page's only where its names reach a function that reads them as it runs, such as `PacletDependencyInformation`. A dependency's code is in the cones of the definitions that use it, so moving a `"Pin"` or a minimum converts again only the pages that show the declaration.
 
 - A name in a string counts when it can be a symbol's name. A string with its context, such as `` "Demo`Greetings`Wave" ``, names that symbol. A bare name names a symbol of the same paclet, or a symbol in a context that the code, or code it calls, holds as a string, as a helper that joins a context to a name for `Symbol` does.
 - A symbol's messages are part of its fingerprint, but the names in them are not uses.
