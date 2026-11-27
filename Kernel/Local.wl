@@ -90,18 +90,7 @@ BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Block[{$deployMonito
 (* The catalog of a paclet's own documentation notebooks: each page rendered at
    Documentation/<kind>/<name>.html beside the site *)
 localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit[name, "/"]], joined = StringDelete[name, "/"], pages, root},
-    pages = Association @ KeyValueMap[
-        Function[{id, file}, With[{nb = localNotebook[file]},
-            id -> Join[
-                <|"Kind" -> pageKind[id], "Name" -> pageName[id], "Title" -> localTitle[nb, pageName[id]], "Keywords" -> {}, "Guides" -> {},
-                  "HTML" -> "Documentation/" <> id <> ".html", "Notebook" -> ""|>,
-                If[MatchQ[nb, _Notebook], <|"Keywords" -> notebookMetadata[nb]["Keywords"]|>, <||>],
-                If[pageKind[id] === "tutorial", <|"Stub" -> placeholderQ[nb], "Overview" -> overviewNotebookQ[nb]|>, <||>],
-                If[pageKind[id] === "guide" && MatchQ[nb, _Notebook], <|"Guides" -> DeleteCases[guideStructure[name, nb]["Children"], id]|>, <||>]
-            ]
-        ]],
-        local
-    ];
+    pages = Association @ KeyValueMap[#1 -> localPage[name, #1, #2] &, local];
     root = SelectFirst[
         Join[{"guide/" <> short, "guide/" <> joined}, SortBy[Select[Keys[pages], StringStartsQ[#, "guide/"] &], guideKey[pages[#]] &]],
         StringQ[#] && KeyExistsQ[pages, #] &,
@@ -116,6 +105,25 @@ localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit
         "RootGuide" -> root,
         "Pages" -> pages
     |>
+];
+
+(* A page of the catalog. A guide's children and a tutorial's state are read from its cells; any
+   other page, a symbol's above all, takes its title and keywords from its notebook's metadata, read
+   without its cells, and is read whole only where the file holds no metadata to read. *)
+localPage[name_String, id_String, file_String] := With[{meta = If[MemberQ[{"guide", "tutorial"}, pageKind[id]], None, fileMetadata[file]]},
+    If[ AssociationQ[meta],
+        <|"Kind" -> pageKind[id], "Name" -> pageName[id], "Title" -> Replace[meta["Title"], _Missing -> pageName[id]], "Keywords" -> meta["Keywords"],
+          "Guides" -> {}, "HTML" -> "Documentation/" <> id <> ".html", "Notebook" -> ""|>,
+        With[{nb = localNotebook[file]},
+            Join[
+                <|"Kind" -> pageKind[id], "Name" -> pageName[id], "Title" -> localTitle[nb, pageName[id]], "Keywords" -> {}, "Guides" -> {},
+                  "HTML" -> "Documentation/" <> id <> ".html", "Notebook" -> ""|>,
+                If[MatchQ[nb, _Notebook], <|"Keywords" -> notebookMetadata[nb]["Keywords"]|>, <||>],
+                If[pageKind[id] === "tutorial", <|"Stub" -> placeholderQ[nb], "Overview" -> overviewNotebookQ[nb]|>, <||>],
+                If[pageKind[id] === "guide" && MatchQ[nb, _Notebook], <|"Guides" -> DeleteCases[guideStructure[name, nb]["Children"], id]|>, <||>]
+            ]
+        ]
+    ]
 ];
 
 (* an authoring notebook's title: its symbol's name, the guide's or the tutorial's title *)

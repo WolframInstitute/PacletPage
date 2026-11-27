@@ -2859,10 +2859,28 @@ tidyBuiltPages[builtRoot_String, sourceRoot_ : None] := Count[
     True];
 
 tidyBuiltPage[file_String, source_ : None] := With[{collapsed = collapsedCells[source]},
-    (collapsed =!= <||> || StringContainsQ[ReadString[file], "\"PageDelimiter\"" | "\"WorkflowDockedCell\"" | "\"SearchTextTranslated\""]) && With[{notebook = Get[file]},
-        With[{tidy = restoreCollapsed[DeleteCases[singleRuleBeforeExamples[notebook], $frontEndNoise, Infinity], collapsed]},
+    (collapsed =!= <||> || StringContainsQ[ReadString[file], "\"PageDelimiter\"" | "\"WorkflowDockedCell\"" | "\"SearchTextTranslated\"" | "PackageLink["]) && With[{notebook = Get[file]},
+        With[{tidy = summaryFixed @ restoreCollapsed[DeleteCases[singleRuleBeforeExamples[notebook], $frontEndNoise, Infinity], collapsed]},
             tidy =!= notebook && StringQ[Export[file, tidy, "NB"]]]]
 ];
+
+(* DocumentationBuild makes a page's summary, its metadata's "summary", from its Usage cell, taking
+   a two-argument link's label; a paclet symbol's PackageLink has three, so the summary starts with
+   the box as text, PackageLink[Name, paclet : ..., ...][args], and search shows it so. Such a
+   summary is made again, by DocumentationBuild's own summary function, with each such link its
+   label: Name[args] gives .... *)
+summaryFixed[notebook_Notebook] := Module[{metadata, summary, text},
+    metadata = Association[Replace[Lookup[Association[Replace[Lookup[Options[notebook], TaggingRules, {}], Except[_List | _Association] -> {}]], "Metadata", {}],
+        Except[_List | _Association] -> {}]];
+    summary = Lookup[metadata, "summary", None];
+    If[ ! StringQ[summary] || StringFreeQ[summary, "PackageLink["], Return[notebook, Module]];
+    Needs["DocumentationBuild`"];
+    text = UsingFrontEnd[DocumentationBuild`Info`GetNotebookSummary[
+        DeleteCases[notebook /. TemplateBox[{label_, _, _}, "PackageLink", ___] :> label, TaggingRules -> _, Infinity],
+        Lookup[metadata, "type", "Symbol"], Lookup[metadata, "title", ""]]];
+    If[ StringQ[text] && StringFreeQ[text, "PackageLink["], notebook /. ("summary" -> summary) :> ("summary" -> text), notebook]
+];
+summaryFixed[other_] := other;
 
 (* DocumentationBuild opens every cell group and every cell of a page, so an example whose input
    the converted page hides, a mermaid diagram's call or a "#| collapse" example, would show it.

@@ -371,6 +371,35 @@ localDocumentation[_] := <||>;
 
 localNotebook[file_String] := If[FileExistsQ[file], Import[file, "NB"], Missing["NoFile", file]];
 
+(* the text of a notebook file's last metadata list within its last n bytes, or None *)
+metadataText[file_String, size_Integer, n_Integer] := Module[{stream, tail, text, at},
+    If[ n > 32768 && size <= n / 4, Return[None, Module]];
+    stream = OpenRead[file, BinaryFormat -> True];
+    tail = WithCleanup[SetStreamPosition[stream, Max[0, size - n]]; ReadByteArray[stream], Close[stream]];
+    If[ ! ByteArrayQ[tail], Return[None, Module]];
+    text = ByteArrayToString[tail, "ISO8859-1"];
+    at = StringPosition[text, "\"Metadata\""];
+    If[ at === {}, None, First[StringCases[StringTake[text, {at[[-1, 1]], Min[StringLength[text], at[[-1, 1]] + 32767]}], $metadataPattern, 1], None]]
+];
+
+(* A notebook file's title and keywords, as notebookMetadata gives them, read from the end of the
+   file, where a notebook writes its options after its cells, without reading the cells: a large
+   paclet's catalog reads thousands of pages. None where the file's last part holds no metadata. *)
+$metadataPattern = RegularExpression["(?s)\"Metadata\"\\s*->\\s*\\{(?:[^{}\"]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^{}\"]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\\}"];
+fileMetadata[file_String] := Module[{size, found, rules},
+    size = If[FileExistsQ[file], FileByteCount[file], 0];
+    If[ size === 0, Return[None, Module]];
+    (* the last 32 KB, then more, as a notebook of many cells keeps a longer outline after its options *)
+    found = Catch[Scan[With[{text = metadataText[file, size, #]}, If[StringQ[text], Throw[text, "metadata"]]] &, {32768, 131072, 524288}]; None, "metadata"];
+    If[ ! StringQ[found], Return[None, Module]];
+    rules = Replace[ToExpression["{" <> found <> "}", InputForm, HoldComplete], {HoldComplete[{"Metadata" -> m_List}] :> m, _ -> None}];
+    If[ ! ListQ[rules], Return[None, Module]];
+    <|
+        "Title" -> Replace[ruleValue[{"Metadata" -> rules}, {"Metadata", "title"}, Missing[]], Except[_String?(StringTrim[#] =!= "" &)] -> Missing["NoTitle"]],
+        "Keywords" -> Select[Flatten[{ruleValue[{"Metadata" -> rules}, {"Metadata", "keywords"}, {}], ruleValue[{"Metadata" -> rules}, {"Metadata", "synonyms"}, {}]}], StringQ]
+    |>
+];
+
 (* ==================== pages ==================== *)
 
 (* a page with the keywords of its notebook's metadata, and its title when the page has none but

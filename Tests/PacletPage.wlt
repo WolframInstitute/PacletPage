@@ -166,6 +166,48 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], write, files},
+        WithCleanup[
+            (* notebooks as Export writes them: a short one, one whose cells push its metadata past 32 KB from
+               the end, one whose title has a quote and a line wrapped in it, and one with no metadata *)
+            write[name_, cells_, rules_] := Export[FileNameJoin[{dir, name <> ".nb"}], Notebook[cells, TaggingRules -> rules], "NB"];
+            files = {
+                write["short", {Cell["Foo", "ObjectName"]}, {"Metadata" -> {"title" -> "Foo", "keywords" -> {"k1", "k2"}, "synonyms" -> {"s1"}, "history" -> {"", "", "", ""}}}],
+                write["long", Table[Cell[StringRepeat["word ", 40], "Text"], 2000], {"Metadata" -> {"title" -> "Long Page", "keywords" -> {}}}],
+                write["quoted", {Cell["Q", "ObjectName"]}, {"Metadata" -> {"title" -> "A \"quoted\" title " <> StringRepeat["and more ", 20], "keywords" -> {"x"}}}],
+                write["none", {Cell["N", "ObjectName"]}, {}]
+            };
+            {
+                fileMetadata /@ Most[files] === (KeyDrop[notebookMetadata[Import[#, "NB"]], {"Stub", "Overview"}] & /@ Most[files]),
+                fileMetadata[Last[files]]
+            },
+            DeleteDirectory[dir, DeleteContents -> True]
+        ]
+    ],
+    {True, None},
+    TestID -> "Catalog: a notebook file's title and keywords are read from its metadata without its cells, as reading it whole gives them"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], docs, write, local},
+        WithCleanup[
+            docs = FileNameJoin[{dir, "Documentation", "English"}];
+            write[path_, nb_] := With[{parent = DirectoryName[FileNameJoin[{docs, path}]]},
+                If[! DirectoryQ[parent], CreateDirectory[parent, CreateIntermediateDirectories -> True]]; Export[FileNameJoin[{docs, path}], nb, "NB"]];
+            write["ReferencePages/Symbols/Foo.nb", Notebook[{Cell["Foo", "ObjectName"]}, TaggingRules -> {"Metadata" -> {"title" -> "Foo", "keywords" -> {"kf"}, "uri" -> "Pub/Name/ref/Foo"}}]];
+            write["ReferencePages/Symbols/Bar.nb", Notebook[{Cell["Bar", "ObjectName"]}]];
+            write["Guides/Name.nb", Notebook[{Cell["Name Guide", "GuideTitle"]}, TaggingRules -> {"Metadata" -> {"title" -> "Name Guide", "uri" -> "Pub/Name/guide/Name"}}]];
+            local = localDocumentation[dir];
+            (* read from the metadata, and read whole, the catalog is the same *)
+            localCatalog["Pub/Name", local] === Block[{fileMetadata = (None &)}, localCatalog["Pub/Name", local]],
+            DeleteDirectory[dir, DeleteContents -> True]
+        ]
+    ],
+    True,
+    TestID -> "Catalog: a local catalog read from its notebooks' metadata is the one read from the notebooks whole"
+]
+
+VerificationTest[
     Module[{dir = CreateDirectory[], ids},
         Scan[
             (CreateDirectory[DirectoryName[#], CreateIntermediateDirectories -> True]; Put[Notebook[{}], #]) &,
@@ -2700,6 +2742,25 @@ VerificationTest[
     ],
     {{True, False, False}, {{{2}, Closed, Open, Open}, {5}}},
     TestID -> "Build: a built page hides again the cells and example groups its converted page hides, which DocumentationBuild opens, and leaves the template's sections to the build"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], file, link, summary},
+        WithCleanup[
+            file = FileNameJoin[{dir, "Foo.nb"}];
+            (* a built symbol page whose summary DocumentationBuild flattened from its Usage cell's PackageLink *)
+            link = TemplateBox[{Cell[TextData["Foo"]], "paclet:Pub/Name/ref/Foo", "Pub/Name Package Symbol"}, "PackageLink", BaseStyle -> "InlineFormula"];
+            Export[file, Notebook[{
+                Cell["Foo", "ObjectName"],
+                Cell[TextData[{Cell[BoxData[RowBox[{link, "[", StyleBox["x", "TI"], "]"}]], "InlineFormula"], " gives the foo of ", Cell[BoxData[StyleBox["x", "TI"]], "InlineFormula"], "."}], "Usage"]
+            }, TaggingRules -> {"Metadata" -> {"title" -> "Foo", "type" -> "Symbol",
+                "summary" -> "PackageLink[Foo, paclet : Pub/Name/ref/Foo, Pub/Name Package Symbol][x] gives the foo of x."}}], "NB"];
+            {tidyBuiltPage[file], summary = FirstCase[Get[file], ("summary" -> s_) :> s, None, Infinity]; summary, tidyBuiltPage[file]},
+            DeleteDirectory[dir, DeleteContents -> True]
+        ]
+    ],
+    {True, "Foo[x] gives the foo of x.", False},
+    TestID -> "Tidy: a symbol page's summary takes its usage's link label, not the PackageLink box as text"
 ]
 
 VerificationTest[
