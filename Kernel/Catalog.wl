@@ -363,7 +363,7 @@ localDocumentation[dir_String] := Module[{root},
 (* the id a reference page's notebook names in its URI, with the paclet's name taken off, else the
    one its directory and its file give *)
 notebookPageID[file_String, fallback_String] := With[
-    {uri = ruleValue[FirstCase[localNotebook[file], (TaggingRules -> rules_) :> rules, {}, {1}], {"Metadata", "uri"}, None]},
+    {uri = Replace[fileMetadata[file], {meta_Association :> meta["URI"], _ :> ruleValue[FirstCase[localNotebook[file], (TaggingRules -> rules_) :> rules, {}, {1}], {"Metadata", "uri"}, None]}]},
     If[StringQ[uri] && StringContainsQ[uri, "/ref/"], "ref/" <> Last[StringSplit[uri, "/ref/", 2]], fallback]
 ];
 
@@ -396,7 +396,8 @@ fileMetadata[file_String] := Module[{size, found, rules},
     If[ ! ListQ[rules], Return[None, Module]];
     <|
         "Title" -> Replace[ruleValue[{"Metadata" -> rules}, {"Metadata", "title"}, Missing[]], Except[_String?(StringTrim[#] =!= "" &)] -> Missing["NoTitle"]],
-        "Keywords" -> Select[Flatten[{ruleValue[{"Metadata" -> rules}, {"Metadata", "keywords"}, {}], ruleValue[{"Metadata" -> rules}, {"Metadata", "synonyms"}, {}]}], StringQ]
+        "Keywords" -> Select[Flatten[{ruleValue[{"Metadata" -> rules}, {"Metadata", "keywords"}, {}], ruleValue[{"Metadata" -> rules}, {"Metadata", "synonyms"}, {}]}], StringQ],
+        "URI" -> Replace[ruleValue[{"Metadata" -> rules}, {"Metadata", "uri"}, None], Except[_String] -> None]
     |>
 ];
 

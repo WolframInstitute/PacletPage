@@ -178,7 +178,7 @@ VerificationTest[
                 write["none", {Cell["N", "ObjectName"]}, {}]
             };
             {
-                fileMetadata /@ Most[files] === (KeyDrop[notebookMetadata[Import[#, "NB"]], {"Stub", "Overview"}] & /@ Most[files]),
+                (KeyDrop[fileMetadata[#], "URI"] & /@ Most[files]) === (KeyDrop[notebookMetadata[Import[#, "NB"]], {"Stub", "Overview"}] & /@ Most[files]),
                 fileMetadata[Last[files]]
             },
             DeleteDirectory[dir, DeleteContents -> True]
@@ -198,13 +198,39 @@ VerificationTest[
             write["ReferencePages/Symbols/Bar.nb", Notebook[{Cell["Bar", "ObjectName"]}]];
             write["Guides/Name.nb", Notebook[{Cell["Name Guide", "GuideTitle"]}, TaggingRules -> {"Metadata" -> {"title" -> "Name Guide", "uri" -> "Pub/Name/guide/Name"}}]];
             local = localDocumentation[dir];
-            (* read from the metadata, and read whole, the catalog is the same *)
-            localCatalog["Pub/Name", local] === Block[{fileMetadata = (None &)}, localCatalog["Pub/Name", local]],
+            (* read from the metadata, and read whole, the catalog is the same; neither from a cache *)
+            Block[{catalogCacheFile = (None &)}, localCatalog["Pub/Name", local] === Block[{fileMetadata = (None &)}, localCatalog["Pub/Name", local]]],
             DeleteDirectory[dir, DeleteContents -> True]
         ]
     ],
     True,
     TestID -> "Catalog: a local catalog read from its notebooks' metadata is the one read from the notebooks whole"
+]
+
+VerificationTest[
+    Module[{dir = CreateDirectory[], docs, cacheDir = CreateDirectory[], write, local, reads = {}, first, second, third},
+        WithCleanup[
+            docs = FileNameJoin[{dir, "Documentation", "English"}];
+            write[path_, title_] := With[{file = FileNameJoin[{docs, path}]},
+                If[! DirectoryQ[DirectoryName[file]], CreateDirectory[DirectoryName[file], CreateIntermediateDirectories -> True]];
+                Export[file, Notebook[{Cell[title, "ObjectName"]}, TaggingRules -> {"Metadata" -> {"title" -> title}}], "NB"]];
+            write["ReferencePages/Symbols/Foo.nb", "Foo"];
+            write["ReferencePages/Symbols/Bar.nb", "Bar"];
+            local = localDocumentation[dir];
+            (* the cache in a directory of the test's own; each page read is counted *)
+            Block[{$UserBaseDirectory = cacheDir, localPage = Function[{name, id, file}, AppendTo[reads, id]; <|"Title" -> FileBaseName[file], "Stamp" -> FileByteCount[file]|>]},
+                first = localCatalog["Pub/Name", local]["Pages"];
+                second = localCatalog["Pub/Name", local]["Pages"];
+                Pause[1.1];
+                write["ReferencePages/Symbols/Foo.nb", "Foo, now longer"];
+                third = localCatalog["Pub/Name", local]["Pages"]
+            ];
+            {Sort[reads], first === second, third["ref/Foo"] =!= first["ref/Foo"], third["ref/Bar"] === first["ref/Bar"]},
+            Scan[DeleteDirectory[#, DeleteContents -> True] &, {dir, cacheDir}]
+        ]
+    ],
+    {{"ref/Bar", "ref/Foo", "ref/Foo"}, True, True, True},
+    TestID -> "Catalog: a local catalog's pages are read once and kept in this user's cache; a changed notebook is read again alone"
 ]
 
 VerificationTest[

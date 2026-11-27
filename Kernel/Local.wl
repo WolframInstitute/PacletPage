@@ -90,7 +90,7 @@ BuildPacletPageSite[dir_String, opts : OptionsPattern[]] := Block[{$deployMonito
 (* The catalog of a paclet's own documentation notebooks: each page rendered at
    Documentation/<kind>/<name>.html beside the site *)
 localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit[name, "/"]], joined = StringDelete[name, "/"], pages, root},
-    pages = Association @ KeyValueMap[#1 -> localPage[name, #1, #2] &, local];
+    pages = localPages[name, local];
     root = SelectFirst[
         Join[{"guide/" <> short, "guide/" <> joined}, SortBy[Select[Keys[pages], StringStartsQ[#, "guide/"] &], guideKey[pages[#]] &]],
         StringQ[#] && KeyExistsQ[pages, #] &,
@@ -105,6 +105,36 @@ localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit
         "RootGuide" -> root,
         "Pages" -> pages
     |>
+];
+
+(* The catalog's pages, each read once: a page whose notebook has the size and date this user's
+   cache of the catalog records takes the cached entry, and the others are read and enter the
+   cache, so a large paclet's catalog is read whole once and in seconds after, in any kernel. The
+   cache is a file of the user's own, written whole in place of the last. *)
+localPages[name_String, local_Association] := Module[{cacheFile = catalogCacheFile[name, local], cache, fresh = <||>, stamp, pages},
+    cache = If[StringQ[cacheFile] && FileExistsQ[cacheFile], Replace[Import[cacheFile, "WXF"], Except[_Association] -> <||>], <||>];
+    stamp[file_] := {FileByteCount[file], AbsoluteTime[FileDate[file]]};
+    pages = Association @ KeyValueMap[
+        Function[{id, file}, id -> With[{cached = Lookup[cache, file, None], now = stamp[file]},
+            If[ AssociationQ[cached] && cached["Stamp"] === now, cached["Page"],
+                With[{page = localPage[name, id, file]}, fresh[file] = <|"Stamp" -> now, "Page" -> page|>; page]]]],
+        local];
+    If[ StringQ[cacheFile] && (fresh =!= <||> || Complement[Keys[cache], Values[local]] =!= {}),
+        writeCatalogCache[cacheFile, Join[KeyTake[cache, Values[local]], fresh]]];
+    pages
+];
+
+(* this user's cache of a paclet's catalog: one file for the paclet's name and its notebooks' directory *)
+catalogCacheFile[name_String, local_Association] := If[ local === <||>, None,
+    FileNameJoin[{$UserBaseDirectory, "ApplicationData", "WolframInstitute", "PacletPage", "Catalogs",
+        StringReplace[name, "/" -> "__"] <> "-" <> StringTake[digest[{name, DirectoryName[DirectoryName[First[Values[local]]]]}], 16] <> ".wxf"}]
+];
+
+(* the cache written to a file of its own beside it and moved into place, so a kernel that reads it
+   never reads half of it *)
+writeCatalogCache[file_String, cache_Association] := With[{dir = DirectoryName[file], partial = file <> "." <> CreateUUID[] <> ".part"},
+    If[ ! DirectoryQ[dir], CreateDirectory[dir, CreateIntermediateDirectories -> True]];
+    If[ StringQ[Export[partial, cache, "WXF"]], RenameFile[partial, file, OverwriteTarget -> True]]
 ];
 
 (* A page of the catalog. A guide's children and a tutorial's state are read from its cells; any
