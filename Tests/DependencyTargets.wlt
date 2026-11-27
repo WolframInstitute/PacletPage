@@ -222,9 +222,10 @@ VerificationTest[
         Block[{dependencyResourceRelease = (<|"Version" -> "2.0.0", "DescriptionURL" -> "https://www.wolframcloud.com/obj/demo/description"|> &)},
             {
                 dependencyEntryQ[entry, owner],
-                ! dependencyEntryQ[Append[entry, "Pin" -> <|"Version" -> "1.5+"|>], owner],
-                ! dependencyEntryQ[Append[entry, "Pin" -> <||>], owner],
-                ! dependencyEntryQ[Append[entry, "Pin" -> <|"Resource" -> url|>], owner],
+                (* a pinned install checks the pin whole: an exact version, something to pin, keys it knows *)
+                Block[{$dependencyPinned = True}, ! dependencyEntryQ[Append[entry, "Pin" -> <|"Version" -> "1.5+"|>], owner]],
+                Block[{$dependencyPinned = True}, ! dependencyEntryQ[Append[entry, "Pin" -> <||>], owner]],
+                Block[{$dependencyPinned = True}, ! dependencyEntryQ[Append[entry, "Pin" -> <|"Resource" -> url|>], owner]],
                 dependencyRelease[owner, entry, True]["Version"],
                 MatchQ[dependencyRelease[owner, dependencyPinned[entry], True], Failure["DependencyVersion", _]],
                 KeyExistsQ[gitPinned, "Resource"], gitPinned["Commit"] === sha && ! KeyExistsQ[gitPinned, "Pin"],
