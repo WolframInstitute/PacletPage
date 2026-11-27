@@ -306,6 +306,8 @@
       byLink.set(link, entry);
       return entry;
     });
+    // All lists every symbol, with no families to choose among
+    byLetter.set('All', entries);
     function endsWord(name, head) {
       var tail = name.slice(head.length);
       return !tail || /^\p{Lu}\p{Ll}/u.test(tail) || (/\p{Ll}$/u.test(head) && /^\p{Lu}/u.test(tail)) ||
@@ -360,9 +362,9 @@
       Array.from(buttons.children).forEach(function (button) {
         button.setAttribute('aria-pressed', String(button.value === value));
       });
-      if (!prefixCache.has(value)) prefixCache.set(value, prefixesFor(byLetter.get(value)));
+      if (!prefixCache.has(value)) prefixCache.set(value, value === 'All' ? new Map() : prefixesFor(byLetter.get(value)));
       prefixes = prefixCache.get(value);
-      prefixPicker.replaceChildren(new Option('All ' + value + ' names', ''));
+      prefixPicker.replaceChildren(new Option(value === 'All' ? 'All names' : 'All ' + value + ' names', ''));
       prefixes.forEach(function (group, key) {
         prefixPicker.add(new Option(group.label + ' (' + group.entries.length + ')', key));
       });

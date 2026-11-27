@@ -514,7 +514,7 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
         resource = Replace[Lookup[cfg, "Resource", ""], Except[_String] -> ""],
         ids, indexable, indexed, letters, buckets, initial, group, batch, batchSize = 45,
         positions, label, remaining, count, initialOf, rowXML, rowsXML, buttonXML, optionXML,
-        symbolCountText, moreText, ulEl, remainingEl, letterButtons, letterOptions, railEl, railClass},
+        symbolCountText, moreText, ulEl, remainingEl, letterButtons, letterOptions, railEl, railClass, prefixShown},
     ids = SortBy[Select[Keys[pages], symbolPageQ], symbolKey[pages[#]] &];
     indexable = enabled && setting =!= False && Length[ids] > 24;
     indexed = indexable && TrueQ[setting];
@@ -525,12 +525,14 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
         Select[Keys[buckets], ! StringMatchQ[#, RegularExpression["[A-Z]"] | "$"] &],
         If[KeyExistsQ[buckets, "$"], {"$"}, {}]
     ];
-    initial = SelectFirst[letters, KeyExistsQ[buckets, #] &, ""];
-    group = Lookup[buckets, initial, {}];
+    (* the index opens on All, every symbol, and a letter narrows it *)
+    initial = If[indexable, "All", ""];
+    group = If[indexable, ids, {}];
     batch = Which[indexed, Take[group, UpTo[batchSize]], enabled, ids, True, {}];
     positions = If[indexed, KeyTake[AssociationThread[ids -> Range[0, Length[ids] - 1]], batch], <||>];
     remaining = Which[indexed, Select[ids, ! KeyExistsQ[positions, #] &], enabled, {}, True, ids];
-    label = If[indexable, "All " <> initial <> " names", ""];
+    label = If[indexable, "All names", ""];
+    prefixShown = indexed && initial =!= "All" && Length[group] > batchSize;
     count[number_Integer] := StringReplace[IntegerString[number], RegularExpression["(?<=\\d)(?=(?:\\d{3})+$)"] -> ","];
     rowXML[id_String] := XMLElement["li", DeleteCases[{
         If[KeyExistsQ[positions, id], "data-position" -> IntegerString[positions[id]], Nothing],
@@ -540,17 +542,17 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
     buttonXML[letter_String] := XMLElement["button", DeleteCases[{
         "type" -> "button",
         "value" -> letter,
-        "aria-label" -> "Jump to " <> letter,
+        "aria-label" -> If[letter === "All", "Show all symbols", "Jump to " <> letter],
         "aria-pressed" -> If[letter === initial, "true", "false"],
-        If[KeyExistsQ[buckets, letter], Nothing, "disabled" -> True]
+        If[letter === "All" || KeyExistsQ[buckets, letter], Nothing, "disabled" -> True]
     }, Nothing], {letter}];
     optionXML[letter_String] := XMLElement["option", {"value" -> letter}, {letter}];
     symbolCountText = If[indexable, initial <> " \:00b7 " <> count[Length[group]] <> If[Length[group] === 1, " symbol", " symbols"], ""];
     moreText = If[indexable && Length[group] > batchSize, "Show " <> IntegerString[Min[batchSize, Length[group] - batchSize]] <> " more", ""];
     ulEl = XMLElement["ul", {"class" -> "nav-symbols"}, rowsXML[batch]];
     remainingEl = If[remaining === {}, Nothing, XMLElement["template", {"id" -> "symbol-rest"}, rowsXML[remaining]]];
-    letterButtons = If[indexable, buttonXML /@ letters, {}];
-    letterOptions = optionXML /@ Select[letters, KeyExistsQ[buckets, #] &];
+    letterButtons = If[indexable, buttonXML /@ Prepend[letters, "All"], {}];
+    letterOptions = If[indexable, optionXML /@ Prepend[Select[letters, KeyExistsQ[buckets, #] &], "All"], {}];
     railClass = StringRiffle[Join[If[indexable, {"indexable"}, {}], If[indexed, {"indexed"}, {}]], " "];
     railEl = XMLElement["nav", DeleteCases[{
         "id" -> "side-right",
@@ -577,7 +579,7 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
                         XMLElement["select", {"id" -> "symbol-first-letter"}, letterOptions]
                     }]
                 }],
-                XMLElement["div", DeleteCases[{"class" -> "symbol-prefix", If[indexed && Length[group] > batchSize, Nothing, "hidden" -> True]}, Nothing], {
+                XMLElement["div", DeleteCases[{"class" -> "symbol-prefix", If[prefixShown, Nothing, "hidden" -> True]}, Nothing], {
                     XMLElement["label", {"for" -> "symbol-prefix"}, {"Symbol group"}],
                     XMLElement["div", {"class" -> "symbol-select"}, {
                         XMLElement["select", {"id" -> "symbol-prefix"}, {
@@ -609,7 +611,7 @@ htmlSymbolsRailParts[catalog_Association, cfg_Association] := Module[
             "symbolTotal" -> count[Length[ids]],
             "letterButtons" -> xmlToHTML[letterButtons],
             "letterOptions" -> xmlToHTML[letterOptions],
-            "prefixHidden" -> If[indexed && Length[group] > batchSize, "", "hidden"],
+            "prefixHidden" -> If[prefixShown, "", "hidden"],
             "initialOption" -> "<option value=\"\">" <> esc[label] <> "</option>",
             "initialGroup" -> esc[label],
             "symbolCount" -> esc[symbolCountText],

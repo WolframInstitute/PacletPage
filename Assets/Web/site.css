@@ -208,6 +208,7 @@ body.pp-fullscreen .pp-full-exit { display: inline-flex; }
   font: inherit; color: var(--pp-link); border: 1px solid var(--pp-ctl-line); border-radius: 3px; background: var(--pp-ctl-bg);
 }
 .symbol-letters button { min-width: 0; padding: 3px 0; font-size: 13px; cursor: pointer; }
+.symbol-letters button[value="All"] { grid-column: span 2; }
 .symbol-letters button:disabled { border-color: transparent; background: transparent; color: var(--pp-ctl-disabled); cursor: default; }
 .symbol-letters button[aria-pressed="true"] { background: var(--pp-active-bg); color: var(--pp-active-fg); border-color: currentColor; font-weight: 600; }
 .symbol-letters button:enabled:hover, .symbol-more:hover { background: var(--pp-ctl-hover); }

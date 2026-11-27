@@ -59,8 +59,8 @@ Declare the libraries in the consumer's `PacletInfo.wl` `"Dependencies"`, an opt
   each page painted at once from the cloud's static render, then made live. Every page has its own
   address, Back and Forward step through the pages read, links to the paclet's own pages stay in
   the site, and any other link opens in a new tab. A large symbol list offers an A–Z index behind a
-  button in its heading, which a site can start on; on, it shows the first letter’s links (up to 45)
-  as the page loads, and in crowded letters each family shows its first symbol and its size, such as
+  button in its heading, which a site can start on; on, it opens on All, every symbol 45 at a time,
+  a letter narrows it and All shows every symbol again, and in crowded letters each family shows its first symbol and its size, such as
   `AdjointOperator… (2)`. The header filter searches the whole catalog from any letter.
   A dark theme follows the reader's system setting, with a switch in the header, and buttons hide
   either rail or show the page alone. A label under the site's name can show the paclet's version,

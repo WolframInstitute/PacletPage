@@ -280,11 +280,13 @@ VerificationTest[
         {
             slots["symbolCount"], slots["moreText"], slots["prefixHidden"], slots["initialGroup"],
             StringCount[slots["symbols"], "data-id="], DuplicateFreeQ[ids], Sort[ids] === Sort[esc /@ Keys[catalog["Pages"]]],
-            StringContainsQ[slots["letterOptions"], "<option value=\"$\">$</option>"]
+            StringContainsQ[slots["letterOptions"], "<option value=\"$\">$</option>"],
+            StringStartsQ[slots["letterOptions"], "<option value=\"All\">All</option>"]
         }
     ],
-    {"A &#183; 47 symbols", "Show 2 more", "", "All A names", 45, True, True, True},
-    TestID -> "Site: the first batch, count and letter picker precede the remaining symbol links; every id appears once"
+    (* the index opens on All, every symbol, 45 at a time *)
+    {"All &#183; 50 symbols", "Show 5 more", "hidden", "All names", 45, True, True, True, True},
+    TestID -> "Site: the first batch, count and letter picker precede the remaining symbol links; every id appears once; the index opens on All"
 ]
 
 VerificationTest[
@@ -305,7 +307,7 @@ VerificationTest[
         forbidden = Cases[expr, XMLElement["script" | "select" | "option" | "template" | "noscript", _, _], Infinity];
         {
             StringContainsQ[html, "id=\"side-right\" class=\"indexable indexed\""],
-            StringContainsQ[html, "<template id=\"symbol-rest\">"],
+            StringContainsQ[html, "value=\"All\" aria-label=\"Show all symbols\" aria-pressed=\"true\""],
             StringContainsQ[html, "id=\"toggleSideR\""],
             StringContainsQ[html, "id=\"splitR\""],
             StringContainsQ[html, "id=\"ppFullExit\""],
@@ -518,8 +520,8 @@ VerificationTest[
             (* Automatic: the index there and off, every symbol listed, a button to turn it on *)
             {rail[html[catalog, {}]], StringFreeQ[html[catalog, {}], "<template id=\"symbol-rest\">"],
                 StringCount[html[catalog, {}], "class=\"sym\""], StringContainsQ[html[catalog, {}], "class=\"symbol-index-toggle\" aria-pressed=\"false\""]},
-            (* True: on from the start, streamed in batches, the button to turn it off *)
-            {rail[html[catalog, {"SymbolIndex" -> True}]], StringContainsQ[html[catalog, {"SymbolIndex" -> True}], "<template id=\"symbol-rest\">"],
+            (* True: on from the start, opening on All, the button to turn it off *)
+            {rail[html[catalog, {"SymbolIndex" -> True}]], StringContainsQ[html[catalog, {"SymbolIndex" -> True}], "value=\"All\" aria-label=\"Show all symbols\" aria-pressed=\"true\""],
                 StringContainsQ[html[catalog, {"SymbolIndex" -> True}], "class=\"symbol-index-toggle\" aria-pressed=\"true\""]},
             (* False, and a rail of 24 symbols: no index and no button *)
             {StringFreeQ[rail[html[catalog, {"SymbolIndex" -> False}]], "indexable"], StringFreeQ[html[catalog, {"SymbolIndex" -> False}], "class=\"symbol-index-toggle\""],
