@@ -309,24 +309,30 @@ VerificationTest[
                 install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> ToUpperCase[hash]|>, Missing["NotFound"], "nosidecar"],
                 install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> StringRepeat["0", 64]|>, Missing["NotFound"], "wrongpin"],
                 install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> hash|>, StringRepeat["f", 64] <> "  Example__Lib-1.0.0.paclet\n", "disagree"],
-                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> hash|>, hash <> "  Example__Lib-1.0.0.paclet\n", "agree"]
+                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> hash|>, hash <> "  Example__Lib-1.0.0.paclet\n", "agree"],
+                (* by system, as an "Archive" by system: this system's entry, another's wrong one, this system's wrong one, and none for this system *)
+                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> <|$SystemID -> hash, "Other-System" -> StringRepeat["0", 64]|>|>, Missing["NotFound"], "bysystem"],
+                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> <|$SystemID -> StringRepeat["0", 64], "All" -> hash|>|>, Missing["NotFound"], "bysystemwrong"],
+                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> <|"Other-System" -> StringRepeat["0", 64]|>|>, Missing["NotFound"], "bysystemnone"]
             };
             {
                 MatchQ[results[[1]], _PacletObject] && results[[1]]["Version"] === "1.0.0",
                 MatchQ[results[[2]], Failure["DependencyArchive", _]],
                 MatchQ[results[[3]], Failure["DependencyArchive", _]] && StringContainsQ[results[[3]]["MessageTemplate"], "disagrees"],
                 MatchQ[results[[4]], _PacletObject],
+                MatchQ[results[[5]], _PacletObject], MatchQ[results[[6]], Failure["DependencyArchive", _]], MatchQ[results[[7]], _PacletObject],
+                dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> <|$SystemID -> "abc"|>|>|>, owner[<||>]],
                 (* a hash names one archive: it needs an exact version, a commit pins a Git source instead, and it is 64 hex digits *)
                 dependencyPinQ[<|"Name" -> name, "Version" -> "1.0+", "Pin" -> <|"Archive" -> url, "SHA256" -> hash|>|>, owner[<||>]],
                 dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Git" -> "https://github.com/demo/lib", "Commit" -> StringRepeat["a", 40], "SHA256" -> hash|>|>, owner[<||>]],
                 dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> "abc"|>|>, owner[<||>]]
             },
-            Scan[PacletDirectoryUnload, FileNameJoin[{root, #}] & /@ {"nosidecar", "wrongpin", "disagree", "agree"}];
+            Scan[PacletDirectoryUnload, FileNameJoin[{root, #}] & /@ {"nosidecar", "wrongpin", "disagree", "agree", "bysystem", "bysystemwrong", "bysystemnone"}];
             DeleteDirectory[root, DeleteContents -> True]
         ]
     ],
-    {True, True, True, True, False, False, False},
-    TestID -> "Archive by its pin's SHA-256: a pinned archive must match the hash its pin gives, published one or not, and a published one that disagrees is refused"
+    {True, True, True, True, True, True, True, False, False, False, False},
+    TestID -> "Archive by its pin's SHA-256: a pinned archive must match the hash its pin gives, for its system or for all, published one or not, and a published one that disagrees is refused"
 ]
 
 VerificationTest[

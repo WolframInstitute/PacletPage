@@ -90,9 +90,17 @@ dependencyArchiveURL[archive_Association] := Lookup[archive, $SystemID, Lookup[a
    "Commit", "Path" and "SHA256", laid over the entry in pinned mode and ignored otherwise. A pin that
    names a source, "Git" or "Archive", replaces the entry's own; a pin's version is exact. A pin's
    "SHA256" is the hash of the archive of that exact version, which a pinned install downloads and
-   verifies whether or not a SHA-256 is published beside it; a commit pins a "Git" source instead. *)
+   verifies whether or not a SHA-256 is published beside it; for an archive by system, an
+   association of system IDs, and "All" for any other system, to hashes, as "Archive" maps them to
+   addresses. A commit pins a "Git" source instead. *)
 $dependencyPinKeys = {"Version", "Archive", "Git", "Commit", "Path", "SHA256"};
-dependencySHA256Q[hash_] := StringQ[hash] && StringMatchQ[hash, RegularExpression["[0-9a-fA-F]{64}"]];
+dependencySHA256Q[hash_String] := StringMatchQ[hash, RegularExpression["[0-9a-fA-F]{64}"]];
+dependencySHA256Q[hashes_Association] := hashes =!= <||> && AllTrue[Keys[hashes], StringQ] && AllTrue[Values[hashes], StringQ[#] && dependencySHA256Q[#] &];
+dependencySHA256Q[_] := False;
+(* a pin's hash for this system: the one it names for $SystemID, else its "All", else None *)
+dependencySHA256[hash_String] := ToLowerCase[hash];
+dependencySHA256[hashes_Association] := Replace[Lookup[hashes, $SystemID, Lookup[hashes, "All", None]], hash_String :> ToLowerCase[hash]];
+dependencySHA256[_] := None;
 dependencyPinned[entry_Association] := With[{pin = Lookup[entry, "Pin", None]},
     If[! AssociationQ[pin], entry,
         Join[If[KeyExistsQ[pin, "Git"] || KeyExistsQ[pin, "Archive"],

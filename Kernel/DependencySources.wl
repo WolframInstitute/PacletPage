@@ -219,7 +219,7 @@ dependencyPublisherURLQ[resource_, url_] := Module[{base = URLParse[resource], t
 (* a pinned entry's "SHA256", which every archive it downloads or takes must match *)
 $dependencyPinHash = None;
 
-dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]}, Block[{$dependencyPinHash = Replace[Lookup[entry, "SHA256", None], hash_String :> ToLowerCase[hash]]},
+dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]}, Block[{$dependencyPinHash = dependencySHA256[Lookup[entry, "SHA256", None]]},
     Which[
         KeyExistsQ[release, "SitePaclet"],
             Which[
