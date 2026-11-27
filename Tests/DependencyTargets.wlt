@@ -264,6 +264,32 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], name = testUniqueName["TestPinBackLib"], url, arcs, owner, install, newer, back},
+        WithCleanup[
+            url[v_] := "https://example.org/Example__Lib-" <> v <> ".paclet";
+            arcs = AssociationMap[CreatePacletArchive[testPaclet[root, "v" <> #, <|"Name" -> name, "Version" -> #|>], root] &, {"1.5.0", "2.0.0"}];
+            owner[v_] := PacletObject[<|"Name" -> "Example/PinBackConsumer", "Version" -> "1.0",
+                "Dependencies" -> {<|"Name" -> name, "Version" -> "1.0+", "Pin" -> <|"Version" -> v, "Archive" -> url[v]|>|>}|>];
+            install[v_] := Block[{dependencyDownloaded = Function[{u, file}, CopyFile[arcs[v], file]; File[file]],
+                    dependencyGitText = (Missing["NotFound"] &), dependencyCurlText = (Missing["NotFound"] &)},
+                InstallPacletDependencies[owner[v], name, "CheckReadiness" -> False, "TargetDirectory" -> FileNameJoin[{root, "deps"}], "Pinned" -> True][name]];
+            newer = install["2.0.0"];
+            (* the pin moves back, as a revert does *)
+            back = install["1.5.0"];
+            {
+                MatchQ[newer, _PacletObject] && newer["Version"] === "2.0.0",
+                MatchQ[back, _PacletObject] && back["Version"] === "1.5.0",
+                Sort[Through[Select[PacletFind[name], StringStartsQ[ExpandFileName[#["Location"]], ExpandFileName[FileNameJoin[{root, "deps"}]]] &]["Version"]]]
+            },
+            PacletDirectoryUnload[FileNameJoin[{root, "deps"}]];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, True, {"1.5.0"}},
+    TestID -> "Pin: a pin that moves back replaces the newer copy in the directory with the pinned release"
+]
+
+VerificationTest[
     Module[{root = CreateDirectory[], name = testUniqueName["TestURLLib"], url = "https://example.org/Example__Lib-1.5.0.paclet",
             demo = "https://www.wolframcloud.com/obj/demo/DeployedResources/Paclet/Example/Lib", arc150, arc151, owner, install, good, bad},
         WithCleanup[

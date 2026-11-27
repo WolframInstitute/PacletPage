@@ -322,7 +322,9 @@ dependencyInstall[owner_, entry_, update_, checkReadiness_ : True] := Module[{na
     pinned = KeyExistsQ[entry, "Git"] && (! KeyExistsQ[entry, "Resource"] || dependencyGitReleaseQ[release]);
     If[pinned && current =!= None,
         With[{conflict = dependencyGitConflict[current, release["Version"]]}, If[FailureQ[conflict], Return[conflict]]]];
-    If[! pinned && current =!= None && ! PacletNewerQ[release["Version"], current["Version"]],
+    (* a pinned installation into a directory of its own replaces the copy there with the pinned
+       release, older or newer, as when a pin moves back; elsewhere an older release does not *)
+    If[! pinned && ! own && current =!= None && ! PacletNewerQ[release["Version"], current["Version"]],
         Return[If[dependencyCompatibleQ[current["Version"], Lookup[entry, "Version", All]], dependencyChecked[owner, entry, current, checkReadiness],
             dependencyFailure["DependencyVersionConflict", "Installed `1` `2` does not satisfy `3`.", name, current["Version"], entry["Version"]]]]];
     loaded = AnyTrue[installed, dependencyLoadedQ];
