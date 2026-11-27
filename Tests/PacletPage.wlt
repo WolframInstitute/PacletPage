@@ -234,6 +234,36 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], docs, write, local, shipped, reads, catalog, plain, first, changed, other},
+        WithCleanup[
+            docs = FileNameJoin[{dir, "Documentation", "English"}];
+            write[path_, nb_] := With[{file = FileNameJoin[{docs, path}]},
+                If[! DirectoryQ[DirectoryName[file]], CreateDirectory[DirectoryName[file], CreateIntermediateDirectories -> True]]; Export[file, nb, "NB"]];
+            write["ReferencePages/Symbols/Foo.nb", Notebook[{Cell["Foo", "ObjectName"]}, TaggingRules -> {"Metadata" -> {"title" -> "Foo", "keywords" -> {"kf"}}}]];
+            write["Guides/Name.nb", Notebook[{Cell["Name Guide", "GuideTitle"]}, TaggingRules -> {"Metadata" -> {"title" -> "Name Guide"}}]];
+            write["Tutorials/Tut.nb", Notebook[{Cell["A Tutorial", "Title"], Cell["Some text.", "Text"]}]];
+            shipped = shipCatalog[dir, "Pub/Name"];
+            local = localDocumentation[dir];
+            (* no cache: each page read is counted *)
+            reads = {};
+            catalog[name_] := Internal`InheritedBlock[{localPage},
+                (* a first rule that counts the page and gives way to the page's own *)
+                DownValues[localPage] = Prepend[DownValues[localPage], HoldPattern[localPage[_, id_, _] /; (AppendTo[reads, id]; False)] :> Null];
+                Block[{catalogCacheFile = (None &)}, localCatalog[name, local]]];
+            plain = Block[{catalogCacheFile = (None &), shippedCatalog = (<||> &)}, localCatalog["Pub/Name", local]];
+            first = {catalog["Pub/Name"], reads};
+            write["ReferencePages/Symbols/Foo.nb", Notebook[{Cell["Foo", "ObjectName"]}, TaggingRules -> {"Metadata" -> {"title" -> "Foo, longer", "keywords" -> {"kf"}}}]];
+            reads = {}; changed = {catalog["Pub/Name"]["Pages"]["ref/Foo"]["Title"], reads};
+            reads = {}; other = {catalog["Pub/Other"]; Sort[reads]};
+            {FileExistsQ[shipped], first[[1]] === plain, first[[2]], changed, other},
+            DeleteDirectory[dir, DeleteContents -> True]
+        ]
+    ],
+    {True, True, {}, {"Foo, longer", {"ref/Foo"}}, {Sort[{"guide/Name", "ref/Foo", "tutorial/Tut"}]}},
+    TestID -> "Catalog: a catalog shipped beside a built paclet's notebooks gives their pages without reading them; a notebook of another size is read"
+]
+
+VerificationTest[
     Module[{dir = CreateDirectory[], ids},
         Scan[
             (CreateDirectory[DirectoryName[#], CreateIntermediateDirectories -> True]; Put[Notebook[{}], #]) &,

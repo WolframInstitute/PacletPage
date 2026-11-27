@@ -107,27 +107,58 @@ localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit
     |>
 ];
 
-(* The catalog's pages, each read once: a page whose notebook has the size and date this user's
-   cache of the catalog records takes the cached entry, and the others are read and enter the
-   cache, so a large paclet's catalog is read whole once and in seconds after, in any kernel. The
-   cache is a file of the user's own, written whole in place of the last. *)
-localPages[name_String, local_Association] := Module[{cacheFile = catalogCacheFile[name, local], cache, fresh = <||>, stamp, pages},
+(* The catalog's pages, each read once: a page whose notebook has the size the catalog shipped
+   beside the notebooks records takes the shipped entry, as a fresh install's pages do; one whose
+   notebook has the size and date this user's cache records takes the cached entry; the others are
+   read and enter the cache. So a paclet's catalog opens in about a second when its build shipped
+   one, and after its first reading otherwise, in any kernel. *)
+localPages[name_String, local_Association] := Module[
+    {shipped = shippedCatalog[name, local], cacheFile = catalogCacheFile[name, local], cache, fresh = <||>, stamp, root, pages},
     cache = If[StringQ[cacheFile] && FileExistsQ[cacheFile], Replace[Import[cacheFile, "WXF"], Except[_Association] -> <||>], <||>];
+    root = If[local === <||>, None, documentationRoot[First[Values[local]]]];
     stamp[file_] := {FileByteCount[file], AbsoluteTime[FileDate[file]]};
     pages = Association @ KeyValueMap[
-        Function[{id, file}, id -> With[{cached = Lookup[cache, file, None], now = stamp[file]},
-            If[ AssociationQ[cached] && cached["Stamp"] === now, cached["Page"],
-                With[{page = localPage[name, id, file]}, fresh[file] = <|"Stamp" -> now, "Page" -> page|>; page]]]],
+        Function[{id, file}, id -> With[{entry = If[StringQ[root], Lookup[shipped, relativePath[root, file], None], None]},
+            If[ AssociationQ[entry] && entry["Size"] === FileByteCount[file], entry["Page"],
+                With[{cached = Lookup[cache, file, None], now = stamp[file]},
+                    If[ AssociationQ[cached] && cached["Stamp"] === now, cached["Page"],
+                        With[{page = localPage[name, id, file]}, fresh[file] = <|"Stamp" -> now, "Page" -> page|>; page]]]]]],
         local];
     If[ StringQ[cacheFile] && (fresh =!= <||> || Complement[Keys[cache], Values[local]] =!= {}),
         writeCatalogCache[cacheFile, Join[KeyTake[cache, Values[local]], fresh]]];
     pages
 ];
 
+(* the form of a catalog's entries, which a shipped catalog and a cache are kept in *)
+$catalogFormat = 1;
+$shippedCatalogName = "PacletPageCatalog.wxf";
+
+(* the documentation directory a notebook of it is in: the one above its Guides, Tutorials or
+   ReferencePages *)
+documentationRoot[file_String] := With[{parts = FileNameSplit[file]},
+    Replace[Position[parts, "Guides" | "Tutorials" | "ReferencePages"], {{___, {n_}} :> FileNameJoin[Take[parts, n - 1]], _ -> None}]];
+
+(* the catalog a build ships beside a paclet's notebooks, by each notebook's path there: its size and
+   its entry, or none where it is of another paclet or form *)
+shippedCatalog[name_String, local_Association] := With[{root = If[local === <||>, None, documentationRoot[First[Values[local]]]]},
+    If[ ! StringQ[root] || ! FileExistsQ[FileNameJoin[{root, $shippedCatalogName}]], <||>,
+        Replace[Import[FileNameJoin[{root, $shippedCatalogName}], "WXF"], {
+            shipped_Association /; Lookup[shipped, "Format", None] === $catalogFormat && Lookup[shipped, "Name", None] === name :> shipped["Pages"],
+            _ -> <||>}]]];
+
+(* The catalog of a built paclet's notebooks shipped beside them, so that an install of the paclet
+   opens its catalog without reading them: the file written, or None. *)
+shipCatalog[builtRoot_String, name_String] := Module[{local = localDocumentation[builtRoot], root},
+    root = If[local === <||>, None, documentationRoot[First[Values[local]]]];
+    If[ ! StringQ[root], Return[None, Module]];
+    Export[FileNameJoin[{root, $shippedCatalogName}], <|"Format" -> $catalogFormat, "Name" -> name,
+        "Pages" -> Association[KeyValueMap[relativePath[root, #2] -> <|"Size" -> FileByteCount[#2], "Page" -> localPage[name, #1, #2]|> &, local]]|>, "WXF"]
+];
+
 (* this user's cache of a paclet's catalog: one file for the paclet's name and its notebooks' directory *)
 catalogCacheFile[name_String, local_Association] := If[ local === <||>, None,
     FileNameJoin[{$UserBaseDirectory, "ApplicationData", "WolframInstitute", "PacletPage", "Catalogs",
-        StringReplace[name, "/" -> "__"] <> "-" <> StringTake[digest[{name, DirectoryName[DirectoryName[First[Values[local]]]]}], 16] <> ".wxf"}]
+        StringReplace[name, "/" -> "__"] <> "-" <> StringTake[digest[{name, $catalogFormat, DirectoryName[DirectoryName[First[Values[local]]]]}], 16] <> ".wxf"}]
 ];
 
 (* the cache written to a file of its own beside it and moved into place, so a kernel that reads it

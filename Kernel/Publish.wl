@@ -3523,7 +3523,7 @@ stageBundledDependencies[head_Symbol, dir_String, stage_String, spec_] := Catch[
 
 freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True, pageOptions_Association : <||>] := Module[
     {buildDir, prefix, recordFile, builtDocsDir, authoring, stageRoot, source, built, pages, load, dependencies, processes, changed, parallel, pruned,
-     excludedQ, links, missing, declared, sources, flagged, bundleSpec, bundleActiveQ, bundled},
+     excludedQ, links, missing, declared, sources, flagged, bundleSpec, bundleActiveQ, bundled, shipped},
     (* the files the archive leaves out; a symbolic link that leads outside the paclet must be one *)
     excludedQ = Function[path, AnyTrue[Flatten[{Lookup[pageOptions, "Exclude", {}]}], StringMatchQ[path, #] &]];
     links = outsideLinks[dir];
@@ -3601,6 +3601,8 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
     With[{check = Lookup[pageOptions, "ArchiveCheck", None]},
         If[ check =!= None && ! TrueQ[check[built["Archive"]]], Message[head::archivecheck, check]; Return[$Failed, Module]]
     ];
+    (* the catalog of the built notebooks, shipped in the archive, so an install opens it at once *)
+    shipped = shipCatalog[FileNameJoin[{buildDir, prefix}], name];
     (* the symbols the paclet declares, which the resource page's examples link to: by default the
        public ones the fresh kernel found, for a paclet that declares none *)
     declared = Replace[Lookup[pageOptions, "Symbols", Automatic], {
@@ -3609,6 +3611,8 @@ freshArchive[head_Symbol, dir_String, name_String, docSource_, loadCheck_ : True
         names : {__String} :> declareSymbols[built["Archive"], FileNameJoin[{buildDir, prefix}], names, True],
         _ -> None
     }];
+    (* declaring symbols packs the archive again, with the catalog; without it, the catalog is packed here *)
+    If[ StringQ[shipped] && ! IntegerQ[declared], repackArchive[built["Archive"], FileNameJoin[{buildDir, prefix}]]];
     With[{result = <|"Archive" -> built["Archive"], "Pages" -> Length[pages], "Load" -> load, "DeclaredSymbols" -> declared, "Symbols" -> archiveSymbols[FileNameJoin[{buildDir, prefix}]], "ArchiveSize" -> Quantity[FileByteCount[built["Archive"]], "Bytes"],
           "Documentation" -> <|"Changed" -> Length[changed], "Pruned" -> Length[pruned], "Processes" -> processes, "BuiltInParallel" -> parallel, "Missing" -> missing, "Flagged" -> flagged|>|>},
         Put[
@@ -3683,6 +3687,14 @@ declareSymbols[archive_String, builtRoot_String, names_List, replace_] := Module
     If[ StringQ[packed] && FileExistsQ[packed], CopyFile[packed, archive, OverwriteTarget -> True]];
     DeleteDirectory[work, DeleteContents -> True];
     If[ StringQ[packed], Length[names], None]
+];
+
+(* the archive packed again from the built paclet, in place *)
+repackArchive[archive_String, builtRoot_String] := Module[{work = CreateDirectory[], packed},
+    packed = CreatePacletArchive[builtRoot, work];
+    If[ StringQ[packed] && FileExistsQ[packed], CopyFile[packed, archive, OverwriteTarget -> True]];
+    DeleteDirectory[work, DeleteContents -> True];
+    StringQ[packed]
 ];
 
 (* the directories of the LibraryLink libraries a paclet declares *)
