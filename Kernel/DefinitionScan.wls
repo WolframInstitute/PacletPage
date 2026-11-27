@@ -141,12 +141,18 @@ bareQ[name_String] := ToExpression[name, InputForm, Function[s, MatchQ[Language`
     Language`DefinitionList[] | Language`DefinitionList[_ -> {((Attributes -> _) | (Messages -> _) | (_ -> {})) ...}]], HoldAllComplete]];
 snapshot[] := AssociationMap[{definitionHash[#], bareQ[#]} &, foreignNames[]];
 (* What a loading changed, between two snapshots. Left out: the count of Module's names, the
-   file being read and the state of the random generator, which change with any code, and what
-   names the session; and a symbol with nothing to see before whose
-   definition now names nothing of the paclets, which is Wolfram's own package loaded on its first
-   use, by whichever code used it first. *)
+   file being read and the state of the random generator, which change with any code; what names
+   the session, the packages loaded so far, and the cloud's, the requester's, the account's and the
+   resource system's values, the cookies and the credential stores, which the machine, the account
+   and whatever loaded first decide, not the paclet's code; and a symbol with nothing to see before
+   whose definition now names nothing of the paclets, which is Wolfram's own package loaded on its
+   first use, by whichever code used it first. *)
+$sessionNames = {"$ModuleNumber", "$InputFileName", "$RandomGeneratorState", "$SessionID", "$ProcessID", "$CommandLine", "$ScriptCommandLine",
+    "$Packages", "$WolframID", "$WolframUUID", "$UserAgent", "$LicenseID", "$PublisherID", "$ResourceSystemBase", "$ResourceSystemPath",
+    "$Cookies", "$HTTPCookies", "$CookieStore", "$SystemCredentialStore", "$EntityStores"};
+sessionNameQ[name_String] := MemberQ[$sessionNames, name] || StringStartsQ[name, "$Cloud" | "$Requester"];
 changedBetween[old_Association, new_Association] := Sort @ Select[
-    DeleteCases[Keys[new], "$ModuleNumber" | "$InputFileName" | "$RandomGeneratorState" | "$SessionID" | "$ProcessID" | "$CommandLine" | "$ScriptCommandLine"],
+    Select[Keys[new], ! sessionNameQ[#] &],
     Function[name, Lookup[old, name, {None, False}][[1]] =!= new[name][[1]] &&
         ! (KeyExistsQ[old, name] && old[name][[2]] && (declared === {} || StringFreeQ[definitionText[name], declared]))]
 ];
@@ -165,6 +171,13 @@ If[ $OperatingSystem =!= "MacOSX" && StringQ[Environment["WOLFRAM_CLOUD_USER"]] 
     progress[If[StringQ[CloudConnect[Environment["WOLFRAM_CLOUD_USER"], Environment["WOLFRAM_CLOUD_PASSWORD"]]], "connected to the cloud", "no cloud connection"]]
 ];
 
+(* Wolfram's cloud and resource packages, loaded and used once before the first snapshot: a
+   paclet that loads them as it loads, as one that reads a ResourceFunction on a cold cache does,
+   then changes nothing of System` that a warm cache, or another paclet loading them first, would
+   not *)
+Needs["CloudObject`"];
+Needs["ResourceSystemClient`"];
+CloudObject["DefinitionScan"];
 before = snapshot[];
 progress[IntegerString[Length[before]], " System` and Global` definitions hashed"];
 contextsBefore = AssociationThread[Contexts[] -> True];

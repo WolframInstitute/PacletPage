@@ -6,7 +6,7 @@ PacletObject[<|
     "Creator" -> "Nikolay Murzin",
     "PublisherID" -> "WolframInstitute",
     "License" -> "MIT",
-    "Version" -> "0.3.100",
+    "Version" -> "0.3.101",
     "WolframVersion" -> "14.3+",
     "PrimaryContext" -> "WolframInstitute`PacletPage`",
     "Dependencies" -> {

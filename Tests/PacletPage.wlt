@@ -1168,6 +1168,33 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], work = CreateDirectory[], d = "Dx" <> IntegerString[RandomInteger[10^12], 36], c = "Cx" <> IntegerString[RandomInteger[10^12], 36],
+            paclet, dep, consumer, scan},
+        WithCleanup[
+            paclet[dd_, name_, code_List] := (
+                CreateDirectory[FileNameJoin[{dd, "Kernel"}], CreateIntermediateDirectories -> True];
+                Export[FileNameJoin[{dd, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/" <> name <> "\", \"Version\" -> \"1.0\", \"PrimaryContext\" -> \"" <> name <>
+                    "`\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"" <> name <> "`\"}}|>]", "Text"];
+                Export[FileNameJoin[{dd, "Kernel", name <> ".wl"}], StringRiffle[code, "\n"], "Text"];
+                dd);
+            (* a dependency whose loading loads the cloud's packages and reads the cloud's base, as one
+               that reads a ResourceFunction on a cold cache does, and adds itself to $Packages *)
+            dep = paclet[FileNameJoin[{root, "dep"}], d, {"BeginPackage[\"" <> d <> "`\"]", "f::usage = \"f[x]\";", "Begin[\"`Private`\"]",
+                "Needs[\"CloudObject`\"]", "base = $CloudBase;", "f[x_] := {x, base}", "End[]", "EndPackage[]"}];
+            consumer = paclet[FileNameJoin[{root, "consumer"}], c, {"BeginPackage[\"" <> c <> "`\", {\"" <> d <> "`\"}]", "g::usage = \"g[x]\";",
+                "Begin[\"`Private`\"]", "g[x_] := f[x]", "End[]", "EndPackage[]"}];
+            PacletDirectoryLoad[consumer];
+            scan = scanPaclet[consumer, c <> "`", {dep}, <|"Excluded" -> {}, "Cache" -> FileNameJoin[{root, "cache"}], "Work" -> work, "Monitor" -> False, "Preferred" -> {consumer, dep}|>];
+            {AssociationQ[scan], Lookup[Lookup[scan, "DependencyChanged", <||>], dep, Missing[]]},
+            PacletDirectoryUnload[consumer];
+            Scan[DeleteDirectory[#, DeleteContents -> True] &, {root, work}]
+        ]
+    ],
+    {True, <||>},
+    TestID -> "Scan: a dependency that loads Wolfram's cloud packages, or adds itself to $Packages, changes nothing of System` that another loading first, or a warm cache, would not"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{work = CreateDirectory[], in, out, run, result},
         in = FileNameJoin[{work, "in.wxf"}];
         out = FileNameJoin[{work, "out.wxf"}];
