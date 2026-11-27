@@ -1042,6 +1042,25 @@ VerificationTest[
 ]
 
 VerificationTest[
+    withDefinitionFixture[<|"foo" -> "---\nTemplate: Symbol\nRelatedGuides: [FooGuide]\n---\n\n```wl\nfoo[1]\n```\n", "bar" -> "```wl\nbar[1]\n```\n"|>, Function[fixture, Module[{dir = fixture["Directory"], guide, build, runs = {}},
+        CreateDirectory[FileNameJoin[{dir, "docs", "Guides"}]];
+        guide[name_, title_] := Export[FileNameJoin[{dir, "docs", "Guides", name <> ".md"}], "---\nTemplate: Guide\nTitle: " <> title <> "\n---\n\n# " <> title <> "\n", "Text"];
+        guide["FooGuide", "Foo things"];
+        build[] := Sort[FileBaseName /@ BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False]["Converted"]];
+        AppendTo[runs, build[]];
+        (* a guide no page names *)
+        guide["OtherGuide", "Other things"];
+        AppendTo[runs, build[]];
+        (* the title of the guide foo names *)
+        guide["FooGuide", "Foo and more"];
+        AppendTo[runs, build[]];
+        runs
+    ]]],
+    {Sort[{"FooGuide", "bar", "foo"}], {"OtherGuide"}, Sort[{"FooGuide", "foo"}]},
+    TestID -> "Build: a new guide converts again only itself and the pages that name it; a guide's new title, the pages that name it"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{build},
         build[mode_] := FileBaseName /@ BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False, "CacheKey" -> mode]["Converted"];
         {build["Code"], build["Code"], definitionCode[fixture, "x + 3", "2 x"]; build["Code"], build["Definitions"], definitionCode[fixture, "x + 3", "5 x"]; build["Code"]}

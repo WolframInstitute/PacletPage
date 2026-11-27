@@ -1155,9 +1155,24 @@ tasksConverted[tasks_List, spec_, setup_, kernels_List] := Module[{first, rest, 
     Prepend[rest, first]
 ];
 
-(* the page cache's key: everything a page's notebook depends on. The guides' titles are in it
-   because every page's Related Guides links show them. *)
+(* the page cache's key: everything a page's notebook depends on, among it the titles of the
+   guides the page shows (pageGuides) *)
 $pageCacheVersion = "2";
+(* The guides a page shows, each with the title its link to it shows: those whose names its text
+   holds, as a Related Guides entry, a guide link or a guide's More About list names them, and those
+   its front matter's Related Guides gives in a title's words, which the converter names the guide
+   by without their spaces. A guide the page does not name is none of its key, so a new guide
+   converts again only the pages that name it. *)
+pageGuides[file_String, meta_Association, guides_List] := With[
+    {names = Join[pageTextNames[file], Catenate[guideEntryNames /@ Cases[Flatten[{Lookup[meta, "RelatedGuides", {}]}], _String]]]},
+    Select[guides, MemberQ[names, First[#]] &]
+];
+(* the names a Related Guides entry may give its guide by, as the converter reads one: the entry's
+   words without their spaces, or a link's label so and its target *)
+guideEntryNames[entry_String] := DeleteDuplicates @ Join[{StringDelete[entry, Whitespace]},
+    Catenate @ StringCases[StringTrim[entry], StartOfString ~~ "[" ~~ label : Except["]"] .. ~~ "](" ~~ target : Except[")"] ... ~~ ")" ~~ EndOfString :>
+        {StringDelete[label, Whitespace], StringTrim[target]}]];
+
 pageKey[task_Association, converterID_, code_String, guides_List] := digest[
     Join[
         {$pageCacheVersion, task["Page"], FileHash[task["File"], "SHA256"], task["Options"], converterID, code, guides},
@@ -1384,7 +1399,7 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     examples = Replace[If[FileExistsQ[examplesFile], Import[examplesFile, "WXF"], <||>], Except[_Association] -> <||>];
     examples = If[ KeyExistsQ[examples, "Codes"], examples, <|"Codes" -> examples, "Pages" -> <||>|>];
     tasks = Map[
-        Function[task, With[{code = codes[task["Page"]]}, With[{key = pageKey[task, converterID, code, guides]},
+        Function[task, With[{code = codes[task["Page"]]}, With[{key = pageKey[task, converterID, code, pageGuides[task["File"], Lookup[metas, task["File"], <||>], guides]]},
             Join[task, <|
                 "Code" -> code,
                 "Entry" -> FileNameJoin[{pagesDir, key <> ".nb"}],
