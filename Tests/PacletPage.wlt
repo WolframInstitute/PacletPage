@@ -1022,6 +1022,26 @@ VerificationTest[
 ]
 
 VerificationTest[
+    withDefinitionFixture[<|"foo" -> "Reads `GreetingData`.\n\n```wl\nfoo[1]\n```\n", "bar" -> "```wl\nbar[1]\n```\n"|>, Function[fixture, Module[{dir = fixture["Directory"], info, build, runs = {}},
+        (* an asset no definition names, which foo's text names by its asset name, and a file nothing names *)
+        info = Import[FileNameJoin[{dir, "PacletInfo.wl"}], "Text"];
+        Export[FileNameJoin[{dir, "PacletInfo.wl"}], StringReplace[info, "\"Extensions\" -> {" -> "\"Extensions\" -> {{\"Asset\", \"Root\" -> \"Assets\", \"Assets\" -> {{\"GreetingData\", \"greeting.txt\"}}}, "], "Text"];
+        CreateDirectory[FileNameJoin[{dir, "Assets"}]];
+        Export[FileNameJoin[{dir, "Assets", "greeting.txt"}], "1", "Text"];
+        Export[FileNameJoin[{dir, "Assets", "other.txt"}], "1", "Text"];
+        build[] := Sort[FileBaseName /@ BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False]["Converted"]];
+        AppendTo[runs, build[]];
+        Export[FileNameJoin[{dir, "Assets", "greeting.txt"}], "2", "Text"];
+        AppendTo[runs, build[]];
+        Export[FileNameJoin[{dir, "Assets", "other.txt"}], "2", "Text"];
+        AppendTo[runs, build[]];
+        runs
+    ]]],
+    {{"bar", "foo"}, {"foo"}, {"bar", "foo"}},
+    TestID -> "Build: a file the loading does not read and no definition names converts again only the pages that name it; one nothing names, every page"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{build},
         build[mode_] := FileBaseName /@ BuildPacletDocumentation[fixture["Directory"], "Converter" -> fakeConvert, "Definition" -> None, "Parallel" -> False, "CacheKey" -> mode]["Converted"];
         {build["Code"], build["Code"], definitionCode[fixture, "x + 3", "2 x"]; build["Code"], build["Definitions"], definitionCode[fixture, "x + 3", "5 x"]; build["Code"]}

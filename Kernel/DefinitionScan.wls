@@ -384,7 +384,7 @@ If[ ! loaded,
     assetNames[dir_String] := With[{paclet = pacletOf[dir]},
         If[ ! PacletObjectQ[paclet], <||>,
             Association @ Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Asset", rules___} :> With[{options = Association[Cases[{rules}, _Rule]]},
-                Cases[Flatten[{Lookup[options, "Assets", {}]}], ((name_String -> path_String) | {name_String, path_String}) :>
+                Cases[Flatten[{Lookup[options, "Assets", {}]}, 1], ((name_String -> path_String) | {name_String, path_String}) :>
                     (ExpandFileName[FileNameJoin[{dir, Lookup[options, "Root", "."], path}]] -> name)]], Infinity]]];
     extra = <||>;
     attached = {};

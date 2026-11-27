@@ -106,7 +106,11 @@ dependencyPinned[entry_Association] := With[{pin = Lookup[entry, "Pin", None]},
         Join[If[KeyExistsQ[pin, "Git"] || KeyExistsQ[pin, "Archive"],
             KeyDrop[entry, {"Pin", "Resource", "Archive", "Git", "Commit", "Path"}], KeyDrop[entry, "Pin"]], pin]]
 ]
-dependencyPinQ[entry_, owner_] := ! KeyExistsQ[entry, "Pin"] || With[{pin = entry["Pin"]},
+(* A pin matters only to a pinned install, which checks it whole and fails on a key it does not
+   know; anywhere else, as the dialog, the report and the loaders read a declaration, a pin is an
+   association whatever it holds, so a field a later PacletPage adds to pins does not make the
+   declaration invalid *)
+dependencyPinQ[entry_, owner_] := ! KeyExistsQ[entry, "Pin"] || ! TrueQ[$dependencyPinned] && AssociationQ[entry["Pin"]] || With[{pin = entry["Pin"]},
     AssociationQ[pin] && pin =!= <||> && ContainsAll[$dependencyPinKeys, Keys[pin]] &&
         (! KeyExistsQ[pin, "Version"] || dependencyVersionQ[pin["Version"]]) &&
         (! KeyExistsQ[pin, "SHA256"] || (! KeyExistsQ[pin, "Git"] && dependencyVersionQ[Lookup[dependencyPinned[entry], "Version", None]])) &&

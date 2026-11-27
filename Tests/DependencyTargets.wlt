@@ -321,11 +321,11 @@ VerificationTest[
                 MatchQ[results[[3]], Failure["DependencyArchive", _]] && StringContainsQ[results[[3]]["MessageTemplate"], "disagrees"],
                 MatchQ[results[[4]], _PacletObject],
                 MatchQ[results[[5]], _PacletObject], MatchQ[results[[6]], Failure["DependencyArchive", _]], MatchQ[results[[7]], _PacletObject],
-                dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> <|$SystemID -> "abc"|>|>|>, owner[<||>]],
+                Block[{$dependencyPinned = True}, dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> <|$SystemID -> "abc"|>|>|>, owner[<||>]]],
                 (* a hash names one archive: it needs an exact version, a commit pins a Git source instead, and it is 64 hex digits *)
-                dependencyPinQ[<|"Name" -> name, "Version" -> "1.0+", "Pin" -> <|"Archive" -> url, "SHA256" -> hash|>|>, owner[<||>]],
-                dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Git" -> "https://github.com/demo/lib", "Commit" -> StringRepeat["a", 40], "SHA256" -> hash|>|>, owner[<||>]],
-                dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> "abc"|>|>, owner[<||>]]
+                Block[{$dependencyPinned = True}, dependencyPinQ[<|"Name" -> name, "Version" -> "1.0+", "Pin" -> <|"Archive" -> url, "SHA256" -> hash|>|>, owner[<||>]]],
+                Block[{$dependencyPinned = True}, dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Git" -> "https://github.com/demo/lib", "Commit" -> StringRepeat["a", 40], "SHA256" -> hash|>|>, owner[<||>]]],
+                Block[{$dependencyPinned = True}, dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> "abc"|>|>, owner[<||>]]]
             },
             Scan[PacletDirectoryUnload, FileNameJoin[{root, #}] & /@ {"nosidecar", "wrongpin", "disagree", "agree", "bysystem", "bysystemwrong", "bysystemnone"}];
             DeleteDirectory[root, DeleteContents -> True]
@@ -333,6 +333,24 @@ VerificationTest[
     ],
     {True, True, True, True, True, True, True, False, False, False, False},
     TestID -> "Archive by its pin's SHA-256: a pinned archive must match the hash its pin gives, for its system or for all, published one or not, and a published one that disagrees is refused"
+]
+
+VerificationTest[
+    Module[{name = testUniqueName["TestFuturePinLib"], owner, entry},
+        entry = <|"Name" -> name, "Version" -> "1.0+", "Pin" -> <|"Version" -> "1.0.0", "FutureField" -> "x"|>|>;
+        owner = PacletObject[<|"Name" -> "Example/FuturePinConsumer", "Version" -> "1.0", "Dependencies" -> {entry}|>];
+        {
+            (* read for the dialog, the report and the loaders: the pin is an association, whatever it holds *)
+            Block[{$dependencyPinned = False}, dependencyEntryQ[entry, owner]],
+            AssociationQ[Block[{$dependencyPinned = False}, dependencyManifest[owner]]],
+            (* a pinned install fails on a key it does not know *)
+            Block[{$dependencyPinned = True}, dependencyEntryQ[entry, owner]],
+            MatchQ[Block[{$dependencyPinned = True}, dependencyManifest[owner]], Failure["DependencyManifest", _]],
+            Block[{$dependencyPinned = False}, dependencyEntryQ[<|"Name" -> name, "Pin" -> "not an association"|>, owner]]
+        }
+    ],
+    {True, True, False, True, False},
+    TestID -> "Pin: outside a pinned install a pin may hold keys this PacletPage does not know; a pinned install refuses them"
 ]
 
 VerificationTest[

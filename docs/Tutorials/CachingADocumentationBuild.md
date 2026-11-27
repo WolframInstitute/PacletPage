@@ -142,7 +142,7 @@ The page of `Wave` reaches `Wave` alone, so the change to `Wave` converted it an
 PacletPageDependencies[dir, FileNameJoin[{dir, "docs", "Symbols", "Wave.md"}]]["Reached"]
 ```
 
-The code holds the digests of the named symbols' cones and what every page shares: the paclet's `PacletInfo.wl` but its `"Dependencies"`, the converter, the files the loading did not read and no code names, and the definitions of ``System` `` symbols that the paclet's own loading changed.
+The code holds the digests of the named symbols' cones and what every page shares: the paclet's `PacletInfo.wl` but its `"Dependencies"`, the converter, the files the loading did not read and nothing names, and the definitions of ``System` `` symbols that the paclet's own loading changed. A file the loading did not read that no definition names but a page or an example does, by its name, its name without extension, a directory on its path or its asset name, is in the keys of those pages and examples only, as a data file a tutorial loads is.
 
 The declared dependencies are a page's only where its names reach a function that reads them as it runs, such as `PacletDependencyInformation`. A dependency's code is in the cones of the definitions that use it, so moving a `"Pin"` or a minimum converts again only the pages that show the declaration.
 

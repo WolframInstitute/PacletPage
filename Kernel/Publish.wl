@@ -396,9 +396,10 @@ runScan[arguments_List, monitored_, deadline_] := Module[{kernel = kernelExecuta
     ];
 ];
 
-(* the part of the code every page's key shares *)
-sharedCode[dir_String, scan_Association, dependencies_List, excluded_List, versioned_, converterID_] := With[
-    {read = AssociationThread[ExpandFileName /@ Join[scan["Read"], Lookup[scan, "Attached", {}]] -> True], unloaded = Lookup[scan, "Unloaded", {}]},
+(* the part of the code every page's key shares; the files keyed elsewhere, those the pages name,
+   are left out of it *)
+sharedCode[dir_String, scan_Association, dependencies_List, excluded_List, versioned_, converterID_, elsewhere_List : {}] := With[
+    {read = AssociationThread[ExpandFileName /@ Join[scan["Read"], Lookup[scan, "Attached", {}], elsewhere] -> True], unloaded = Lookup[scan, "Unloaded", {}]},
     digest[{
         pacletInfoKey[#, versioned] & /@ Select[FileNameJoin[{dir, #}] & /@ {"PacletInfo.wl", "PacletInfo.m"}, FileExistsQ],
         unreadFiles[dir, read, excluded],
@@ -420,7 +421,7 @@ pacletFiles[dir_String] := Module[{paclet = PacletObject[File[dir]], extensions,
             {options = Association[Cases[{rules}, _Rule]]},
             With[{root = Lookup[options, "Root", Switch[kind, "Kernel", "Kernel", "LibraryLink", "LibraryResources", "AutoCompletionData", "AutoCompletionData", _, "."]]},
                 If[ kind === "Asset",
-                    With[{assets = Cases[Flatten[{Lookup[options, "Assets", {}]}], (_ -> path_String) | {_, path_String} :> path]},
+                    With[{assets = Cases[Flatten[{Lookup[options, "Assets", {}]}, 1], (_ -> path_String) | {_, path_String} :> path]},
                         If[assets === {}, If[MemberQ[{".", ""}, root], {}, {root}], FileNameJoin[{root, #}] & /@ assets]],
                     {root}
                 ]
@@ -444,6 +445,31 @@ unreadFiles[dir_String, read_Association, excluded_List] := Map[
     Select[pacletFiles[dir], ! KeyExistsQ[read, ExpandFileName[#]] && ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], excluded] &]
 ];
 
+(* A file of the paclet's that its loading did not read and no definition names is part of the
+   keys of the pages, and of the examples, whose text names it, as the scan matches a definition's
+   strings: by a directory on its path below the paclet's, its name, its name without extension, or
+   its name among the paclet's assets. A file that no page names stays in every page's key. By
+   name, each such file's path and hash. *)
+pageNamedFiles[dir_String, scan_Association, excluded_List, names_List] := Module[
+    {read = AssociationThread[ExpandFileName /@ Join[scan["Read"], Lookup[scan, "Attached", {}]] -> True], assets = pacletAssetNames[dir], named, lines},
+    named = Select[
+        AssociationMap[fileTokens[dir, #, assets] &, Select[pacletFiles[dir], ! KeyExistsQ[read, ExpandFileName[#]] &&
+            ! StringMatchQ[StringTrim[StringDrop[#, StringLength[dir]], "/" | "\\"], excluded] &]],
+        IntersectingQ[#, names] &];
+    lines = AssociationMap[{StringDrop[#, StringLength[dir]], FileHash[#, "SHA256"]} &, Keys[named]];
+    <|"Files" -> Keys[named], "ByName" -> Merge[KeyValueMap[Function[{file, tokens}, AssociationThread[tokens -> Table[{lines[file]}, Length[tokens]]]], named], Catenate]|>
+];
+fileTokens[dir_String, file_String, assets_Association] := DeleteDuplicates @ DeleteCases[Join[
+    Most[FileNameSplit[StringTrim[StringDrop[file, StringLength[dir]], "/" | "\\"]]],
+    {FileNameTake[file], FileBaseName[file]}, Lookup[assets, {ExpandFileName[file]}, Nothing]], "Kernel" | "Assets" | ""];
+(* a paclet's declared assets, by file, their names *)
+pacletAssetNames[dir_String] := With[{paclet = PacletObject[File[dir]]},
+    If[ ! PacletObjectQ[paclet], <||>,
+        Association @ Cases[Replace[paclet["Extensions"], Except[_List] -> {}], {"Asset", rules___} :> With[{options = Association[Cases[{rules}, _Rule]]},
+            Cases[Flatten[{Lookup[options, "Assets", {}]}, 1], ((name_String -> path_String) | {name_String, path_String}) :>
+                (ExpandFileName[FileNameJoin[{dir, Lookup[options, "Root", "."], path}]] -> name)]], Infinity]]
+];
+
 (* the names a text holds *)
 $identifier = (LetterCharacter | "$") ~~ ((WordCharacter | "$") ...) ~~ (("`" ~~ (LetterCharacter | "$") ~~ ((WordCharacter | "$") ...)) ...);
 textNames[text_String] := DeleteDuplicates[StringCases[text, $identifier]];
@@ -460,9 +486,11 @@ definitionKeys[scan_Association, shared_String] := <|
 
 (* the code names reach: the shared part and the digests of the cones of the paclet's symbols
    they name, a name in full or by its own name, unless that is a System` symbol's *)
-namesCode[keys_Association, names_List, shared_String : "Shared"] := With[{named = namedSymbols[keys, names]},
+namesCode[keys_Association, names_List, shared_String : "Shared"] := With[{named = namedSymbols[keys, names],
+        files = Union @ Catenate @ Lookup[Lookup[keys, "FilesByName", <||>], names, {}]},
     digest[Join[{keys[shared], Union @ Lookup[keys["Cones"], named]},
-        If[ AssociationQ[Lookup[keys, "Readers", None]] && AnyTrue[named, KeyExistsQ[keys["Readers"], #] &], {keys["Declaration"]}, {}]]]
+        If[ AssociationQ[Lookup[keys, "Readers", None]] && AnyTrue[named, KeyExistsQ[keys["Readers"], #] &], {keys["Declaration"]}, {}],
+        If[ files === {}, {}, {files}]]]
 ];
 (* the paclet's symbols that names name *)
 namedSymbols[keys_Association, names_List] := DeleteDuplicates @ Catenate @ Map[
@@ -558,7 +586,7 @@ PacletPageDependencies[dir_String, file_String, opts : OptionsPattern[]] := Modu
    whose examples run here, or "Code", the paclet's whole code for every page, as when the scan
    fails; and the keys the examples' codes are made with, or None *)
 pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] := Module[
-    {whole, context = paclet["PrimaryContext"], dirs, scan, keys, closure},
+    {whole, context = paclet["PrimaryContext"], dirs, scan, keys, closure, pageFiles},
     (* the whole code, hashed once, for every page *)
     whole[] := With[{code = digest[{exampleCode[dir, opts["Dependencies"], opts["Excluded"], opts["Versioned"]], opts["Converter"]}]},
         <|"Codes" -> AssociationMap[code &, Lookup[tasks, "Page", {}]], "Keys" -> None|>
@@ -574,11 +602,14 @@ pageCodes[mode_, dir_String, paclet_PacletObject, tasks_List, opts_Association] 
         Return[whole[], Module]
     ];
     Scan[Message[BuildPacletDocumentation::outranked, First[#], Last[#]] &, Lookup[scan, "Outranked", {}]];
-    keys = definitionKeys[scan, sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], opts["Converter"]]];
+    (* the unread files that the pages name are keyed into those pages, and out of the shared part *)
+    pageFiles = pageNamedFiles[dir, scan, opts["Excluded"], Union @@ (pageTextNames /@ Lookup[tasks, "File", {}])];
+    keys = definitionKeys[scan, sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], opts["Converter"], pageFiles["Files"]]];
+    keys["FilesByName"] = pageFiles["ByName"];
     (* An example's result is what its code evaluates to, which the paclet's code decides and the
        converter does not: its code has the shared part without the converter, so that another
        converter converts every page again and evaluates none of its examples again. *)
-    keys["ExampleShared"] = sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], None];
+    keys["ExampleShared"] = sharedCode[dir, scan, closure, opts["Excluded"], opts["Versioned"], None, pageFiles["Files"]];
     keys = Join[keys, declarationReaders[scan, dir]];
     <|"Codes" -> Association[#Page -> pageCode[keys, #File] & /@ tasks], "Keys" -> keys|>
 ];
