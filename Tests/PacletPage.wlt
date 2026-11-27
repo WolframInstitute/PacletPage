@@ -1197,6 +1197,38 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{root = CreateDirectory[], d = "Dx" <> IntegerString[RandomInteger[10^12], 36], c = "Cx" <> IntegerString[RandomInteger[10^12], 36],
+            paclet, dep, consumer, wrapper, scan, plain, elsewhere},
+        WithCleanup[
+            paclet[dd_, name_, code_List] := (
+                CreateDirectory[FileNameJoin[{dd, "Kernel"}], CreateIntermediateDirectories -> True];
+                Export[FileNameJoin[{dd, "PacletInfo.wl"}], "PacletObject[<|\"Name\" -> \"Pub/" <> name <> "\", \"Version\" -> \"1.0\", \"PrimaryContext\" -> \"" <> name <>
+                    "`\", \"Extensions\" -> {{\"Kernel\", \"Root\" -> \"Kernel\", \"Context\" -> \"" <> name <> "`\"}}|>]", "Text"];
+                Export[FileNameJoin[{dd, "Kernel", name <> ".wl"}], StringRiffle[code, "\n"], "Text"];
+                dd);
+            (* a dependency that adds its own directory to $Path as it loads *)
+            dep = paclet[FileNameJoin[{root, "dep"}], d, {"BeginPackage[\"" <> d <> "`\"]", "f::usage = \"f[x]\";", "Begin[\"`Private`\"]",
+                "AppendTo[$Path, DirectoryName[$InputFileName]];", "f[x_] := x", "End[]", "EndPackage[]"}];
+            consumer = paclet[FileNameJoin[{root, "consumer"}], c, {"BeginPackage[\"" <> c <> "`\", {\"" <> d <> "`\"}]", "g::usage = \"g[x]\";",
+                "Begin[\"`Private`\"]", "g[x_] := f[x]", "End[]", "EndPackage[]"}];
+            PacletDirectoryLoad[consumer];
+            scan[cache_] := Lookup[Lookup[scanPaclet[consumer, c <> "`", {dep}, <|"Excluded" -> {}, "Cache" -> FileNameJoin[{root, cache}],
+                "Work" -> CreateDirectory[], "Monitor" -> False, "Preferred" -> {consumer, dep}|>], "DependencyChanged", <||>], dep, <||>];
+            plain = scan["plain"];
+            (* the same scan in a kernel whose $Path starts with one more entry, as another machine's does *)
+            wrapper = FileNameJoin[{root, "wrapper.wls"}];
+            Export[wrapper, "AppendTo[$Path, " <> ToString[FileNameJoin[{root, "elsewhere"}], InputForm] <> "]; Get[" <> ToString[$definitionScan, InputForm] <> "]", "Text"];
+            elsewhere = Block[{$definitionScan = wrapper}, scan["elsewhere"]];
+            {KeyExistsQ[plain, "$Path"], Lookup[plain, "$Path"] === Lookup[elsewhere, "$Path"]},
+            PacletDirectoryUnload[consumer];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, True},
+    TestID -> "Scan: a loading that adds to $Path is keyed by what it added, whatever $Path the kernel starts with"
+]
+
+VerificationTest[
     withDefinitionFixture[<|"foo" -> "```wl\nfoo[1]\n```\n"|>, Function[fixture, Module[{work = CreateDirectory[], in, out, run, result},
         in = FileNameJoin[{work, "in.wxf"}];
         out = FileNameJoin[{work, "out.wxf"}];
@@ -1975,6 +2007,29 @@ VerificationTest[
     ],
     {3, None, 3, None, True, True},
     TestID -> "Archive: with \"Build\" -> Automatic a deploy takes the recorded archive only from the same sources and the same builder"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], archive, written = <||>, result, hash},
+        WithCleanup[
+            archive = FileNameJoin[{root, "Pub__Sym-1.0.0.paclet"}];
+            Export[archive, "not really an archive", "Text"];
+            hash = FileHash[archive, "SHA256", "HexString"];
+            (* the cloud copies as written: an archive, or a checksum file's text *)
+            result = Block[{cloudCopy = Function[{from, to}, written[First[to]] = If[StringEndsQ[First[to], ".sha256"], ReadString[from], "archive"]; to]},
+                publishArchive[archive, "https://c.example/obj/u/Paclets", "Pub/Sym", "Public", None]];
+            {
+                result["SHA256"] === hash,
+                Sort[Keys[written]],
+                written["https://c.example/obj/u/Paclets/Pub__Sym-1.0.0.paclet.sha256"] === hash <> "  Pub__Sym-1.0.0.paclet\n",
+                written["https://c.example/obj/u/Paclets/Pub__Sym.paclet.sha256"] === hash <> "  Pub__Sym.paclet\n"
+            },
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, Sort[{"https://c.example/obj/u/Paclets/Pub__Sym-1.0.0.paclet", "https://c.example/obj/u/Paclets/Pub__Sym-1.0.0.paclet.sha256",
+        "https://c.example/obj/u/Paclets/Pub__Sym.paclet", "https://c.example/obj/u/Paclets/Pub__Sym.paclet.sha256"}], True, True},
+    TestID -> "Archive: each published copy has its SHA-256 beside it, as sha256sum writes it"
 ]
 
 VerificationTest[

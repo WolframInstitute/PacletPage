@@ -2552,19 +2552,31 @@ heroImage[image_?heroImageQ, _] := image;
 heroImage[_, _] := None;
 
 (* the built archive, where PacletInstall can find it: <dir>/<Publisher>__<Name>.paclet, the
-   latest, and <dir>/<Publisher>__<Name>-<version>.paclet *)
+   latest, and <dir>/<Publisher>__<Name>-<version>.paclet, each with its SHA-256 beside it,
+   <copy>.sha256 as sha256sum writes it, which a pinned install checks the archive against *)
 publishArchive[archive_String, dir_String, name_String, permissions_, commit_] := With[
     {latest = StringTrim[dir, "/"] <> "/" <> StringReplace[name, "/" -> "__"] <> ".paclet",
      versioned = StringTrim[dir, "/"] <> "/" <> FileNameTake[archive],
-     meta = If[StringQ[commit], <|"Commit" -> commit|>, <||>]},
+     meta = If[StringQ[commit], <|"Commit" -> commit|>, <||>],
+     hash = FileHash[archive, "SHA256", "HexString"]},
     (* the commit is set after the copy, which replacing an object does not carry over *)
     Map[
         With[{copied = cloudCopy[archive, CloudObject[#, Permissions -> permissions]]},
             If[MatchQ[copied, _CloudObject] && meta =!= <||>, SetOptions[copied, MetaInformation -> meta]];
-            copied
+            If[MatchQ[copied, _CloudObject], publishChecksum[#, hash, permissions], copied]
         ] &,
         {versioned, latest}
-    ] // Replace[{{v_CloudObject, l_CloudObject} :> <|"Latest" -> First[l], "Version" -> First[v]|>, other_ :> other}]
+    ] // Replace[{{v_CloudObject, l_CloudObject} :> <|"Latest" -> First[l], "Version" -> First[v], "SHA256" -> hash|>, other_ :> other}]
+];
+
+(* the archive at url's SHA-256 beside it, <url>.sha256: the archive's CloudObject, or what failed *)
+publishChecksum[url_String, hash_String, permissions_] := Module[{file = FileNameJoin[{$TemporaryDirectory, CreateUUID["sha256-"]}], copied},
+    WithCleanup[
+        Export[file, hash <> "  " <> Last[StringSplit[url, "/"]] <> "\n", "Text"];
+        copied = cloudCopy[file, CloudObject[url <> ".sha256", Permissions -> permissions]];
+        If[MatchQ[copied, _CloudObject], CloudObject[url], copied],
+        If[FileExistsQ[file], DeleteFile[file]]
+    ]
 ];
 
 (* The paclet as it is authored, for editing elsewhere: its directory but build/, hidden files and

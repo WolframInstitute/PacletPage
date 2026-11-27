@@ -36,7 +36,8 @@ dependencyEntryQ[entry_, owner_] := With[{
     links = Lookup[entry, "SetupLinks", <||>], size = Lookup[entry, "DownloadSize", ""]
 },
     ContainsAll[{"Name", "Required", "Optional", "Version", "Platforms", "Description", "Check", "Resource", "Archive", "Git", "Commit", "Path",
-        "DownloadSize", "License", "URL", "SetupLinks", "Pin"}, Keys[entry]] &&
+        "DownloadSize", "License", "URL", "SetupLinks", "Pin", "SHA256"}, Keys[entry]] &&
+    (! KeyExistsQ[entry, "SHA256"] || dependencySHA256Q[entry["SHA256"]]) &&
     dependencyPinQ[entry, owner] &&
     BooleanQ[Lookup[entry, "Optional", False]] &&
     dependencyNameQ[name] && name =!= owner["Name"] && dependencyVersionSpecQ[version] &&
@@ -86,9 +87,12 @@ dependencyArchiveURL[archive_String] := archive;
 dependencyArchiveURL[archive_Association] := Lookup[archive, $SystemID, Lookup[archive, "All", None]];
 
 (* What a build installs instead: "Pin" -> <|...|> with keys among "Version", "Archive", "Git",
-   "Commit" and "Path", laid over the entry in pinned mode and ignored otherwise. A pin that names a
-   source, "Git" or "Archive", replaces the entry's own; a pin's version is exact. *)
-$dependencyPinKeys = {"Version", "Archive", "Git", "Commit", "Path"};
+   "Commit", "Path" and "SHA256", laid over the entry in pinned mode and ignored otherwise. A pin that
+   names a source, "Git" or "Archive", replaces the entry's own; a pin's version is exact. A pin's
+   "SHA256" is the hash of the archive of that exact version, which a pinned install downloads and
+   verifies whether or not a SHA-256 is published beside it; a commit pins a "Git" source instead. *)
+$dependencyPinKeys = {"Version", "Archive", "Git", "Commit", "Path", "SHA256"};
+dependencySHA256Q[hash_] := StringQ[hash] && StringMatchQ[hash, RegularExpression["[0-9a-fA-F]{64}"]];
 dependencyPinned[entry_Association] := With[{pin = Lookup[entry, "Pin", None]},
     If[! AssociationQ[pin], entry,
         Join[If[KeyExistsQ[pin, "Git"] || KeyExistsQ[pin, "Archive"],
@@ -97,6 +101,7 @@ dependencyPinned[entry_Association] := With[{pin = Lookup[entry, "Pin", None]},
 dependencyPinQ[entry_, owner_] := ! KeyExistsQ[entry, "Pin"] || With[{pin = entry["Pin"]},
     AssociationQ[pin] && pin =!= <||> && ContainsAll[$dependencyPinKeys, Keys[pin]] &&
         (! KeyExistsQ[pin, "Version"] || dependencyVersionQ[pin["Version"]]) &&
+        (! KeyExistsQ[pin, "SHA256"] || (! KeyExistsQ[pin, "Git"] && dependencyVersionQ[Lookup[dependencyPinned[entry], "Version", None]])) &&
         dependencyEntryQ[dependencyPinned[entry], owner]]
 
 (* set by an installation in pinned mode, as a build's *)

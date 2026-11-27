@@ -39,6 +39,8 @@ progress[parts___] := WriteString["stdout", ToString[Round[AbsoluteTime[] - $sta
 arguments = Replace[$CommandLine, {{___, "-script", _, rest___} :> {rest}, _ -> {}}];
 {in, out} = Take[arguments, -2];
 input = Import[in, "WXF"];
+(* the search paths as this kernel starts, which its installation and the machine decide *)
+$initialPaths = <|"$Path" -> $Path, "$LibraryPath" -> $LibraryPath|>;
 
 (* a System` or Global` symbol's definition as text, every symbol in it with its context, the names
    a Module made, x$123, without their numbers, and the paths the scan knows by their stand-ins, so
@@ -53,6 +55,16 @@ definitionText[name_String] := Replace[ToExpression[name, InputForm, Hold], Hold
         ]
     ]
 ];
+(* $Path and $LibraryPath as text: the entries a loading added, with the stand-ins of the paths the
+   scan knows and of the installation's and the machine's own directories, so that a paclet that
+   adds its directory gives the same text on any machine *)
+definitionText[name : "$Path" | "$LibraryPath"] := installationFree @ pathFree @ ToString[
+    Select[Replace[ToExpression[name], Except[_List] -> {}], ! MemberQ[$initialPaths[name], #] &], InputForm];
+installationFree[text_String] := StringReplace[text, Catenate @ Map[
+    Function[place, With[{path = First[place], standIn = Last[place]},
+        {path ~~ next : ("/" | "\\" | "\"") :> standIn <> next, path ~~ EndOfString :> standIn}]],
+    SortBy[Select[{{$InstallationDirectory, "<$InstallationDirectory>"}, {$BaseDirectory, "<$BaseDirectory>"}}, StringQ[First[#]] && StringLength[First[#]] > 1 &], -StringLength[First[#]] &]
+]];
 definitionHash[name_String] := fingerprint[definitionText[name]];
 
 (* a symbol of the paclet's: its attributes and its whole definition, held, which ReadProtected

@@ -54,7 +54,7 @@ Only the consumer's own list is read: a dependency's own dependencies are not fo
 | `"DownloadSize"` | Display text or an association of system IDs to display text |
 | `"URL"`, `"SetupLinks"` | Setup instructions and an optional association of additional link labels to HTTPS URLs |
 | `"Check"` | Fully qualified name of a zero-argument readiness function in the consumer's kernel context |
-| `"Pin"` | What a documentation build installs instead: an association of `"Version"` (exact), `"Archive"`, `"Git"`, `"Commit"` and `"Path"` |
+| `"Pin"` | What a documentation build installs instead: an association of `"Version"` (exact), `"Archive"`, `"Git"`, `"Commit"`, `"Path"` and `"SHA256"` |
 | `"Archive"` | A `.paclet` file relative to the consumer directory, or the https address of one, with an exact `"Version"`; for a paclet built for each system, an association of system IDs (and `"All"`) to addresses. A published `<address>.sha256` is checked |
 | `"Git"`, `"Commit"`, `"Path"` | HTTPS Git repository URL, commit ID (7 to 40 hexadecimal digits, either case), and optional paclet subdirectory |
 
@@ -175,7 +175,7 @@ For headless documentation builds that need every declared library (both require
 BuildPacletDocumentation[dir, "InstallDependencies" -> All]
 ```
 
-A build installs exact versions, while users keep minimums. Each declaration can say what a build installs with a `"Pin"`. Outside a build the pin is ignored, so the dialog, the information report and the loader go by the declaration's own fields. A pin's `"Version"` is exact, and a pin that names a source, `"Git"` or `"Archive"`, replaces the declaration's own.
+A build installs exact versions, while users keep minimums. Each declaration can say what a build installs with a `"Pin"`. Outside a build the pin is ignored, so the dialog, the information report and the loader go by the declaration's own fields. A pin's `"Version"` is exact, and a pin that names a source, `"Git"` or `"Archive"`, replaces the declaration's own. A pin's `"SHA256"` is the hash of that version's archive: a pinned install verifies the archive it downloads against it, whether or not a SHA-256 is published beside the archive, and a published one that disagrees is an error. A commit pins a `"Git"` source instead.
 
 ```wl
 #| eval: false

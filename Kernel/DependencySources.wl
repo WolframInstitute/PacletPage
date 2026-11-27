@@ -216,12 +216,16 @@ dependencyPublisherURLQ[resource_, url_] := Module[{base = URLParse[resource], t
         ! MemberQ[target["Path"], ".." | "."] && Take[Rest[target["Path"]], UpTo[Length[path]]] === path
 ]
 
-dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]},
+(* a pinned entry's "SHA256", which every archive it downloads or takes must match *)
+$dependencyPinHash = None;
+
+dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]}, Block[{$dependencyPinHash = Replace[Lookup[entry, "SHA256", None], hash_String :> ToLowerCase[hash]]},
     Which[
         KeyExistsQ[release, "SitePaclet"],
             Which[
                 $AllowInternet === False, dependencyOffline[],
-                dependencyTargetQ[], With[{url = dependencySiteArchiveURL[release["SitePaclet"]]},
+                (* a pinned hash is checked on the archive itself, so a site's paclet is downloaded *)
+                dependencyTargetQ[] || StringQ[$dependencyPinHash], With[{url = dependencySiteArchiveURL[release["SitePaclet"]]},
                     If[FailureQ[url], url, dependencyDownloadInstall[url, name, release["Version"]]]],
                 True, dependencyInstallFile[release["SitePaclet"], name, release["Version"]]],
         KeyExistsQ[release, "GitURL"] || KeyExistsQ[release, "GitArchive"],
@@ -230,11 +234,14 @@ dependencyInstallRelease[entry_, release_] := With[{name = entry["Name"]},
             If[$AllowInternet === False, dependencyOffline[],
                 dependencyDownloadInstall[release["ArchiveURL"], name, release["Version"], release["ArchiveURL"] <> ".sha256", True]],
         KeyExistsQ[release, "Archive"],
-            dependencyInstallFile[release["Archive"], name, release["Version"], Lookup[release, "BundledGit", None]],
+            (* a bundled archive is the consumer's own repacking of the copy it was built with, checked
+               as part of the consumer's archive; a pin's hash is a local archive's *)
+            With[{checked = If[TrueQ[Lookup[release, "Bundled", False]], Null, dependencyPinCheck[Replace[release["Archive"], File[path_String] :> path], name, release["Version"], None]]},
+                If[FailureQ[checked], checked, dependencyInstallFile[release["Archive"], name, release["Version"], Lookup[release, "BundledGit", None]]]],
         True,
             dependencyPublishedInstall[entry, release]
     ]
-]
+]]
 
 (* A published release that fails to install, as one with no archive for this system or one the
    cloud cannot serve, leaves an entry with a Git source to its repository at the pinned commit. *)
@@ -331,15 +338,27 @@ dependencyDownloadInstall[url_, name_, version_, checksum_ : None, curl_ : False
 
 (* A declared archive with a published SHA-256 beside it, <archive>.sha256 as sha256sum writes it,
    must match it; without one, or with none reachable, the archive is taken as it is. *)
-dependencyChecksum[None, _, _, _, ___] := Null;
+dependencyChecksum[None, file_String, name_, version_, ___] := dependencyPinCheck[file, name, version, None];
 dependencyChecksum[sidecar_String, file_String, name_, version_, curl_ : False] := With[
     {text = Replace[dependencyGitText[sidecar], $Failed :> If[TrueQ[curl], dependencyCurlText[sidecar], $Failed]]},
     With[{expected = If[StringQ[text], StringCases[text, RegularExpression["(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])"], 1], {}]},
-        Which[
-            expected === {}, Null,
-            ToLowerCase[First[expected]] === FileHash[file, "SHA256", "HexString"], Null,
-            True, dependencyFailure["DependencyArchive", "The archive of `1` `2` does not match its published SHA-256.", name, version]
-        ]
+        dependencyPinCheck[file, name, version, If[expected === {}, None, ToLowerCase[First[expected]]]]
+    ]
+];
+
+(* An archive against its pin's SHA-256, which wins, and the one published beside it: a published
+   hash that disagrees with the pin's is an error, as an archive that matches neither is *)
+dependencyPinCheck[file_, name_, version_, published_] := Module[{pin = $dependencyPinHash, hash},
+    If[! StringQ[pin] && ! StringQ[published], Return[Null, Module]];
+    hash = If[StringQ[file] && FileExistsQ[file], FileHash[file, "SHA256", "HexString"], None];
+    Which[
+        StringQ[pin] && StringQ[published] && published =!= pin,
+            dependencyFailure["DependencyArchive", "The SHA-256 published beside the archive of `1` `2` disagrees with its pin's.", name, version],
+        StringQ[pin] && hash =!= pin,
+            dependencyFailure["DependencyArchive", "The archive of `1` `2` does not match its pin's SHA-256.", name, version],
+        StringQ[published] && hash =!= published,
+            dependencyFailure["DependencyArchive", "The archive of `1` `2` does not match its published SHA-256.", name, version],
+        True, Null
     ]
 ];
 

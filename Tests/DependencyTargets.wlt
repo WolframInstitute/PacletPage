@@ -270,7 +270,9 @@ VerificationTest[
             arc151 = CreatePacletArchive[testPaclet[root, "v151", <|"Name" -> name, "Version" -> "1.5.1"|>], root];
             owner = PacletObject[<|"Name" -> "Example/URLConsumer", "Version" -> "1.0",
                 "Dependencies" -> {<|"Name" -> name, "Pin" -> <|"Version" -> "1.5.0", "Archive" -> url|>|>}|>];
-            install = Function[{archive, target}, Block[{dependencyDownloaded = Function[{u, file}, CopyFile[archive, file]; File[file]]},
+            (* no SHA-256 published beside the archive, and no network *)
+            install = Function[{archive, target}, Block[{dependencyDownloaded = Function[{u, file}, CopyFile[archive, file]; File[file]],
+                    dependencyGitText = (Missing["NotFound"] &), dependencyCurlText = (Missing["NotFound"] &)},
                 InstallPacletDependencies[owner, name, "CheckReadiness" -> False, "TargetDirectory" -> target, "Pinned" -> True][name]]];
             good = install[arc150, FileNameJoin[{root, "good"}]];
             bad = install[arc151, FileNameJoin[{root, "bad"}]];
@@ -290,6 +292,41 @@ VerificationTest[
     ],
     {True, True, True, True, True, True, True},
     TestID -> "Archive at an https address: an exact pinned release downloads into the directory, and an archive of another version is refused"
+]
+
+VerificationTest[
+    Module[{root = CreateDirectory[], name = testUniqueName["TestPinHashLib"], url = "https://example.org/Example__Lib-1.0.0.paclet", arc, hash, owner, install, results},
+        WithCleanup[
+            arc = CreatePacletArchive[testPaclet[root, "lib", <|"Name" -> name, "Version" -> "1.0.0"|>], root];
+            hash = FileHash[arc, "SHA256", "HexString"];
+            owner[pin_] := PacletObject[<|"Name" -> "Example/PinHashConsumer", "Version" -> "1.0", "Dependencies" -> {<|"Name" -> name, "Pin" -> pin|>}|>];
+            (* the archive as downloaded, and a SHA-256 published beside it, or none *)
+            install = Function[{pin, sidecar, target}, Block[{
+                    dependencyDownloaded = Function[{u, file}, CopyFile[arc, file]; File[file]],
+                    dependencyGitText = (sidecar &), dependencyCurlText = (Missing["NotFound"] &)},
+                InstallPacletDependencies[owner[pin], name, "CheckReadiness" -> False, "TargetDirectory" -> FileNameJoin[{root, target}], "Pinned" -> True][name]]];
+            results = {
+                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> ToUpperCase[hash]|>, Missing["NotFound"], "nosidecar"],
+                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> StringRepeat["0", 64]|>, Missing["NotFound"], "wrongpin"],
+                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> hash|>, StringRepeat["f", 64] <> "  Example__Lib-1.0.0.paclet\n", "disagree"],
+                install[<|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> hash|>, hash <> "  Example__Lib-1.0.0.paclet\n", "agree"]
+            };
+            {
+                MatchQ[results[[1]], _PacletObject] && results[[1]]["Version"] === "1.0.0",
+                MatchQ[results[[2]], Failure["DependencyArchive", _]],
+                MatchQ[results[[3]], Failure["DependencyArchive", _]] && StringContainsQ[results[[3]]["MessageTemplate"], "disagrees"],
+                MatchQ[results[[4]], _PacletObject],
+                (* a hash names one archive: it needs an exact version, a commit pins a Git source instead, and it is 64 hex digits *)
+                dependencyPinQ[<|"Name" -> name, "Version" -> "1.0+", "Pin" -> <|"Archive" -> url, "SHA256" -> hash|>|>, owner[<||>]],
+                dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Git" -> "https://github.com/demo/lib", "Commit" -> StringRepeat["a", 40], "SHA256" -> hash|>|>, owner[<||>]],
+                dependencyPinQ[<|"Name" -> name, "Pin" -> <|"Version" -> "1.0.0", "Archive" -> url, "SHA256" -> "abc"|>|>, owner[<||>]]
+            },
+            Scan[PacletDirectoryUnload, FileNameJoin[{root, #}] & /@ {"nosidecar", "wrongpin", "disagree", "agree"}];
+            DeleteDirectory[root, DeleteContents -> True]
+        ]
+    ],
+    {True, True, True, True, False, False, False},
+    TestID -> "Archive by its pin's SHA-256: a pinned archive must match the hash its pin gives, published one or not, and a published one that disagrees is refused"
 ]
 
 VerificationTest[
