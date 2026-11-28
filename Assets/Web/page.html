@@ -120,9 +120,11 @@
   }
   @media (max-width: 900px) { #notebook-embed { padding: 0 14px 40px; } }
   /* The dark theme. The cloud's render of a notebook has its colors fixed, so the notebook is
-     inverted, with its hues turned back; a picture or a plot (img.pp-graphic, marked by the script
-     by its size) is turned back whole, slightly dimmed, while icons and typeset images stay inverted
-     with the text around them. The page's own controls have colors of their own. */
+     inverted, with its hues turned back. A picture or a plot on a background of its own
+     (img.pp-graphic, marked by the script from its size and its pixels) is turned back whole,
+     dimmed, as a grey figure card with rounded corners; line art on a transparent background,
+     icons and typeset images stay inverted with the text around them, their lines light on the
+     dark page. The page's own controls have colors of their own. */
   html[data-theme="dark"] { color-scheme: dark; background: #141516; }
   html[data-theme="dark"] body { background: #141516; }
   /* the notebook keeps the light scheme's defaults, black text on no background, before the
@@ -130,6 +132,9 @@
   html[data-theme="dark"] #notebook-embed { color-scheme: light; color: #000; filter: invert(.92) hue-rotate(180deg); }
   html[data-theme="dark"] #notebook-embed img.pp-graphic, html[data-theme="dark"] #notebook-embed video,
   html[data-theme="dark"] #notebook-embed canvas { filter: invert(1) hue-rotate(180deg); }
+  /* a picture's own background, white, toned down to a grey card with rounded corners on the dark
+     page, its colors dimmed with it and black and white kept apart */
+  html[data-theme="dark"] #notebook-embed img.pp-graphic { border-radius: 6px; filter: brightness(.82) invert(1) hue-rotate(180deg); }
   html[data-theme="dark"] #resource-frame { background: #141516; }
   html[data-theme="dark"] #err { color: #9aa1a7; }
   html[data-theme="dark"] #err a, html[data-theme="dark"] #fb-browse, html[data-theme="dark"] #feedback-form .foot a { color: #78aee8; }
@@ -214,10 +219,26 @@
   // the shell this page is framed in, on the same origin; null when the page is opened alone
   try { if (window.parent !== window && window.parent.ppSite) site = window.parent.ppSite; } catch (e) {}
 
-  // In the dark theme the notebook is inverted; a picture or a plot, an image of 64 pixels or more
-  // each way, is turned back, while icons and lines of typeset text stay inverted with the text.
+  // In the dark theme the notebook is inverted. A picture or a plot, an image of 64 pixels or more
+  // each way, is turned back, its colors true, black and white among them, which can carry meaning;
+  // line art on a transparent background (a quarter or more of it clear) stays inverted with the
+  // text, as icons and lines of typeset text do: turned back, its lines would be dark on the dark
+  // page. An image whose pixels cannot be read is turned back.
+  function transparentArt(img) {
+    try {
+      var c = document.createElement('canvas'), n = 32, clear = 0;
+      c.width = n; c.height = n;
+      var g = c.getContext('2d');
+      g.drawImage(img, 0, 0, n, n);
+      var d = g.getImageData(0, 0, n, n).data;
+      for (var i = 3; i < d.length; i += 4) if (d[i] < 200) clear++;
+      return clear >= n * n / 4;
+    } catch (e) { return false; }
+  }
   function markGraphic(img) {
-    if (img.naturalWidth >= 64 && img.naturalHeight >= 64) img.classList.add('pp-graphic');
+    if (img.__ppMarked || img.naturalWidth < 64 || img.naturalHeight < 64) return;
+    img.__ppMarked = true;
+    if (!transparentArt(img)) img.classList.add('pp-graphic');
   }
   document.addEventListener('load', function (e) {
     var t = e.target;
