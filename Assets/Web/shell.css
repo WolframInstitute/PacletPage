@@ -1,0 +1,346 @@
+/* PacletPage's documentation shell: the header with its filter, the rail of guides and tutorials,
+   the rail of symbols with its A-Z index, the splitters, the layout buttons, the page tools and the
+   Feedback panel. A published site and any host that shows a paclet's pages in the shell, such as
+   Wolfram Studio, load this one file (PacletPageWebAssets), so the shell is the same in both.
+
+   Every rule is under .pp-shell, but for the Feedback note and form, which are appended to the
+   document's body (.pp-fb-note, .pp-fb-overlay). The colors are custom properties, given here on the
+   root at no specificity, light, and dark where the root has data-theme="dark": a host sets them on
+   its own :root to its colors, and the shell and the Feedback panel take them from there. */
+
+:where(:root) {
+  --pp-bg: #fff; --pp-panel: #fafafa; --pp-ink: #333; --pp-strong: #2a2a2a; --pp-dim: #7a838c;
+  --pp-line: #e3e3e3; --pp-row-line: #eee; --pp-hover: #f0f1f2;
+  --pp-accent: #dd1100; --pp-active-bg: #fdeee9; --pp-active-fg: #c4280b;
+  --pp-link: #1a6ba5; --pp-app-link: #1f7a6b; --pp-stub: #8a8f98; --pp-stub-hover: #5c6168;
+  --pp-sep: #cfd2d6; --pp-arrow: #aaa; --pp-arrow-hover: #666;
+  --pp-source-bg: #fdf6e3; --pp-source-border: #e3d7b0; --pp-source-fg: #6b5a1e;
+  --pp-error: #c62828; --pp-focus: #4a90d9;
+  --pp-ftr-bg: #f4f5f6; --pp-ftr-line: #e1e4e6; --pp-ftr-fg: #7a838b; --pp-ftr-link: #4b555e;
+  --pp-ctl-bg: #fff; --pp-ctl-line: #cbd0d3; --pp-ctl-hover: #edf2f5; --pp-ctl-disabled: #92989c;
+  --pp-count: #575e63; --pp-index-line: #dedfe0;
+  --pp-exit-bg: rgba(255, 255, 255, .92); --pp-exit-line: #d0d4d8; --pp-exit-fg: #333; --pp-shadow: rgba(0, 0, 0, .28);
+  --pp-hdr-bg: #232629; --pp-hdr-fg: #fff; --pp-hdr-dim: #b9bdc1; --pp-hdr-line: #3a3f44; --pp-hdr-field: #16181a;
+  /* where sticky parts stick, below a host's own bars; the header's right padding and the exit
+     button's offset, which a host with a control of its own at the right widens */
+  --pp-sticky-top: 0px; --pp-hdr-pr: 20px; --pp-full-exit-right: 12px;
+  --pp-font: 'Source Sans Pro', 'Source Sans 3', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+:where(:root[data-theme="dark"]) {
+  --pp-bg: #141516; --pp-panel: #1e2023; --pp-ink: #d4d7da; --pp-strong: #eceef0; --pp-dim: #8d959c;
+  --pp-line: #2e3135; --pp-row-line: #282b2e; --pp-hover: #2a2d31;
+  --pp-active-bg: #481d1b; --pp-active-fg: #e96459;
+  --pp-link: #74b3ea; --pp-app-link: #5cc6b3; --pp-stub: #7d848b; --pp-stub-hover: #a7adb3;
+  --pp-sep: #3a3e43; --pp-arrow: #6c737a; --pp-arrow-hover: #b0b6bb;
+  --pp-source-bg: #3b3421; --pp-source-border: #6b5c34; --pp-source-fg: #f4d98c;
+  --pp-error: #ff8a80; --pp-focus: #74b3ea;
+  --pp-ftr-bg: #1b1d20; --pp-ftr-line: #2e3135; --pp-ftr-fg: #80878e; --pp-ftr-link: #b3b9be;
+  --pp-ctl-bg: #24272a; --pp-ctl-line: #3c4146; --pp-ctl-hover: #2d3135; --pp-ctl-disabled: #626970;
+  --pp-count: #9aa1a7; --pp-index-line: #2e3135;
+  --pp-exit-bg: rgba(36, 39, 42, .92); --pp-exit-line: #3c4146; --pp-exit-fg: #d4d7da; --pp-shadow: rgba(0, 0, 0, .6);
+}
+
+/* ---- the shell ------------------------------------------------------------------------------ */
+.pp-shell {
+  width: 100%; min-height: 100%; display: flex; flex-direction: column; box-sizing: border-box;
+  font-family: var(--pp-font); color: var(--pp-ink); background: var(--pp-bg);
+}
+.pp-shell *, .pp-shell *::before, .pp-shell *::after { box-sizing: border-box; }
+.pp-shell [hidden] { display: none !important; }
+
+/* header */
+.pp-shell .pp-hdr {
+  position: sticky; top: var(--pp-sticky-top); z-index: 5; min-height: 48px;
+  background: var(--pp-hdr-bg); color: var(--pp-hdr-fg);
+  display: flex; align-items: center; gap: 16px; padding: 6px var(--pp-hdr-pr) 6px 20px;
+  border-bottom: 3px solid var(--pp-accent);
+}
+.pp-shell .pp-brand { display: inline-flex; align-items: baseline; gap: 10px; text-decoration: none; color: var(--pp-hdr-fg); white-space: nowrap; cursor: pointer; }
+.pp-shell .pp-brand:hover { opacity: .92; }
+.pp-shell .pp-name { display: inline-flex; flex-direction: column; font-size: 18px; font-weight: 600; letter-spacing: .2px; line-height: 1.15; }
+.pp-shell .pp-ver { font-size: 10.5px; font-weight: 400; letter-spacing: .3px; color: #9aa1a7; margin-top: 1px; }
+.pp-shell .pp-sub { font-size: 12px; font-weight: 400; color: var(--pp-hdr-dim); }
+.pp-shell .pp-filter-slot { flex: 0 1 320px; min-width: 120px; }
+.pp-shell .pp-filter {
+  width: 100%; background: var(--pp-hdr-field); color: #e8eaec; border: 1px solid var(--pp-hdr-line); border-radius: 4px;
+  padding: 5px 10px; font: 13px/1.3 var(--pp-font); outline: none;
+}
+.pp-shell .pp-filter::placeholder { color: #7d858c; }
+.pp-shell .pp-filter:focus { border-color: var(--pp-accent); background: #101214; }
+.pp-shell .pp-meta { margin-left: auto; font-size: 12px; color: #aeb4ba; white-space: nowrap; }
+.pp-shell .pp-home {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 13px; color: #cfd2d5; border: 1px solid #44484c;
+  padding: 5px 12px; border-radius: 4px; text-decoration: none;
+}
+.pp-shell .pp-home:hover { background: #2e3236; color: #fff; }
+.pp-shell .pp-home svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+/* the layout buttons, the theme switch and the exit from full screen */
+.pp-shell .pp-layout-controls { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; flex: 0 0 auto; }
+.pp-shell .pp-layout-controls-bar { padding: 4px 12px; border-bottom: 1px solid var(--pp-line); background: var(--pp-panel); justify-content: flex-end; }
+.pp-shell .pp-layout-btn, .pp-shell .pp-theme-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border-radius: 4px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .18); background: rgba(255, 255, 255, .06); color: #d6dbe0;
+}
+.pp-shell .pp-layout-btn:hover, .pp-shell .pp-theme-btn:hover { background: rgba(255, 255, 255, .16); color: #fff; }
+.pp-shell .pp-layout-btn.on { background: #2e3236; color: #fff; border-color: #555b62; }
+.pp-shell .pp-layout-controls-bar .pp-layout-btn { border-color: var(--pp-ctl-line); background: transparent; color: var(--pp-ink); }
+.pp-shell .pp-layout-controls-bar .pp-layout-btn:hover { background: var(--pp-hover); color: var(--pp-strong); }
+.pp-shell .pp-layout-btn svg, .pp-shell .pp-theme-btn svg, .pp-shell .pp-full-exit svg { width: 16px; height: 16px; display: block; }
+.pp-shell .pp-theme-btn .pp-sun, :root[data-theme="dark"] .pp-shell .pp-theme-btn .pp-moon { display: none; }
+:root[data-theme="dark"] .pp-shell .pp-theme-btn .pp-sun { display: block; }
+.pp-shell .pp-full-exit {
+  display: none; position: fixed; top: calc(var(--pp-sticky-top) + 10px); right: var(--pp-full-exit-right); z-index: 30;
+  width: 30px; height: 30px; padding: 0; border-radius: 5px; align-items: center; justify-content: center;
+  border: 1px solid var(--pp-exit-line); background: var(--pp-exit-bg); color: var(--pp-exit-fg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .15); cursor: pointer;
+}
+.pp-shell .pp-full-exit:hover, .pp-shell .pp-full-exit:focus-visible { color: var(--pp-accent); border-color: var(--pp-accent); }
+
+/* what the layout buttons hide */
+.pp-shell.pp-hide-left .pp-side, .pp-shell.pp-hide-left .pp-split-left,
+.pp-shell.pp-hide-right .pp-side-right, .pp-shell.pp-hide-right .pp-split-right { display: none !important; }
+.pp-shell.pp-fullscreen .pp-hdr, .pp-shell.pp-fullscreen .pp-side, .pp-shell.pp-fullscreen .pp-side-right,
+.pp-shell.pp-fullscreen .pp-split, .pp-shell.pp-fullscreen .pp-ftr, .pp-shell.pp-fullscreen .pp-layout-controls-bar { display: none !important; }
+.pp-shell.pp-fullscreen .pp-content { padding: 12px 24px 48px; }
+.pp-shell.pp-fullscreen .pp-full-exit { display: inline-flex; }
+.pp-shell .docked { top: calc(var(--pp-sticky-top) + 51px); }
+.pp-shell.pp-fullscreen .docked { top: var(--pp-sticky-top); }
+
+/* the three columns */
+.pp-shell .pp-main { flex: 1; display: flex; align-items: stretch; min-width: 0; }
+.pp-shell .pp-side, .pp-shell .pp-side-right {
+  flex: 0 0 auto; align-self: flex-start; position: sticky; top: calc(var(--pp-sticky-top) + 51px);
+  min-height: calc(100vh - var(--pp-sticky-top) - 140px); max-height: calc(100vh - var(--pp-sticky-top) - 96px);
+  overflow-y: auto; overflow-x: hidden; background: var(--pp-panel); padding: 12px 0 36px;
+}
+.pp-shell .pp-side { width: 256px; border-right: 1px solid var(--pp-line); }
+.pp-shell .pp-side-right { width: 220px; border-left: 1px solid var(--pp-line); }
+.pp-shell .pp-split {
+  flex: 0 0 5px; width: 5px; cursor: col-resize; position: relative; z-index: 4;
+  background: transparent; transition: background .12s; touch-action: none; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.pp-shell .pp-split:hover, .pp-shell .pp-split.dragging { background: color-mix(in srgb, var(--pp-accent) 28%, transparent); }
+.pp-shell .pp-split:focus-visible { outline: 2px solid var(--pp-accent); outline-offset: -2px; }
+.pp-shell .pp-split-left { margin-left: -3px; margin-right: -2px; }
+.pp-shell .pp-split-right { margin-left: -2px; margin-right: -3px; }
+.pp-shell.pp-resizing { cursor: col-resize; user-select: none; }
+.pp-shell.pp-resizing iframe { pointer-events: none; }
+.pp-shell .pp-content { position: relative; flex: 1; min-width: 0; padding: 6px 16px 36px; background: var(--pp-bg); }
+
+/* the page tools: the switch to the page's source and the Feedback button */
+.pp-shell .pp-pagetools {
+  position: sticky; top: calc(var(--pp-sticky-top) + 56px); z-index: 4;
+  display: flex; justify-content: flex-end; gap: 6px; padding: 4px 4px 0; pointer-events: none;
+}
+.pp-shell.pp-fullscreen .pp-pagetools { top: calc(var(--pp-sticky-top) + 10px); }
+.pp-shell .pp-pagetool {
+  pointer-events: auto; display: inline-flex; align-items: center; gap: 4px;
+  font: 12px/1 var(--pp-font); color: var(--pp-ink); background: var(--pp-bg);
+  border: 1px solid var(--pp-line); border-radius: 4px; padding: 6px 10px; cursor: pointer; text-decoration: none;
+}
+.pp-shell .pp-pagetool:hover { border-color: var(--pp-dim); background: var(--pp-panel); }
+.pp-shell .pp-pagetool:disabled { opacity: .6; cursor: default; }
+.pp-shell .pp-pagetool[data-view="source"] { background: var(--pp-source-bg); border-color: var(--pp-source-border); color: var(--pp-source-fg); }
+
+/* the rails' lists and links */
+.pp-shell .pp-side ul, .pp-shell .pp-side-right ul { list-style: none; margin: 0; padding: 0; }
+.pp-shell .pp-side li, .pp-shell .pp-side-right li { position: relative; }
+.pp-shell .pp-side li.active, .pp-shell .pp-side-right li.active { font-weight: 600; }
+.pp-shell .pp-side a, .pp-shell .pp-side-right a {
+  display: block; padding: 5px 24px 5px 16px; line-height: 1.35; color: var(--pp-ink); font-size: 13.5px;
+  text-decoration: none; border-left: 3px solid transparent; white-space: normal; overflow-wrap: break-word;
+}
+.pp-shell .pp-side a:hover, .pp-shell .pp-side-right a:hover { background: var(--pp-hover); }
+.pp-shell .pp-side a.active, .pp-shell .pp-side-right a.active {
+  background: var(--pp-active-bg); color: var(--pp-active-fg); border-left-color: var(--pp-accent); font-weight: 600;
+}
+.pp-shell .pp-side .pp-nav-root > li { border-bottom: 1px solid var(--pp-row-line); }
+.pp-shell .pp-side ul ul { padding-left: 14px; }
+.pp-shell .pp-side a.gd, .pp-shell .pp-side a.res { font-weight: 600; color: var(--pp-strong); }
+.pp-shell .pp-side a.tut, .pp-shell .pp-side a.ref, .pp-shell .pp-side-right a.sym { color: var(--pp-link); }
+.pp-shell .pp-side a.app { color: var(--pp-app-link); }
+.pp-shell .pp-side a.tut.stub, .pp-shell .pp-side a.app.stub { color: var(--pp-stub); font-style: italic; }
+.pp-shell .pp-side a.tut.stub:hover, .pp-shell .pp-side a.app.stub:hover { color: var(--pp-stub-hover); }
+.pp-shell .pp-side a.tut.active, .pp-shell .pp-side a.app.active, .pp-shell .pp-side-right a.sym.active { color: var(--pp-active-fg); font-style: normal; }
+.pp-shell .pp-nav-sep { border-top: 3px solid var(--pp-sep); margin: 14px 0 6px; }
+.pp-shell .pp-nav-label {
+  margin: 10px 0 3px; padding: 0 20px 0 19px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--pp-dim);
+}
+.pp-shell .pp-nav-empty { padding: 10px 14px; color: var(--pp-dim); font-size: 12px; font-style: italic; }
+/* collapsible guides */
+.pp-shell .pp-side details { margin: 0; }
+.pp-shell .pp-side summary { list-style: none; cursor: pointer; position: relative; }
+.pp-shell .pp-side summary::-webkit-details-marker { display: none; }
+.pp-shell .pp-side summary::after { content: '\25B8'; position: absolute; right: 10px; top: 8px; color: var(--pp-arrow); font-size: 11px; }
+.pp-shell .pp-side details[open] > summary::after { content: '\25BE'; }
+.pp-shell .pp-side summary:hover::after { color: var(--pp-arrow-hover); }
+
+/* the symbols rail's A-Z index: its heading with the index's switch above the list; off, the
+   index's controls are hidden and the list holds every symbol */
+.pp-shell .pp-side-right.indexable { display: flex; flex-direction: column; padding: 0; overflow: hidden; container-type: inline-size; }
+.pp-shell .pp-side-right.indexable:not(.indexed) .symbol-browse, .pp-shell .pp-side-right.indexable:not(.indexed) .symbol-count,
+.pp-shell .pp-side-right.indexable:not(.indexed) .symbol-more { display: none !important; }
+.pp-shell .symbol-index { flex: none; padding: 12px; border-bottom: 1px solid var(--pp-index-line); }
+.pp-shell .symbol-heading { display: flex; align-items: center; gap: 6px; }
+.pp-shell .symbol-heading h2 { margin: 0 auto 0 0; font-size: 16px; font-weight: 600; }
+.pp-shell .symbol-total, .pp-shell .symbol-count { color: var(--pp-count); font-size: 13px; font-variant-numeric: tabular-nums; }
+.pp-shell .symbol-index-toggle {
+  font: inherit; font-size: 12px; font-weight: 600; line-height: 1.2; padding: 2px 7px; cursor: pointer;
+  color: var(--pp-link); background: var(--pp-ctl-bg); border: 1px solid var(--pp-ctl-line); border-radius: 3px;
+}
+.pp-shell .symbol-index-toggle:hover { background: var(--pp-ctl-hover); }
+.pp-shell .symbol-index-toggle[aria-pressed="true"] { background: var(--pp-active-bg); color: var(--pp-active-fg); border-color: currentColor; }
+.pp-shell .symbol-count { margin-top: 6px; overflow-wrap: anywhere; }
+.pp-shell .symbol-letters { display: grid; grid-template-columns: repeat(auto-fit, minmax(26px, 1fr)); gap: 2px; margin-top: 8px; }
+.pp-shell .symbol-letters button, .pp-shell .symbol-more, .pp-shell .symbol-index select {
+  font: inherit; color: var(--pp-link); border: 1px solid var(--pp-ctl-line); border-radius: 3px; background: var(--pp-ctl-bg);
+}
+.pp-shell .symbol-letters button { min-width: 0; padding: 3px 0; font-size: 13px; cursor: pointer; }
+.pp-shell .symbol-letters button[value="All"] { grid-column: span 2; }
+.pp-shell .symbol-letters button:disabled { border-color: transparent; background: transparent; color: var(--pp-ctl-disabled); cursor: default; }
+.pp-shell .symbol-letters button[aria-pressed="true"] { background: var(--pp-active-bg); color: var(--pp-active-fg); border-color: currentColor; font-weight: 600; }
+.pp-shell .symbol-letters button:enabled:hover, .pp-shell .symbol-more:hover { background: var(--pp-ctl-hover); }
+.pp-shell .symbol-index label { display: block; margin-top: 7px; font-size: 13px; font-weight: 600; }
+.pp-shell .symbol-select { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; margin-top: 2px; font-size: 13px; }
+.pp-shell .symbol-index select {
+  grid-area: 1 / 1 / 2 / -1; align-self: stretch; width: 100%; min-width: 0; margin: 0;
+  padding: 5px 8px; padding-inline-end: 30px; font-weight: 400; color: inherit; -webkit-appearance: none; appearance: none;
+}
+/* the native picker keeps its focus ring; a long symbol name can wrap before the arrow */
+.pp-shell .symbol-selection {
+  grid-area: 1 / 1 / 2 / -1; align-self: stretch; display: flex; align-items: center; min-width: 0;
+  margin: 1px; padding: 4px 7px; padding-inline-end: 29px; background: var(--pp-ctl-bg); border-radius: 2px;
+  overflow-wrap: anywhere; pointer-events: none;
+}
+.pp-shell .symbol-select::after {
+  content: ''; grid-area: 1 / 2; justify-self: center; width: 10px; height: 6px; background: currentColor;
+  clip-path: polygon(0 18%, 12% 0, 50% 65%, 88% 0, 100% 18%, 50% 100%); pointer-events: none;
+}
+@media (forced-colors: active) {
+  .pp-shell .symbol-select::after { background: ButtonText; forced-color-adjust: none; }
+}
+.pp-shell .symbol-index .symbol-letter-picker { display: none; }
+.pp-shell .symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letters { display: none; }
+.pp-shell .symbol-browse:has(.symbol-letters > :nth-child(36)) .symbol-letter-picker { display: block; }
+.pp-shell .indexable .symbol-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 3px 0 12px; }
+.pp-shell .symbol-more { display: block; margin: 6px auto; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+@container (max-width: 196px) {
+  .pp-shell .symbol-letters { display: none; }
+  .pp-shell .symbol-index .symbol-letter-picker { display: block; }
+}
+
+/* footer */
+.pp-shell .pp-ftr {
+  border-top: 1px solid var(--pp-ftr-line); background: var(--pp-ftr-bg); color: var(--pp-ftr-fg);
+  font-size: 11.5px; padding: 6px 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.pp-shell .pp-ftr a { color: var(--pp-ftr-link); }
+.pp-shell .pp-ftr a:hover { color: var(--pp-accent); }
+.pp-shell .pp-ftr-pkg { font-weight: 600; color: var(--pp-ftr-link); }
+.pp-shell .pp-ftr-desc { color: var(--pp-ftr-fg); }
+
+/* ---- the Feedback note and form, appended to the document's body ---------------------------- */
+.pp-fb-note {
+  position: fixed; top: calc(var(--pp-sticky-top) + 96px); right: 18px; z-index: 40;
+  max-width: 340px; padding: 12px 14px; border-radius: 6px; box-sizing: border-box;
+  background: var(--pp-bg); color: var(--pp-ink); border: 1px solid var(--pp-line); box-shadow: 0 6px 24px rgba(0, 0, 0, .18);
+  font: 13px/1.45 var(--pp-font);
+}
+.pp-fb-note .pp-fb-hdr { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-weight: 600; }
+.pp-fb-note .pp-fb-close { border: 0; background: none; color: var(--pp-dim); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.pp-fb-note .pp-fb-meta { font-size: 12px; color: var(--pp-dim); margin-bottom: 8px; word-break: break-word; }
+.pp-fb-note .pp-fb-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-fb-note .pp-fb-acts a, .pp-fb-note .pp-fb-acts button {
+  font: 12px/1.2 var(--pp-font); padding: 5px 10px; border-radius: 4px; cursor: pointer; text-decoration: none;
+  border: 1px solid var(--pp-line); background: var(--pp-panel); color: var(--pp-ink);
+}
+.pp-fb-note .pp-fb-acts a.primary, .pp-fb-note .pp-fb-acts button.primary { background: var(--pp-accent); border-color: var(--pp-accent); color: #fff; }
+.pp-fb-overlay {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start;
+  justify-content: flex-end; padding: 48px 18px 18px; background: rgba(20, 20, 20, .32); box-sizing: border-box;
+}
+.pp-fb-overlay *, .pp-fb-overlay *::before, .pp-fb-overlay *::after { box-sizing: border-box; }
+.pp-fb-form {
+  display: flex; flex-direction: column; width: min(520px, 100%); max-height: calc(100vh - 66px); margin: 0;
+  background: var(--pp-bg); color: var(--pp-ink); border: 1px solid var(--pp-line);
+  border-radius: 8px; box-shadow: 0 10px 34px rgba(0, 0, 0, .28); overflow: hidden;
+  font: 14px/1.45 var(--pp-font);
+}
+.pp-fb-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--pp-line); }
+.pp-fb-htitle { display: flex; flex-direction: column; min-width: 0; font-weight: 600; font-size: 15px; }
+.pp-fb-hmeta { font-weight: 400; font-size: 12px; color: var(--pp-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-fb-dismiss { border: 0; background: none; color: var(--pp-dim); font-size: 22px; line-height: 1; padding: 2px 6px; cursor: pointer; border-radius: 4px; }
+.pp-fb-dismiss:hover { background: var(--pp-hover); color: var(--pp-strong); }
+.pp-fb-body { padding: 12px 16px 4px; overflow: auto; }
+.pp-fb-form label { display: block; font-weight: 600; margin: 10px 0 4px; color: var(--pp-ink); }
+.pp-fb-form label:first-child { margin-top: 0; }
+.pp-fb-opt { font-weight: 400; color: var(--pp-dim); }
+.pp-fb-form textarea, .pp-fb-form input[type="text"], .pp-fb-form input[type="email"] {
+  width: 100%; padding: 7px 9px; border: 1px solid var(--pp-ctl-line); border-radius: 4px;
+  font: inherit; color: var(--pp-ink); background: var(--pp-ctl-bg); resize: vertical;
+}
+.pp-fb-form textarea:focus, .pp-fb-form input:focus {
+  outline: none; border-color: var(--pp-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pp-focus) 18%, transparent);
+}
+.pp-fb-drop { border: 1.5px dashed var(--pp-ctl-line); border-radius: 6px; padding: 10px 12px; color: var(--pp-dim); font-size: 13px; background: var(--pp-panel); }
+.pp-fb-drop.dragging { border-color: var(--pp-focus); background: color-mix(in srgb, var(--pp-focus) 9%, transparent); }
+.pp-fb-browse { border: 0; background: none; padding: 0; font: inherit; color: var(--pp-link); cursor: pointer; text-decoration: underline; }
+.pp-fb-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.pp-fb-list li {
+  position: relative; display: flex; flex-direction: column; align-items: center; width: 108px;
+  padding: 6px; border: 1px solid var(--pp-line); border-radius: 6px; font-size: 11px; color: var(--pp-dim); background: var(--pp-panel);
+}
+.pp-fb-list img { max-width: 96px; max-height: 64px; border-radius: 3px; margin-bottom: 4px; }
+.pp-fb-fname { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-fb-fremove {
+  position: absolute; top: 2px; right: 2px; border: 0; background: var(--pp-bg); color: var(--pp-dim);
+  border-radius: 50%; width: 18px; height: 18px; line-height: 16px; padding: 0; cursor: pointer;
+}
+.pp-fb-status { min-height: 18px; margin: 10px 0 0; font-size: 13px; color: var(--pp-dim); }
+.pp-fb-status.error { color: var(--pp-error); }
+.pp-fb-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--pp-line); font-size: 12px; color: var(--pp-dim); }
+.pp-fb-links a { color: var(--pp-link); text-decoration: none; }
+.pp-fb-links a:hover { text-decoration: underline; }
+.pp-fb-send {
+  margin-left: auto; border: 0; border-radius: 4px; background: var(--pp-accent); color: #fff;
+  padding: 8px 16px; font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1; cursor: pointer;
+}
+.pp-fb-send:disabled { opacity: .6; cursor: default; }
+.pp-fb-form.sent .pp-fb-body > :not(.pp-fb-thanks), .pp-fb-form.sent .pp-fb-foot { display: none; }
+.pp-fb-thanks { display: none; text-align: center; padding: 40px 10px 44px; }
+.pp-fb-form.sent .pp-fb-thanks { display: block; }
+.pp-fb-thanks strong { display: block; font-size: 18px; margin-bottom: 4px; }
+.pp-fb-popover {
+  position: fixed; z-index: 70; max-width: 360px; padding: 10px 12px; border-radius: 6px; box-sizing: border-box;
+  background: var(--pp-bg); color: var(--pp-ink); border: 1px solid var(--pp-line); box-shadow: 0 6px 24px rgba(0, 0, 0, .2);
+  font: 13px/1.45 var(--pp-font);
+}
+
+/* ---- narrow screens: the rails stack above the content; a coarse pointer gets bigger targets -- */
+@media (max-width: 960px) {
+  .pp-shell .pp-main { flex-direction: column; }
+  .pp-shell .pp-split { display: none; }
+  .pp-shell .pp-side, .pp-shell .pp-side-right {
+    width: 100%; position: static; min-height: 0; max-height: none;
+    border-left: none; border-right: none; border-bottom: 1px solid var(--pp-line); padding: 8px 0 12px;
+  }
+  .pp-shell .pp-meta, .pp-shell .pp-sub { display: none; }
+}
+@media (max-width: 900px), (max-height: 540px), (pointer: coarse) {
+  .pp-shell .symbol-letters { display: none; }
+  .pp-shell .symbol-index .symbol-letter-picker { display: block; }
+}
+@media (max-width: 640px) {
+  .pp-fb-overlay { padding: 0; }
+  .pp-fb-form { width: 100%; height: 100%; max-height: none; border-radius: 0; }
+}
+@media (pointer: coarse) {
+  .pp-shell .pp-side a, .pp-shell .pp-side-right a { padding-top: 7px; padding-bottom: 7px; }
+  .pp-shell .pp-side summary { padding-top: 7px; padding-bottom: 7px; }
+  .pp-shell .symbol-select { font-size: 16px; }
+  .pp-shell .symbol-index select, .pp-shell .symbol-more { min-height: 44px; font-size: 16px; }
+}

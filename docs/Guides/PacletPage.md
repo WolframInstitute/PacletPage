@@ -30,6 +30,7 @@ PacletPage takes a paclet from the markdown in its `docs/` folder to a published
 ### The site
 - `PacletPageCatalog` the pages of a published paclet or of a paclet directory, the notebook behind each, and the guide tree
 - `PacletPageFiles` the site's pages, to preview locally or to publish elsewhere
+- `PacletPageWebAssets` the shell's stylesheet and script, which a host such as Wolfram Studio loads to show a paclet's pages as its site does
 - `BuildPacletPageSite` the site rendered on this computer, without the cloud, to preview the documentation
 - `PacletPage` a page of a local or installed paclet's documentation as a three-column `XMLElement` shell with its live notebook
 - `DeployPacletPage` publish the site, with its feedback form, in the connected cloud account

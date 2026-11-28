@@ -155,8 +155,9 @@ wl -f run-tests.wls    # offline: no network, no cloud
 wl -f release.wls      # the whole release: documentation, resource, archive, site, check
 ```
 
-With `wolframscript`, Chrome and `playwright-core` installed, `node --test Tests/symbol-*.test.cjs`
-checks the desktop index, the phone drawer and the first paint on a slow connection.
+With `wolframscript`, Chrome and `playwright-core` installed, `node --test Tests/*.test.cjs`
+checks the desktop index, the phone drawer, the first paint on a slow connection, and the shell's
+module as a host mounts it (`Tests/shell.test.cjs`).
 Set `CHROME_BIN` to use another Chromium executable.
 
 PacletPage releases itself with `PublishPacletPage`, into the account `PACLETPAGE_ACCOUNT` (by

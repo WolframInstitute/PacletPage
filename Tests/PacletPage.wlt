@@ -1656,6 +1656,14 @@ VerificationTest[
 ]
 
 VerificationTest[
+    With[{assets = PacletPageWebAssets[]},
+        {Keys[assets], FileNameTake /@ Values[KeyTake[assets, {"ShellCSS", "ShellJS"}]], FileExistsQ /@ Values[KeyTake[assets, {"ShellCSS", "ShellJS"}]],
+            assets["Version"] === $pacletPageVersion, StringContainsQ[ReadString[assets["ShellJS"]], "export function mountPacletShell("]}],
+    {{"ShellCSS", "ShellJS", "Version"}, {"shell.css", "shell.js"}, {True, True}, True, True},
+    TestID -> "Site: PacletPageWebAssets gives the shell's stylesheet and script module of this PacletPage, and its version"
+]
+
+VerificationTest[
     StringQ[converterParserContext[converterSpec[File[$pinnedConverter]]]],
     True,
     TestID -> "Build: the converter this release carries loads Wolfram/Parser, so a build checks its parser before converting"

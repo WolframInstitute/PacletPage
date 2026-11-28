@@ -93,6 +93,10 @@ every documentation page, and deploys the paclet resource publicly to the connec
 SubmitPacletResource::usage = "SubmitPacletResource[dir] builds the paclet in dir afresh, checks its definition \
 notebook and the archive, and submits the paclet to the Wolfram Paclet Repository, without a front end.";
 
+PacletPageWebAssets::usage = "PacletPageWebAssets[] gives the files a documentation site's shell is made with, which a host \
+such as Wolfram Studio loads to show a paclet's pages as the site does: an association of \"ShellCSS\", the stylesheet, \
+and \"ShellJS\", the script module, each the absolute path of this PacletPage's own, and its \"Version\".";
+
 PublishPacletPage::usage = "PublishPacletPage[dir, name] builds the documentation of the paclet in dir, deploys its \
 resource, publishes the site name around it and checks the site; with \"Submit\" -> True it also submits the paclet \
 to the Paclet Repository.";
@@ -124,6 +128,14 @@ $webDirectory = FileNameJoin[{ParentDirectory[$packageDirectory], "Assets", "Web
    site's footer names and links to *)
 $pacletPageVersion := $pacletPageVersion = Replace[PacletObject[File[ParentDirectory[$packageDirectory]]], {p_PacletObject :> p["Version"], _ -> None}];
 $pacletPageSite = "https://www.wolframcloud.com/obj/wolframinstitute/PacletPage";
+
+(* the shell's stylesheet and script, this PacletPage's own: the published sites and any host that
+   shows a paclet's pages in the shell load the same two files *)
+PacletPageWebAssets[] := <|
+    "ShellCSS" -> ExpandFileName[FileNameJoin[{$webDirectory, "shell.css"}]],
+    "ShellJS" -> ExpandFileName[FileNameJoin[{$webDirectory, "shell.js"}]],
+    "Version" -> $pacletPageVersion
+|>;
 
 (* Reading definitions in a fresh kernel must use locally available paclets. *)
 Block[{$AllowInternet = False, $AllowDataUpdates = False},

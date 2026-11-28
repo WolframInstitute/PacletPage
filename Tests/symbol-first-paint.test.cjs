@@ -16,7 +16,7 @@ function buildShell() {
         "HTML" -> "./" <> id <> ".html", "Notebook" -> "./" <> id <> ".nb"|>]], "ref/" <> # & /@ names];
     catalog = <|"Name" -> "Test/Index", "Kind" -> "Local", "Title" -> "Index", "RootGuide" -> "guide/Home",
         "Resource" -> "./home.html", "DocBase" -> "./", "Pages" -> pages|>;
-    WriteString["stdout", PacletPageFiles[catalog, "PageURL" -> ""]["index.html"]];
+    WriteString["stdout", PacletPageFiles[catalog, "PageURL" -> "", "SymbolIndex" -> True]["index.html"]];
   `;
   return execFileSync('wolframscript', ['-code', source], {
     cwd: path.join(__dirname, '..'), encoding: 'utf8'

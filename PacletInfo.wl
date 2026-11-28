@@ -36,6 +36,7 @@ PacletObject[<|
                 "WolframInstitute`PacletPage`PacletPageCatalog",
                 "WolframInstitute`PacletPage`PacletPage",
                 "WolframInstitute`PacletPage`PacletPageFiles",
+                "WolframInstitute`PacletPage`PacletPageWebAssets",
                 "WolframInstitute`PacletPage`BuildPacletPageSite",
                 "WolframInstitute`PacletPage`DeployPacletPage",
                 "WolframInstitute`PacletPage`DeployPacletPageFeedback",
