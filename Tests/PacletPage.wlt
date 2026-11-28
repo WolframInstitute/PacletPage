@@ -1620,13 +1620,15 @@ VerificationTest[
 ]
 
 VerificationTest[
-    Cases[
+    (* the converter loads its parser, whose contexts it puts on the path; the suite's later tests
+       read CodeParser`, of the same names, so the path is left as it was *)
+    Block[{$ContextPath = $ContextPath}, Cases[
         converter[File[$pinnedConverter]][
             "---\nTemplate: Symbol\nName: Foo\nContext: KeywordTest`\nPaclet: KeywordTest/Pkg\nURI: KeywordTest/Pkg/ref/Foo\nKeywords: [first keyword, second keyword]\n---\n\n## Usage\n\n<code>[Foo]()[*x*]</code> gives the foo of *x*.\n",
             "Evaluate" -> False
         ],
         Cell[k_String, "Keywords", ___] :> k, Infinity
-    ],
+    ]],
     {"first keyword", "second keyword"},
     TestID -> "Build: the converter this release carries fills a symbol page's Keywords cells from its front matter, which the documentation build reads the page's keywords from"
 ]
