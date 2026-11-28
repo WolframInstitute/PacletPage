@@ -8,7 +8,9 @@
        wl -f release.wls             (or --dry-run: the build and the resource, not deployed)
 
    The account is PACLETPAGE_ACCOUNT, by default the Wolfram Institute's. With PACLETPAGE_PARALLEL=0
-   the pages are built in this kernel alone. *)
+   the pages are built in this kernel alone. A tree copied without its repository, as onto a pod,
+   names the commit it was copied from in PACLETPAGE_COMMIT; its tag is then made where the
+   repository is. *)
 
 $ProgressReporting = False
 
@@ -17,6 +19,9 @@ PacletDirectoryLoad[dir]
 Needs["WolframInstitute`PacletPage`"]
 
 account = Replace[Environment["PACLETPAGE_ACCOUNT"], Except[_String?(StringLength[#] > 0 &)] -> "wolframinstitute@wolframinstitute.org"]
+repository = FileExistsQ[FileNameJoin[{dir, ".git"}]]
+commit = If[repository, Automatic,
+    Replace[Environment["PACLETPAGE_COMMIT"], Except[_String?(StringMatchQ[#, RegularExpression["[0-9a-f]{40}"]] &)] -> Automatic]]
 result = PublishPacletPage[dir, "PacletPage",
     "Account" -> account,
     "DryRun" -> MemberQ[Rest[$ScriptCommandLine], "--dry-run"],
@@ -25,7 +30,7 @@ result = PublishPacletPage[dir, "PacletPage",
     (* no example shows PacletPage's own version, so a new version alone converts no page again *)
     "BuildOptions" -> {"Parallel" -> Replace[Environment["PACLETPAGE_PARALLEL"], {"0" | "False" -> False, _ -> Automatic}], "CacheVersion" -> False},
     (* the release takes the archive its gate built from the same commit, in the same tree *)
-    "ResourceOptions" -> {"Build" -> Automatic},
+    "ResourceOptions" -> {"Build" -> Automatic, "Commit" -> commit},
     "SiteOptions" -> {"FeedbackOptions" -> {"Domains" -> {"wolframinstitute.org", "wolfram.com"}}, "VersionLabel" -> True, "Footer" -> True}
 ]
 If[ ! AssociationQ[result], Exit[1]]
@@ -35,10 +40,14 @@ If[ AssociationQ[result["Site"]], Print["site: ", result["Site"]["Site"]]]
 (* a release tagged v<version> on the commit it was built from, when it was built from a commit
    alone, without changes beside it *)
 tagRelease[resource_Association] := With[{commit = resource["Commit"], tag = "v" <> resource["Version"]},
-    If[ TrueQ[resource["Deployed"]] && StringQ[commit] && StringMatchQ[commit, RegularExpression["[0-9a-f]{40}"]],
-        RunProcess[{"git", "-C", dir, "tag", "-a", tag, commit, "-m", "PacletPage " <> resource["Version"]}];
-        Print["tag: ", tag, If[MatchQ[RunProcess[{"git", "-C", dir, "push", "origin", tag}], KeyValuePattern["ExitCode" -> 0]], " pushed", " not pushed"]],
-        Print["tag: none, the release was not built from a commit alone"]
+    Which[
+        ! TrueQ[resource["Deployed"]] || ! StringQ[commit] || ! StringMatchQ[commit, RegularExpression["[0-9a-f]{40}"]],
+            Print["tag: none, the release was not built from a commit alone"],
+        ! repository,
+            Print["tag: ", tag, " on ", commit, ", to be made in the repository"],
+        True,
+            RunProcess[{"git", "-C", dir, "tag", "-a", tag, commit, "-m", "PacletPage " <> resource["Version"]}];
+            Print["tag: ", tag, If[MatchQ[RunProcess[{"git", "-C", dir, "push", "origin", tag}], KeyValuePattern["ExitCode" -> 0]], " pushed", " not pushed"]]
     ]
 ]
 If[ AssociationQ[result["Check"]],
