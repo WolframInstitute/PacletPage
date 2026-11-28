@@ -249,6 +249,8 @@
 .pp-shell .pp-ftr-desc { color: var(--pp-ftr-fg); }
 
 /* ---- the Feedback note and form, appended to the document's body ---------------------------- */
+/* hidden means hidden: the form's own display: flex would otherwise keep it open when closed */
+.pp-fb-overlay[hidden], .pp-fb-note[hidden], .pp-fb-overlay [hidden], .pp-fb-note [hidden] { display: none !important; }
 .pp-fb-note {
   position: fixed; top: calc(var(--pp-sticky-top) + 96px); right: 18px; z-index: 40;
   max-width: 340px; padding: 12px 14px; border-radius: 6px; box-sizing: border-box;

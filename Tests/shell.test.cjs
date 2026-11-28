@@ -128,7 +128,16 @@ test('The Feedback panel hands its report, files included, to onFeedback, and de
       defaultEmail: 'reader@example.org',
       onFeedback: async (payload) => { reports.push(payload); return { submitted: true }; }
     });
-    root.querySelector('[data-pp-tool="feedback"]').click();
+    const tool0 = root.querySelector('[data-pp-tool="feedback"]');
+    // the form closes, out of sight, by its close button, its backdrop and Escape
+    const shown = () => getComputedStyle(document.querySelector('.pp-fb-overlay')).display !== 'none';
+    const closes = [];
+    tool0.click(); closes.push(shown()); document.querySelector('.pp-fb-dismiss').click(); closes.push(shown());
+    tool0.click(); closes.push(shown()); document.querySelector('.pp-fb-overlay').click(); closes.push(shown());
+    tool0.click(); closes.push(shown());
+    document.querySelector('.pp-fb-overlay textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    closes.push(shown());
+    tool0.click();
     const overlay = document.querySelector('.pp-fb-overlay'), form = overlay.querySelector('form');
     const prefilled = form.querySelector('input[type="email"]').value;
     form.querySelector('textarea').value = 'The example is wrong.';
@@ -141,6 +150,9 @@ test('The Feedback panel hands its report, files included, to onFeedback, and de
     form.requestSubmit();
     for (let i = 0; i < 50 && !reports.length; i++) await new Promise((r) => setTimeout(r, 20));
     const sent = form.classList.contains('sent');
+    // and on its own, a moment after the report is sent
+    await new Promise((r) => setTimeout(r, 2700));
+    const autoClosed = !shown();
     shell.destroy();
     const gone = !document.querySelector('.pp-fb-overlay');
     // without onFeedback, a shell whose page names no feedback form and no email hides the button
@@ -154,8 +166,10 @@ test('The Feedback panel hands its report, files included, to onFeedback, and de
     const q = root.querySelector('.pp-filter');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: '/' }));
     root.querySelector('[data-pp-layout="right"]').click();
-    return { prefilled, listed, report: reports[0], sent, gone, hidden, quiet: document.activeElement !== q && !root.classList.contains('pp-hide-right') };
+    return { closes, autoClosed, prefilled, listed, report: reports[0], sent, gone, hidden, quiet: document.activeElement !== q && !root.classList.contains('pp-hide-right') };
   });
+  assert.deepStrictEqual(result.closes, [true, false, true, false, true, false], 'The form opens, and closes out of sight by its close button, its backdrop and Escape');
+  assert.ok(result.autoClosed, 'The form closes itself after the report is sent');
   assert.strictEqual(result.prefilled, 'reader@example.org');
   assert.strictEqual(result.listed, 1);
   const { attachments, ...rest } = result.report;
