@@ -644,6 +644,26 @@ $parserPreparation = Function[context,
     ]
 ];
 
+(* The context of a converter that loads Wolfram/Parser, by the flag it keeps for it, or None. *)
+converterParserContext[spec_Association] := With[{symbol = Replace[spec["Function"], rf_ResourceFunction :> ResourceFunction[rf, "Function"]]},
+    If[ Head[symbol] === Symbol, With[{context = With[{s = symbol}, Context[s]]}, If[NameQ[context <> "parserLoadedQ"], context, None]], None]
+];
+
+(* Whether a build's converter has its parser: one at hand, else the one PacletPage declares,
+   installed now, before any page is keyed or converted. A converter that loads none needs none. A
+   build that would go on without it builds every page with its math read by the converter's
+   fallback and its mermaid diagrams left out, as a container with no parser once did, page by page
+   with a message each. *)
+parserReadyQ[spec_Association] := With[{context = converterParserContext[spec]},
+    context === None || (
+        $parserPreparation[context];
+        If[ ! TrueQ[Symbol[context <> "parserLoadedQ"][]] && PacletFind["Wolfram/Parser"] === {},
+            installDeclaredParser[]; $parserPreparation[context]];
+        TrueQ[Symbol[context <> "parserLoadedQ"][]]
+    )
+];
+installDeclaredParser[] := InstallPacletDependencies[File[ParentDirectory[$packageDirectory]], "Wolfram/Parser"];
+
 converterInternals[spec_Association] := Module[{symbol, context},
     symbol = Replace[spec["Function"], rf_ResourceFunction :> ResourceFunction[rf, "Function"]];
     If[ Head[symbol] =!= Symbol, Return[None, Module]];
@@ -1217,6 +1237,7 @@ Options[BuildPacletDocumentation] = {
     "EvaluationKernel" -> None,
     "InstallDependencies" -> False,
     "DependencyDirectory" -> Automatic,
+    "ParserFallback" -> False,
     "Monitor" -> False
 };
 
@@ -1227,6 +1248,7 @@ BuildPacletDocumentation::page = "`1` did not become a notebook: `2`.";
 BuildPacletDocumentation::flagged = "`1` documentation pages carry a flag the documentation build leaves a page out for, from a Flag frontmatter key, a flag cell or the palette's flag buttons: `2`.";
 BuildPacletDocumentation::nodefinition = "No markdown definition was found, as ResourceDefinition.md in `1` or a Template: Paclet page under `2`, so `3` was not rebuilt; a deploy would publish it as it is. Give \"Definition\", or \"Definition\" -> None to build without one.";
 BuildPacletDocumentation::installdeps = "Could not install declared dependencies for `1`: `2`.";
+BuildPacletDocumentation::parser = "The converter's Wolfram/Parser is not installed and could not be installed, so pages would be built with their math read by a fallback and their mermaid diagrams left out. Install Wolfram/Parser, or build with \"ParserFallback\" -> True to accept that.";
 
 (* where a build installs the declared dependencies: a directory of its own under build/ unless it
    names one, and the user paclet repository for None *)
@@ -1317,6 +1339,8 @@ buildPacletDocumentation[dir_String, opts : OptionsPattern[BuildPacletDocumentat
     (* a paclet whose examples run on another kernel loads there, and need not load here *)
     If[ StringQ[paclet["PrimaryContext"]] && OptionValue["EvaluationKernel"] === None, Needs[paclet["PrimaryContext"]]];
     spec = converterSpec[OptionValue["Converter"]];
+    (* the parser the converter draws math and mermaid diagrams with, which the page keys hold *)
+    If[ ! TrueQ[OptionValue["ParserFallback"]] && ! parserReadyQ[spec], Message[BuildPacletDocumentation::parser]; Return[$Failed, Module]];
     converterID = converterKey[spec];
     (* the cache: each page's notebook under a key of everything it depends on, and the code each
        page's examples were last evaluated with, since the converter caches an example's result by

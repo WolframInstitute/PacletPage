@@ -1023,6 +1023,24 @@ VerificationTest[
 ]
 
 VerificationTest[
+    withFixtureDocs[Function[dir, Module[{stopped, built},
+        (* a converter that loads Wolfram/Parser, by its flag for it, whose parser does not load *)
+        PacletPageParserTest`convert[file_String, out_String, opts : OptionsPattern[]] := fakeConvert[file, out, opts];
+        PacletPageParserTest`parserLoadedQ[] := False;
+        PacletPageParserTest`$parserTried = False;
+        Block[{installDeclaredParser = (Null &), $parserPreparation = (Null &)},
+            stopped = BuildPacletDocumentation[dir, "Converter" -> PacletPageParserTest`convert, "Definition" -> None, "Parallel" -> False];
+            built = BuildPacletDocumentation[dir, "Converter" -> PacletPageParserTest`convert, "Definition" -> None, "Parallel" -> False, "ParserFallback" -> True]
+        ];
+        ClearAll["PacletPageParserTest`*"];
+        {stopped, AssociationQ[built]}
+    ]]],
+    {$Failed, True},
+    {BuildPacletDocumentation::parser},
+    TestID -> "Build: a build whose converter has no Wolfram/Parser stops with one message, unless it allows the converter's fallback"
+]
+
+VerificationTest[
     withFixtureDocs[Function[dir, Module[{edited, code, tutorial},
         BuildPacletDocumentation[dir, "Converter" -> fakeConvert, "Definition" -> None];
         Export[FileNameJoin[{dir, "docs", "Symbols", "foo-page.md"}], "---\nTemplate: Symbol\nURI: Pub/Fixture/ref/Foo\n---\n\nFoo text, edited.\n", "Text"];
@@ -1617,6 +1635,12 @@ VerificationTest[
     MatchQ[Import[$pinnedConverter, "WXF"], KeyValuePattern[{"URL" -> $converterURL, "Name" -> _String, "Definition" -> _Language`DefinitionList, "ID" -> _String}]],
     True,
     TestID -> "Build: this release of PacletPage carries a pinned published converter"
+]
+
+VerificationTest[
+    StringQ[converterParserContext[converterSpec[File[$pinnedConverter]]]],
+    True,
+    TestID -> "Build: the converter this release carries loads Wolfram/Parser, so a build checks its parser before converting"
 ]
 
 VerificationTest[
