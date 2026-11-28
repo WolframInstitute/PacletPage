@@ -372,12 +372,13 @@ localDocumentation[_] := <||>;
 localNotebook[file_String] := If[FileExistsQ[file], Import[file, "NB"], Missing["NoFile", file]];
 
 (* the text of a notebook file's last metadata list within its last n bytes, or None *)
-metadataText[file_String, size_Integer, n_Integer] := Module[{stream, tail, text, at},
+metadataText[file_String, size_Integer, n_Integer] := Module[{stream, text, at},
     If[ n > 32768 && size <= n / 4, Return[None, Module]];
-    stream = OpenRead[file, BinaryFormat -> True];
-    tail = WithCleanup[SetStreamPosition[stream, Max[0, size - n]]; ReadByteArray[stream], Close[stream]];
-    If[ ! ByteArrayQ[tail], Return[None, Module]];
-    text = ByteArrayToString[tail, "ISO8859-1"];
+    (* read as text a character a byte, so a tail that starts inside a character still reads; decoding
+       the tail's bytes as one byte array takes some kernels tens of milliseconds a page *)
+    stream = OpenRead[file, BinaryFormat -> True, CharacterEncoding -> "ISOLatin1"];
+    text = WithCleanup[SetStreamPosition[stream, Max[0, size - n]]; ReadString[stream], Close[stream]];
+    If[ ! StringQ[text], Return[None, Module]];
     at = StringPosition[text, "\"Metadata\""];
     If[ at === {}, None, First[StringCases[StringTake[text, {at[[-1, 1]], Min[StringLength[text], at[[-1, 1]] + 32767]}], $metadataPattern, 1], None]]
 ];
