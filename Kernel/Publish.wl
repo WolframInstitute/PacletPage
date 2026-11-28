@@ -42,8 +42,13 @@ converterSpec[Automatic] := converterSpec[Automatic] = If[ DownValues[Global`Mar
     |>,
     converterSpec[automaticConverter[]]
 ];
+(* PacletPage as the converter's checkout carries it, at examples/Paclet/PacletPage: a copy elsewhere
+   three directories down, such as a worktree of PacletPage inside the checkout, is not, and builds
+   with the converter it pins *)
+converterCheckoutQ[] := FileExistsQ[FileNameJoin[{$checkoutDirectory, "MarkdownToNotebook.wl"}]] &&
+    ExpandFileName[FileNameJoin[{$checkoutDirectory, "examples", "Paclet", "PacletPage"}]] === ExpandFileName[ParentDirectory[$packageDirectory]];
 automaticConverter[] := Which[
-    FileExistsQ[FileNameJoin[{$checkoutDirectory, "MarkdownToNotebook.wl"}]],
+    converterCheckoutQ[],
         If[ DirectoryQ[FileNameJoin[{$checkoutDirectory, "examples", "Paclet", "WolframParser"}]],
             PacletDirectoryLoad[FileNameJoin[{$checkoutDirectory, "examples", "Paclet", "WolframParser"}]]
         ];

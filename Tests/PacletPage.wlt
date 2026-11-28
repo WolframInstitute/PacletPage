@@ -1616,6 +1616,24 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], pinned, own, worktree, result},
+        pinned = FileNameJoin[{dir, "Converter.wxf"}];
+        Export[pinned, <|"Name" -> "x`f", "Definition" -> {}, "ID" -> "pinned"|>, "WXF"];
+        Export[FileNameJoin[{dir, "MarkdownToNotebook.wl"}], "f[x_] := x", "Text"];
+        (* PacletPage where the checkout carries it, and a worktree of it three directories down *)
+        own = FileNameJoin[{dir, "examples", "Paclet", "PacletPage", "Kernel"}];
+        worktree = FileNameJoin[{dir, ".claude", "worktrees", "pp", "Kernel"}];
+        Scan[CreateDirectory[#, CreateIntermediateDirectories -> True] &, {own, worktree}];
+        result = Block[{$pinnedConverter = pinned, $packageDirectory = #, $checkoutDirectory = FileNameJoin[{ParentDirectory[#], "..", "..", ".."}]},
+            automaticConverter[]] & /@ {own, worktree};
+        DeleteDirectory[dir, DeleteContents -> True];
+        Replace[result, path_String :> ExpandFileName[path], {1}] === {ExpandFileName[FileNameJoin[{dir, "MarkdownToNotebook.wl"}]], File[pinned]}
+    ],
+    True,
+    TestID -> "Build: PacletPage uses the converter's checkout only as the checkout carries it, and a worktree of it inside the checkout the converter it pins"
+]
+
+VerificationTest[
     Module[{dir = CreateDirectory[], result},
         PacletPagePrepTest`$parserTried = False;
         PacletPagePrepTest`$parserReady = False;
