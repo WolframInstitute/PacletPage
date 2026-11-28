@@ -143,6 +143,23 @@ themeButtonXML[_] := XMLElement["button", {
     }]
 }];
 
+(* The header's button that copies the address of the page shown: a chain link, a check mark for a
+   moment once the address is copied. The shell's script makes the address, a host's own where it
+   gives one. *)
+copyLinkButtonXML[] := XMLElement["button", {
+    "class" -> "pp-layout-btn pp-copy-link", "type" -> "button", "data-pp-tool" -> "copylink",
+    "aria-label" -> "Copy link to this page", "title" -> "Copy link to this page"
+}, {
+    XMLElement["svg", {"class" -> "pp-link-icon", "aria-hidden" -> "true", "viewBox" -> "0 0 20 20", "fill" -> "none", "stroke" -> "currentColor",
+        "stroke-width" -> "1.5", "stroke-linecap" -> "round", "stroke-linejoin" -> "round"}, {
+        XMLElement["path", {"d" -> "M8.5 11.5a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2l-1 1"}, {}],
+        XMLElement["path", {"d" -> "M11.5 8.5a3 3 0 0 0-4.2 0l-2.6 2.6a3 3 0 0 0 4.2 4.2l1-1"}, {}]
+    }],
+    XMLElement["svg", {"class" -> "pp-check-icon", "aria-hidden" -> "true", "viewBox" -> "0 0 20 20", "fill" -> "none", "stroke" -> "currentColor",
+        "stroke-width" -> "1.8", "stroke-linecap" -> "round", "stroke-linejoin" -> "round"},
+        {XMLElement["path", {"d" -> "M4.5 10.5l3.5 3.5 7.5-8"}, {}]}]
+}];
+
 fullExitXML[controls_List, mode_String] := If[ MemberQ[controls, "Fullscreen"],
     XMLElement["button", Join[
         If[mode === "HTML", {"id" -> "ppFullExit"}, {}],
@@ -673,6 +690,7 @@ headerXML[catalog_Association, cfg_Association, layoutEl_] := Module[
                 Nothing
             ],
             layoutEl,
+            copyLinkButtonXML[],
             XMLElement["span", {"class" -> "pp-meta"}, {summary}],
             resourceLinkXML[Replace[Lookup[cfg, "Resource", ""], Except[_String] -> ""], Lookup[cfg, "ResourceLabel", "Resource page"], "Expression"]
         }, Nothing]]

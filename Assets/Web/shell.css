@@ -91,6 +91,11 @@
 .pp-shell .pp-layout-btn svg, .pp-shell .pp-theme-btn svg, .pp-shell .pp-full-exit svg { width: 16px; height: 16px; display: block; }
 .pp-shell .pp-theme-btn .pp-sun, :root[data-theme="dark"] .pp-shell .pp-theme-btn .pp-moon { display: none; }
 :root[data-theme="dark"] .pp-shell .pp-theme-btn .pp-sun { display: block; }
+/* the Copy link button: a chain link, a check mark for a moment once the address is copied */
+.pp-shell .pp-copy-link .pp-check-icon, .pp-shell .pp-copy-link.copied .pp-link-icon { display: none; }
+.pp-shell .pp-copy-link.copied .pp-check-icon { display: block; }
+.pp-shell .pp-copy-link.copied { color: #8fd694; border-color: rgba(143, 214, 148, .5); }
+.pp-shell .pp-copy-link svg { width: 16px; height: 16px; }
 .pp-shell .pp-full-exit {
   display: none; position: fixed; top: calc(var(--pp-sticky-top) + 10px); right: var(--pp-full-exit-right); z-index: 30;
   width: 30px; height: 30px; padding: 0; border-radius: 5px; align-items: center; justify-content: center;

@@ -24,14 +24,15 @@ function page() {
 async function withPage(body) {
   const browser = await chromium.launch(process.env.CHROME_BIN ? { executablePath: process.env.CHROME_BIN } : { channel: 'chrome' });
   try {
-    const tab = await browser.newPage({ viewport: { width: 1200, height: 800 } });
-    await tab.route('http://shell.test/**', (route) => {
+    const context = await browser.newContext({ viewport: { width: 1200, height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] });
+    const tab = await context.newPage();
+    await tab.route('https://shell.test/**', (route) => {
       const name = new URL(route.request().url()).pathname;
       if (name === '/shell.css') return route.fulfill({ contentType: 'text/css', body: fs.readFileSync(path.join(assets, 'shell.css'), 'utf8') });
       if (name === '/shell.js') return route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(path.join(assets, 'shell.js'), 'utf8') });
       return route.fulfill({ contentType: 'text/html', body: page() });
     });
-    await tab.goto('http://shell.test/');
+    await tab.goto('https://shell.test/');
     await tab.waitForFunction(() => window.shellReady === true);
     await body(tab);
   } finally { await browser.close(); }
@@ -62,8 +63,15 @@ test('The filter hides what does not match, Enter navigates to the best match, a
     const restored = { closed: !root.querySelector('details').open, all: shown('ref/Gamma') && shown('tutorial/Steps'), empty: !!root.querySelector('.pp-nav-empty') };
     type('kwgamma');
     const byKeyword = shown('ref/Gamma') && !shown('ref/Beta');
+    // an Escape the filter clears on goes no further, to a host's own Escape
+    let hostEscapes = 0;
+    const host = (e) => { if (e.key === 'Escape') hostEscapes++; };
+    document.addEventListener('keydown', host);
+    q.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.removeEventListener('keydown', host);
+    const escaped = { cleared: q.value === '', hostEscapes };
     shell.destroy();
-    return { filtered, opened, calls, empty, restored, byKeyword, same: window.mountPacletShell(root) === window.mountPacletShell(root) };
+    return { filtered, opened, calls, empty, restored, byKeyword, escaped, same: window.mountPacletShell(root) === window.mountPacletShell(root) };
   });
   assert.deepStrictEqual(result.filtered, { alpha: false, alphaBeta: true, steps: false, saved: 'alphab' });
   assert.ok(result.opened, 'A match inside a closed guide opens it');
@@ -71,6 +79,7 @@ test('The filter hides what does not match, Enter navigates to the best match, a
   assert.ok(result.empty, 'A rail with no match says so');
   assert.deepStrictEqual(result.restored, { closed: true, all: true, empty: false });
   assert.ok(result.byKeyword, 'A page matches on its keywords');
+  assert.deepStrictEqual(result.escaped, { cleared: true, hostEscapes: 0 });
   assert.ok(result.same, 'Mounting a mounted root gives the same handle');
 }));
 
@@ -137,6 +146,7 @@ test('The Feedback panel hands its report, files included, to onFeedback, and de
     // without onFeedback, a shell whose page names no feedback form and no email hides the button
     const tool = root.querySelector('[data-pp-tool="feedback"]');
     tool.removeAttribute('data-pp-feedback-url');
+    tool.setAttribute('href', '#feedback');
     shell = window.mountPacletShell(root, {});
     const hidden = tool.hidden;
     shell.destroy();
@@ -157,4 +167,27 @@ test('The Feedback panel hands its report, files included, to onFeedback, and de
   assert.match(attachments[0].name, /^screenshot-\d{8}-\d{6}\.png$/);
   assert.match(attachments[0].base64, /^data:image\/png;base64,/);
   assert.ok(result.sent && result.gone && result.hidden && result.quiet);
+}));
+
+test('Copy link copies the address of the page shown, the host\'s where it gives one, and shows a check mark for a moment', () => withPage(async (tab) => {
+  const result = await tab.evaluate(async () => {
+    const root = document.querySelector('.pp-shell'), copies = [];
+    const shell = window.mountPacletShell(root, {
+      getPageUrl: (id) => 'https://studio.test/?paclet=Test/Shell&page=' + id,
+      onCopyLink: (url, id, ok) => copies.push({ url, id, ok })
+    });
+    shell.setActive('ref/Beta');
+    const button = root.querySelector('[data-pp-tool="copylink"]');
+    button.click();
+    for (let i = 0; i < 50 && !copies.length; i++) await new Promise((r) => setTimeout(r, 20));
+    const marked = button.classList.contains('copied'), copied = await navigator.clipboard.readText();
+    await new Promise((r) => setTimeout(r, 1500));
+    const unmarked = !button.classList.contains('copied');
+    shell.destroy();
+    return { copies, marked, copied, unmarked, title: button.getAttribute('title') };
+  });
+  assert.deepStrictEqual(result.copies, [{ url: 'https://studio.test/?paclet=Test/Shell&page=ref/Beta', id: 'ref/Beta', ok: true }]);
+  assert.strictEqual(result.copied, 'https://studio.test/?paclet=Test/Shell&page=ref/Beta');
+  assert.ok(result.marked && result.unmarked);
+  assert.strictEqual(result.title, 'Copy link to this page');
 }));

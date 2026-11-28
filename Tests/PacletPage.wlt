@@ -2453,7 +2453,8 @@ VerificationTest[
                 FirstCase[fbURL, XMLElement["a", attrs_List, {"Feedback"}] /; MemberQ[attrs, "data-pp-tool" -> "feedback"] :>
                     With[{a = Association[attrs]}, {a["href"], a["data-pp-all-feedback"]}], None, Infinity],
                 (* Feedback -> Automatic with FeedbackURL -> "" and no email omits the Feedback button *)
-                Cases[noFbAuto, XMLElement[_, {___, "data-pp-tool" -> t_, ___}, _] :> t, Infinity],
+                (* the page's own tools, without the header's Copy link *)
+                Cases[noFbAuto, XMLElement[_, {___, "data-pp-tool" -> t_ /; t =!= "copylink", ___}, _] :> t, Infinity],
                 (* Feedback -> False and ViewSource -> False omit .pp-pagetools *)
                 Cases[noTools, XMLElement["div", {___, "class" -> "pp-pagetools", ___}, _], Infinity] === {},
                 (* ResourceLink emits .pp-home link in header *)

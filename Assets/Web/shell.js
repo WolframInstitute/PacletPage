@@ -571,13 +571,15 @@ export function mountPacletShell(root, opts = {}) {
     const tool = parts.feedback;
     if (!tool) return;
     const info = feedbackInfo(tool);
-    const usable = typeof opts.onFeedback === 'function' || !!info.url || !!info.to;
-    tool.hidden = !usable;
-    if (info.to && !info.url && typeof opts.onFeedback !== 'function') tool.setAttribute('href', mailto(info));
+    // the form where the page names one, an email where it has a template, its own link where it
+    // points elsewhere; none of them, and the button is hidden
+    const external = /^https?:\/\//i.test(tool.getAttribute('href') || '');
+    tool.hidden = !(info.url || info.to || external);
+    if (info.to && !info.url) tool.setAttribute('href', mailto(info));
   }
-  function copyText(text, button) {
-    const done = (ok) => { if (button) button.textContent = ok ? t('copied') : t('copyFailed'); };
-    if (typeof opts.onCopy === 'function') { Promise.resolve(opts.onCopy(text)).then(() => done(true), () => done(false)); return; }
+  // the text written to the clipboard, through the host's onCopy where it gives one; true once written
+  function writeClipboard(text, viaHost) {
+    if (viaHost && typeof opts.onCopy === 'function') return Promise.resolve(opts.onCopy(text)).then(() => true, () => false);
     const legacy = () => {
       const ta = el(doc, 'textarea');
       ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
@@ -587,8 +589,23 @@ export function mountPacletShell(root, opts = {}) {
       ta.remove();
       return ok;
     };
-    if (win.navigator.clipboard && win.navigator.clipboard.writeText) win.navigator.clipboard.writeText(text).then(() => done(true), () => done(legacy()));
-    else done(legacy());
+    if (win.navigator.clipboard && win.navigator.clipboard.writeText) return win.navigator.clipboard.writeText(text).then(() => true, () => legacy());
+    return Promise.resolve(legacy());
+  }
+  function copyText(text, button) {
+    writeClipboard(text, true).then((ok) => { if (button) button.textContent = ok ? t('copied') : t('copyFailed'); });
+  }
+  // Copy link: the address of the page shown, the host's (getPageUrl) or the site's, to the clipboard
+  let copyTimer = null;
+  function copyLink(button) {
+    const id = (current && current.getAttribute('data-id')) || root.getAttribute('data-paclet-id') || '';
+    const url = typeof opts.getPageUrl === 'function' ? opts.getPageUrl(id) : win.location.origin + win.location.pathname + (id ? '#' + id : '');
+    writeClipboard(url, false).then((ok) => {
+      button.classList.toggle('copied', ok);
+      clearLater(copyTimer);
+      copyTimer = later(() => button.classList.remove('copied'), 1400);
+      if (typeof opts.onCopyLink === 'function') opts.onCopyLink(url, id, ok);
+    });
   }
   function showNote(info) {
     if (!note) {
@@ -730,6 +747,8 @@ export function mountPacletShell(root, opts = {}) {
       on(fb.form, 'submit', (e) => { e.preventDefault(); submit(); });
       on(fb.dismiss, 'click', closeForm);
       on(fb.overlay, 'click', (e) => { if (e.target === fb.overlay) closeForm(); });
+      // an Escape the form closes on goes no further, to a host's own Escape
+      on(fb.overlay, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeForm(); } });
       on(fb.mail, 'click', () => { closeForm(); showNote(fb.info); });
     }
     fb.info = info;
@@ -818,9 +837,9 @@ export function mountPacletShell(root, opts = {}) {
       if (kind === 'viewtoggle') { e.preventDefault(); toggleView(tool); }
       else if (kind === 'feedback') {
         const info = feedbackInfo(tool);
-        if (typeof opts.onFeedback === 'function' || info.url) { e.preventDefault(); openForm(tool); }
+        if (info.url) { e.preventDefault(); openForm(tool); }
         else if (info.to) showNote(info);
-      }
+      } else if (kind === 'copylink') { e.preventDefault(); copyLink(tool); }
       return;
     }
     const a = target.closest('a[data-id]');
@@ -829,7 +848,7 @@ export function mountPacletShell(root, opts = {}) {
   on(root, 'input', (e) => { if (e.target === parts.filter) runFilter(true); });
   on(root, 'keydown', (e) => {
     if (e.target === parts.filter) {
-      if (e.key === 'Escape') { parts.filter.value = ''; runFilter(true); parts.filter.blur(); }
+      if (e.key === 'Escape') { parts.filter.value = ''; runFilter(true); parts.filter.blur(); e.stopPropagation(); }
       else if (e.key === 'Enter' && !e.isComposing) {
         const term = (parts.filter.value || '').trim().toLowerCase(), a = term && bestMatch(allLinks(), term);
         if (!a) return;
@@ -860,8 +879,8 @@ export function mountPacletShell(root, opts = {}) {
     if (e.key === '/' && parts.filter && doc.activeElement !== parts.filter && !(doc.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(doc.activeElement.tagName)) && !(doc.activeElement && doc.activeElement.isContentEditable)) {
       e.preventDefault(); parts.filter.focus();
     } else if (e.key === 'Escape') {
-      if (fb && !fb.overlay.hidden) closeForm();
-      else if (root.classList.contains('pp-fullscreen')) setLayout('fullscreen', false, true);
+      if (fb && !fb.overlay.hidden) { closeForm(); e.stopPropagation(); }
+      else if (root.classList.contains('pp-fullscreen')) { setLayout('fullscreen', false, true); e.stopPropagation(); }
     }
   });
   on(doc, 'paste', (e) => {
