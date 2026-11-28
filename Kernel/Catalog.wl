@@ -382,6 +382,12 @@ metadataText[file_String, size_Integer, n_Integer] := Module[{stream, tail, text
     If[ at === {}, None, First[StringCases[StringTake[text, {at[[-1, 1]], Min[StringLength[text], at[[-1, 1]] + 32767]}], $metadataPattern, 1], None]]
 ];
 
+(* held data with nothing to evaluate: strings and numbers, in lists and rules, and the symbols True,
+   False, None and Null. Every head is one of these symbols, so String[...] is refused with any other
+   call; an association is refused whole, as a search of an atomic one does not reach its keys. *)
+inertQ[held_HoldComplete] := FreeQ[held, _Association] &&
+    FreeQ[held, Except[HoldComplete | List | Rule | True | False | None | Null, _Symbol], Heads -> True];
+
 (* A notebook file's title and keywords, as notebookMetadata gives them, read from the end of the
    file, where a notebook writes its options after its cells, without reading the cells: a large
    paclet's catalog reads thousands of pages. None where the file's last part holds no metadata. *)
@@ -392,7 +398,11 @@ fileMetadata[file_String] := Module[{size, found, rules},
     (* the last 32 KB, then more, as a notebook of many cells keeps a longer outline after its options *)
     found = Catch[Scan[With[{text = metadataText[file, size, #]}, If[StringQ[text], Throw[text, "metadata"]]] &, {32768, 131072, 524288}]; None, "metadata"];
     If[ ! StringQ[found], Return[None, Module]];
-    rules = Replace[ToExpression["{" <> found <> "}", InputForm, HoldComplete], {HoldComplete[{"Metadata" -> m_List}] :> m, _ -> None}];
+    (* parsed held and taken only as data: metadata holding anything else, code that reading the
+       catalog must not run, gives the page no title or keywords of its own, and the file, which
+       reading whole would run it, is not read *)
+    rules = Replace[ToExpression["{" <> found <> "}", InputForm, HoldComplete], {
+        held : HoldComplete[{"Metadata" -> m_List}] /; inertQ[held] :> m, _HoldComplete -> {}, _ -> None}];
     If[ ! ListQ[rules], Return[None, Module]];
     <|
         "Title" -> Replace[ruleValue[{"Metadata" -> rules}, {"Metadata", "title"}, Missing[]], Except[_String?(StringTrim[#] =!= "" &)] -> Missing["NoTitle"]],

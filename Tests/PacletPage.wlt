@@ -189,6 +189,30 @@ VerificationTest[
 ]
 
 VerificationTest[
+    Module[{dir = CreateDirectory[], write, pages},
+        WithCleanup[
+            PacletPageInertTest`$ran = {};
+            (* notebook files written as text, the code in their metadata unevaluated *)
+            write[name_, title_] := With[{file = FileNameJoin[{dir, name <> ".nb"}]},
+                WriteString[file, "Notebook[{Cell[\"" <> name <> "\", \"ObjectName\"]}, TaggingRules -> {\"Metadata\" -> {\"title\" -> " <> title <> ", \"keywords\" -> {\"k\"}}}]\n"];
+                Close[file];
+                file];
+            pages = localPage["Pub/Name", "ref/" <> #1, write[#1, #2]] & @@@ {
+                {"Run", "(AppendTo[PacletPageInertTest`$ran, 1]; \"T\")"},
+                {"Wrapped", "String[AppendTo[PacletPageInertTest`$ran, 2]]"},
+                {"Keyed", "<|AppendTo[PacletPageInertTest`$ran, 3] -> \"T\"|>"},
+                {"Plain", "\"A Title\""}
+            };
+            {PacletPageInertTest`$ran, #["Title"] & /@ pages, #["Keywords"] & /@ pages},
+            DeleteDirectory[dir, DeleteContents -> True];
+            ClearAll["PacletPageInertTest`*"]
+        ]
+    ],
+    {{}, {"Run", "Wrapped", "Keyed", "A Title"}, {{}, {}, {}, {"k"}}},
+    TestID -> "Catalog: a page whose notebook's metadata holds code takes only its name, and reading the catalog runs none of the code"
+]
+
+VerificationTest[
     Module[{dir = CreateDirectory[], docs, write, local},
         WithCleanup[
             docs = FileNameJoin[{dir, "Documentation", "English"}];
@@ -255,11 +279,11 @@ VerificationTest[
             write["ReferencePages/Symbols/Foo.nb", Notebook[{Cell["Foo", "ObjectName"]}, TaggingRules -> {"Metadata" -> {"title" -> "Foo, longer", "keywords" -> {"kf"}}}]];
             reads = {}; changed = {catalog["Pub/Name"]["Pages"]["ref/Foo"]["Title"], reads};
             reads = {}; other = {catalog["Pub/Other"]; Sort[reads]};
-            {FileExistsQ[shipped], first[[1]] === plain, first[[2]], changed, other},
+            {FileNameTake[shipped], first[[1]] === plain, first[[2]], changed, other},
             DeleteDirectory[dir, DeleteContents -> True]
         ]
     ],
-    {True, True, {}, {"Foo, longer", {"ref/Foo"}}, {Sort[{"guide/Name", "ref/Foo", "tutorial/Tut"}]}},
+    {"PacletPageCatalog.json", True, {}, {"Foo, longer", {"ref/Foo"}}, {Sort[{"guide/Name", "ref/Foo", "tutorial/Tut"}]}},
     TestID -> "Catalog: a catalog shipped beside a built paclet's notebooks gives their pages without reading them; a notebook of another size is read"
 ]
 

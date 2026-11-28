@@ -114,14 +114,14 @@ localCatalog[name_String, local_Association] := Module[{short = Last[StringSplit
    one, and after its first reading otherwise, in any kernel. *)
 localPages[name_String, local_Association] := Module[
     {shipped = shippedCatalog[name, local], cacheFile = catalogCacheFile[name, local], cache, fresh = <||>, stamp, root, pages},
-    cache = If[StringQ[cacheFile] && FileExistsQ[cacheFile], Replace[Import[cacheFile, "WXF"], Except[_Association] -> <||>], <||>];
+    cache = If[StringQ[cacheFile], Replace[readCatalogJSON[cacheFile], Except[_Association] -> <||>], <||>];
     root = If[local === <||>, None, documentationRoot[First[Values[local]]]];
-    stamp[file_] := {FileByteCount[file], AbsoluteTime[FileDate[file]]};
+    stamp[file_] := {FileByteCount[file], Round[10^6 AbsoluteTime[FileDate[file]]]};
     pages = Association @ KeyValueMap[
         Function[{id, file}, id -> With[{entry = If[StringQ[root], Lookup[shipped, relativePath[root, file], None], None]},
-            If[ AssociationQ[entry] && entry["Size"] === FileByteCount[file], entry["Page"],
+            If[ AssociationQ[entry] && entry["Size"] === FileByteCount[file] && AssociationQ[entry["Page"]], entry["Page"],
                 With[{cached = Lookup[cache, file, None], now = stamp[file]},
-                    If[ AssociationQ[cached] && cached["Stamp"] === now, cached["Page"],
+                    If[ AssociationQ[cached] && cached["Stamp"] === now && AssociationQ[cached["Page"]], cached["Page"],
                         With[{page = localPage[name, id, file]}, fresh[file] = <|"Stamp" -> now, "Page" -> page|>; page]]]]]],
         local];
     If[ StringQ[cacheFile] && (fresh =!= <||> || Complement[Keys[cache], Values[local]] =!= {}),
@@ -129,9 +129,14 @@ localPages[name_String, local_Association] := Module[
     pages
 ];
 
-(* the form of a catalog's entries, which a shipped catalog and a cache are kept in *)
-$catalogFormat = 1;
-$shippedCatalogName = "PacletPageCatalog.wxf";
+(* the form of a catalog's entries, which a shipped catalog and a cache are kept in: JSON, as reading
+   it makes only data, where WXF evaluates the expressions it reads, and a shipped catalog comes with
+   a paclet from anywhere *)
+$catalogFormat = 2;
+$shippedCatalogName = "PacletPageCatalog.json";
+
+(* a catalog file's data, or None; a file broken by hand reports why, and the notebooks are read *)
+readCatalogJSON[file_String] := If[FileExistsQ[file], Replace[Import[file, "RawJSON"], Except[_Association] -> None], None];
 
 (* the documentation directory a notebook of it is in: the one above its Guides, Tutorials or
    ReferencePages *)
@@ -142,8 +147,8 @@ documentationRoot[file_String] := With[{parts = FileNameSplit[file]},
    its entry, or none where it is of another paclet or form *)
 shippedCatalog[name_String, local_Association] := With[{root = If[local === <||>, None, documentationRoot[First[Values[local]]]]},
     If[ ! StringQ[root] || ! FileExistsQ[FileNameJoin[{root, $shippedCatalogName}]], <||>,
-        Replace[Import[FileNameJoin[{root, $shippedCatalogName}], "WXF"], {
-            shipped_Association /; Lookup[shipped, "Format", None] === $catalogFormat && Lookup[shipped, "Name", None] === name :> shipped["Pages"],
+        Replace[readCatalogJSON[FileNameJoin[{root, $shippedCatalogName}]], {
+            shipped_Association /; Lookup[shipped, "Format", None] === $catalogFormat && Lookup[shipped, "Name", None] === name && AssociationQ[shipped["Pages"]] :> shipped["Pages"],
             _ -> <||>}]]];
 
 (* The catalog of a built paclet's notebooks shipped beside them, so that an install of the paclet
@@ -152,20 +157,20 @@ shipCatalog[builtRoot_String, name_String] := Module[{local = localDocumentation
     root = If[local === <||>, None, documentationRoot[First[Values[local]]]];
     If[ ! StringQ[root], Return[None, Module]];
     Export[FileNameJoin[{root, $shippedCatalogName}], <|"Format" -> $catalogFormat, "Name" -> name,
-        "Pages" -> Association[KeyValueMap[relativePath[root, #2] -> <|"Size" -> FileByteCount[#2], "Page" -> localPage[name, #1, #2]|> &, local]]|>, "WXF"]
+        "Pages" -> Association[KeyValueMap[relativePath[root, #2] -> <|"Size" -> FileByteCount[#2], "Page" -> localPage[name, #1, #2]|> &, local]]|>, "RawJSON", "Compact" -> True]
 ];
 
 (* this user's cache of a paclet's catalog: one file for the paclet's name and its notebooks' directory *)
 catalogCacheFile[name_String, local_Association] := If[ local === <||>, None,
     FileNameJoin[{$UserBaseDirectory, "ApplicationData", "WolframInstitute", "PacletPage", "Catalogs",
-        StringReplace[name, "/" -> "__"] <> "-" <> StringTake[digest[{name, $catalogFormat, DirectoryName[DirectoryName[First[Values[local]]]]}], 16] <> ".wxf"}]
+        StringReplace[name, "/" -> "__"] <> "-" <> StringTake[digest[{name, $catalogFormat, DirectoryName[DirectoryName[First[Values[local]]]]}], 16] <> ".json"}]
 ];
 
 (* the cache written to a file of its own beside it and moved into place, so a kernel that reads it
    never reads half of it *)
 writeCatalogCache[file_String, cache_Association] := With[{dir = DirectoryName[file], partial = file <> "." <> CreateUUID[] <> ".part"},
     If[ ! DirectoryQ[dir], CreateDirectory[dir, CreateIntermediateDirectories -> True]];
-    If[ StringQ[Export[partial, cache, "WXF"]], RenameFile[partial, file, OverwriteTarget -> True]]
+    If[ StringQ[Export[partial, cache, "RawJSON", "Compact" -> True]], RenameFile[partial, file, OverwriteTarget -> True]]
 ];
 
 (* A page of the catalog. A guide's children and a tutorial's state are read from its cells; any
